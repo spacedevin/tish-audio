@@ -1,0 +1,1774 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Play, Square, Plus, Volume2, Gamepad2, Mic, Activity, X, Sliders, ChevronDown, Trash2 } from 'lucide-react';
+
+// --- DSP & AUDIO UTILITIES ---
+function makeDistortionCurve(amount) {
+  const k = typeof amount === 'number' ? amount : 50;
+  const n_samples = 44100;
+  const curve = new Float32Array(n_samples);
+  const deg = Math.PI / 180;
+  for (let i = 0; i < n_samples; ++i) {
+    const x = (i * 2) / n_samples - 1;
+    curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+  }
+  return curve;
+}
+
+function makeAsymmetricCurve(amount) {
+  const k = typeof amount === 'number' ? amount : 50;
+  const n_samples = 44100;
+  const curve = new Float32Array(n_samples);
+  const deg = Math.PI / 180;
+  for (let i = 0; i < n_samples; ++i) {
+    const x = (i * 2) / n_samples - 1;
+    curve[i] = x < 0 ? -1 + Math.exp(x) : ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+  }
+  return curve;
+}
+
+function makeRectifierCurve() {
+  const n_samples = 44100;
+  const curve = new Float32Array(n_samples);
+  for (let i = 0; i < n_samples; ++i) {
+    const x = (i * 2) / n_samples - 1;
+    curve[i] = Math.abs(x); 
+  }
+  return curve;
+}
+
+function makeBitcrusherCurve(bits) {
+  const safeBits = typeof bits === 'number' && bits > 0 ? bits : 4;
+  const steps = Math.pow(2, safeBits);
+  const n_samples = 44100;
+  const curve = new Float32Array(n_samples);
+  for (let i = 0; i < n_samples; ++i) {
+    const x = (i * 2) / n_samples - 1;
+    curve[i] = Math.round(x * steps) / steps;
+  }
+  return curve;
+}
+
+function createReverbIR(ctx, duration = 2.5, decay = 5.0, type = 'spring') {
+  const sampleRate = ctx.sampleRate;
+  const length = sampleRate * duration;
+  const impulse = ctx.createBuffer(2, length, sampleRate);
+  for (let i = 0; i < 2; i++) {
+    const channel = impulse.getChannelData(i);
+    for (let j = 0; j < length; j++) {
+      let noise = (Math.random() * 2 - 1);
+      if (type === 'plate') noise = Math.sin(j * 0.1) * noise; 
+      if (type === 'hall') noise = noise * (1 - (j/length) * 0.5); 
+      channel[j] = noise * Math.pow(1 - j / length, decay);
+    }
+  }
+  return impulse;
+}
+
+function autoCorrelate(buf, sampleRate) {
+  let SIZE = buf.length;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.01) return -1;
+
+  let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+  for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+  for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+
+  buf = buf.slice(r1, r2);
+  SIZE = buf.length;
+
+  let c = new Array(SIZE).fill(0);
+  for (let i = 0; i < SIZE; i++)
+    for (let j = 0; j < SIZE - i; j++)
+      c[i] = c[i] + buf[j] * buf[j + i];
+
+  let d = 0; while (c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < SIZE; i++) {
+    if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+  }
+  let T0 = maxpos;
+
+  let x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+  let a = (x1 + x3 - 2 * x2) / 2;
+  let b = (x3 - x1) / 2;
+  if (a) T0 = T0 - b / (2 * a);
+
+  return sampleRate / T0;
+}
+
+const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+function noteFromPitch(frequency) {
+  const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+  return Math.round(noteNum) + 69;
+}
+
+// --- MASSIVE EFFECT LIBRARY FRAMEWORK ---
+const PEDAL_LIBRARY = {
+  MIC_SIM: [
+    { type: 'sm57_sim', label: 'Dyn Mic 57', color: 'from-zinc-600 to-zinc-900', theme: 'dark', defaultParams: { level: 1.0 } },
+    { type: 'u87_sim', label: 'Condenser 87', color: 'from-amber-100 to-amber-300', theme: 'light', defaultParams: { level: 1.0 } },
+    { type: 'ribbon_sim', label: 'Classic Ribbon', color: 'from-stone-500 to-stone-800', theme: 'dark', defaultParams: { level: 1.0 } },
+    { type: 'vocal_doubler', label: 'Vocal Doubler', color: 'from-cyan-400 to-blue-600', theme: 'dark', defaultParams: { mix: 0.5, spread: 0.5 } }
+  ],
+  DYNAMICS: [
+    { type: 'compressor', label: 'Studio Comp', color: 'from-slate-500 to-slate-700', theme: 'dark', defaultParams: { threshold: -24, ratio: 4, makeup: 2 } },
+    { type: 'eq7', label: '7-Band EQ', color: 'from-stone-300 to-stone-500', theme: 'light', defaultParams: { b100: 0, b200: 0, b400: 0, b800: 0, b1k6: 0, b3k2: 0, b6k4: 0, level: 1 } },
+    { type: 'boost', label: 'Clean Boost', color: 'from-gray-200 to-gray-400', theme: 'light', defaultParams: { gain: 2.0 } },
+    { type: 'noise_gate', label: 'Silencer', color: 'from-zinc-400 to-zinc-600', theme: 'dark', defaultParams: { threshold: -50, decay: 0.1 } }
+  ],
+  FILTER: [
+    { type: 'auto_wah', label: 'Auto Wah', color: 'from-violet-600 to-fuchsia-800', theme: 'dark', defaultParams: { rate: 2.0, sweep: 1500, baseFreq: 400 } },
+    { type: 'tron', label: 'Q-Tron', color: 'from-zinc-400 to-zinc-600', theme: 'light', defaultParams: { rate: 5.0, sweep: 2000, baseFreq: 200 } }
+  ],
+  DRIVE: [
+    { type: 'overdrive', label: 'Tube Drive', color: 'from-yellow-400 to-yellow-600', theme: 'light', defaultParams: { drive: 400, tone: 3000, level: 0.5 } },
+    { type: 'screamer', label: 'Grn Screamer', color: 'from-green-400 to-green-600', theme: 'light', defaultParams: { drive: 300, tone: 2500, level: 0.6 } },
+    { type: 'blues_od', label: 'Blues OD', color: 'from-blue-400 to-blue-600', theme: 'light', defaultParams: { drive: 350, tone: 3500, level: 0.5 } },
+    { type: 'ds1', label: 'Orange Dist', color: 'from-orange-500 to-orange-700', theme: 'dark', defaultParams: { drive: 600, tone: 4000, level: 0.4 } },
+    { type: 'rat', label: 'Rodent Fuzz', color: 'from-zinc-800 to-zinc-950', theme: 'dark', defaultParams: { drive: 800, filter: 1500, level: 0.4 } },
+    { type: 'fuzz', label: 'Fuzz Face', color: 'from-red-600 to-red-900', theme: 'dark', defaultParams: { drive: 800, tone: 2000, level: 0.3 } },
+    { type: 'muff', label: 'Muff Fuzz', color: 'from-neutral-700 to-neutral-900', theme: 'dark', defaultParams: { drive: 900, tone: 1000, level: 0.4 } },
+    { type: 'metal', label: 'Metal Zone', color: 'from-zinc-900 to-black', theme: 'dark', defaultParams: { drive: 1000, midFreq: 500, midCut: -15, level: 0.3 } },
+  ],
+  MULTI_FX: [
+    { type: 'centaur', label: 'Mythic Drive', color: 'from-amber-200 to-amber-500', theme: 'light', defaultParams: { drive: 500, highs: 5, output: 0.5 } },
+    { type: 'octa_fuzz', label: 'Octavia Fuzz', color: 'from-fuchsia-700 to-fuchsia-950', theme: 'dark', defaultParams: { drive: 600, tone: 3000, level: 0.4 } },
+    { type: 'bitcrush', label: '8-Bit Crush', color: 'from-pink-600 to-purple-900', theme: 'dark', defaultParams: { bits: 4, level: 0.5 } },
+    { type: 'tape_echo', label: 'Space Echo', color: 'from-emerald-700 to-emerald-950', theme: 'dark', defaultParams: { time: 0.4, feedback: 0.6, age: 0.5, mix: 0.5 } }
+  ],
+  AMP_SIM: [
+    { type: 'amp_tweed', label: 'Tweed Combo', color: 'from-yellow-700 to-yellow-900', theme: 'dark', defaultParams: { gain: 30, bass: 1.0, mid: 1.2, treble: 1.0, presence: 4000, master: 0.8 } },
+    { type: 'amp_stack', label: 'Brit Stack', color: 'from-amber-800 to-amber-950', theme: 'dark', defaultParams: { gain: 50, bass: 1.0, mid: 1.0, treble: 1.0, presence: 3000, master: 0.8 } },
+    { type: 'amp_modern', label: 'Modern High', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { gain: 80, bass: 1.5, mid: 0.5, treble: 1.2, presence: 5000, master: 0.8 } }
+  ],
+  MODULATION: [
+    { type: 'chorus', label: 'Analog Chorus', color: 'from-cyan-500 to-cyan-800', theme: 'dark', defaultParams: { rate: 1.5, depth: 1.0 } },
+    { type: 'vibrato', label: 'Vibrato', color: 'from-sky-500 to-sky-700', theme: 'dark', defaultParams: { rate: 4.0, depth: 0.003 } },
+    { type: 'tremolo', label: 'Tremolo', color: 'from-green-600 to-green-900', theme: 'dark', defaultParams: { speed: 5, depth: 0.5 } },
+    { type: 'rotary', label: 'Rotary Spkr', color: 'from-stone-500 to-stone-700', theme: 'dark', defaultParams: { rate: 6.0, mix: 0.5 } },
+    { type: 'flanger', label: 'Jet Flanger', color: 'from-purple-600 to-purple-950', theme: 'dark', defaultParams: { rate: 0.5, depth: 0.005, feedback: 0.7 } },
+    { type: 'phaser', label: 'Phase 90', color: 'from-orange-500 to-orange-700', theme: 'dark', defaultParams: { rate: 0.8, sweep: 800 } },
+  ],
+  TIME: [
+    { type: 'slapback', label: 'Slapback', color: 'from-rose-500 to-rose-800', theme: 'dark', defaultParams: { time: 0.08, feedback: 0.1, mix: 0.4 } },
+    { type: 'delay', label: 'Digi Delay', color: 'from-blue-600 to-blue-900', theme: 'dark', defaultParams: { time: 0.3, feedback: 0.4, mix: 0.5 } },
+    { type: 'spring_verb', label: 'Spring Verb', color: 'from-teal-700 to-teal-950', theme: 'dark', defaultParams: { mix: 0.3, decay: 3.0 } },
+    { type: 'plate_verb', label: 'Plate Verb', color: 'from-slate-400 to-slate-600', theme: 'light', defaultParams: { mix: 0.4, decay: 2.0 } },
+    { type: 'hall_verb', label: 'Hall Verb', color: 'from-indigo-800 to-black', theme: 'dark', defaultParams: { mix: 0.5, decay: 6.0 } }
+  ],
+  MASTERING: [
+    { type: 'master_eq', label: 'Studio EQ', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { sub: 0, low: 0, mid: 0, high: 0, air: 0, level: 1.0 } },
+    { type: 'graphic_eq', label: 'Graphic EQ', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { b31: 0, b62: 0, b125: 0, b250: 0, b500: 0, b1k: 0, b2k: 0, b4k: 0, b8k: 0, b16k: 0, level: 1.0 } }
+  ],
+  UTILITY: [
+    { type: 'console_mixer', label: 'Mixing Console', color: 'from-zinc-800 to-black', theme: 'dark', defaultParams: { channels: 4, ch1: 1.0, ch2: 1.0, ch3: 1.0, ch4: 1.0, master: 1.0 } },
+    { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
+    { type: 'crossover', label: 'Freq Split', color: 'from-blue-800 to-indigo-950', theme: 'dark', defaultParams: { freq: 800 } },
+    { type: 'splitter', label: 'Splitter', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { output: 1.0 } }
+  ]
+};
+
+const getNodePorts = (node) => {
+  if (!node) return { in: ['main'], out: ['main'] };
+  if (node.type === 'crossover') return { in: ['main'], out: ['low', 'high'] };
+  if (node.type === 'console_mixer') {
+     const numCh = node.params.channels || 4;
+     const ins = [];
+     for(let i=1; i<=numCh; i++) ins.push(`ch${i}`);
+     return { in: ins, out: ['main'] };
+  }
+  return { in: ['main'], out: ['main'] };
+};
+
+// --- WEBGL BACKGROUND SHADER COMPONENT ---
+function WebGLBackground() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return;
+
+    const vsSource = `
+      attribute vec2 a_position;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+      }
+    `;
+
+    const fsSource = `
+      precision highp float;
+      uniform vec2 u_resolution;
+      uniform float u_time;
+      
+      void main() {
+        vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+        uv = uv * 2.0 - 1.0;
+        uv.x *= u_resolution.x / u_resolution.y;
+
+        float z = 1.0 / max(abs(uv.y + 0.3), 0.001); 
+        vec2 grid = fract(vec2(uv.x * z, z - u_time * 0.8) * 4.0);
+
+        float lineX = smoothstep(0.0, 0.03, grid.x) * smoothstep(1.0, 0.97, grid.x);
+        float lineY = smoothstep(0.0, 0.03, grid.y) * smoothstep(1.0, 0.97, grid.y);
+        float lines = 1.0 - (lineX * lineY);
+
+        float fade = smoothstep(0.0, 6.0, z);
+        
+        vec3 neonColor = vec3(0.9, 0.4, 0.1); 
+        vec3 color = neonColor * lines * (1.0 - fade);
+
+        float horizon = 1.0 - smoothstep(0.0, 0.15, abs(uv.y + 0.05));
+        vec3 horizonColor = vec3(0.8, 0.1, 0.6) * horizon * (1.0 - fade);
+
+        float vignette = 1.0 - smoothstep(0.5, 1.5, length(uv));
+        
+        gl_FragColor = vec4(color * vignette + horizonColor + vec3(0.02, 0.02, 0.03), 1.0);
+      }
+    `;
+
+    const compileShader = (type, source) => {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    };
+
+    const vertexShader = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fsSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -1.0, -1.0,  1.0, -1.0,  -1.0,  1.0,
+      -1.0,  1.0,  1.0, -1.0,   1.0,  1.0
+    ]), gl.STATIC_DRAW);
+
+    const positionLocation = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    const timeLocation = gl.getUniformLocation(program, "u_time");
+    const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+
+    let animationId;
+    const startTime = performance.now();
+
+    const render = () => {
+      const displayWidth = canvas.clientWidth;
+      const displayHeight = canvas.clientHeight;
+      if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+        canvas.width = displayWidth;
+        canvas.height = displayHeight;
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      }
+
+      gl.useProgram(program);
+      gl.uniform2f(resolutionLocation, gl.canvas.width, gl.canvas.height);
+      gl.uniform1f(timeLocation, (performance.now() - startTime) / 1000.0);
+
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      animationId = requestAnimationFrame(render);
+    };
+
+    render();
+    return () => cancelAnimationFrame(animationId);
+  }, []);
+
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none opacity-40 mix-blend-screen" />;
+}
+
+// --- MAIN APPLICATION ---
+export default function App() {
+  const [activeTab, setActiveTab] = useState('pedalboard');
+  const [audioReady, setAudioReady] = useState(false);
+  const [inputLevel, setInputLevel] = useState(0);
+  const [currentPitch, setCurrentPitch] = useState({ freq: 0, note: '-', cents: 0 });
+  const [devices, setDevices] = useState([]);
+  const [showDeviceMenu, setShowDeviceMenu] = useState(false);
+  
+  // NODE GRAPH STATE
+  const [nodes, setNodes] = useState([
+    { id: 'sys_out', type: 'SYS_OUT', x: 1000, y: 300, label: 'MASTER OUT', isSystem: true }
+  ]);
+  const [connections, setConnections] = useState([]); 
+  
+  const audioCtxRef = useRef(null);
+  const sourcesRef = useRef({}); 
+  const analyserRef = useRef(null);
+  const outGainRef = useRef(null);
+  const nodeAudioMapRef = useRef({}); 
+  const animationRef = useRef(null);
+
+  const getDevices = async () => {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+      }
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const audioDevs = devs.filter(d => d.kind === 'audioinput');
+      setDevices(audioDevs);
+      setShowDeviceMenu(true);
+    } catch (e) {
+      console.error("Error enumerating devices:", e);
+      alert("Could not access audio interface. Please check permissions.");
+    }
+  };
+
+  const connectDevice = async (deviceId, label) => {
+    try {
+      if (!audioCtxRef.current) return;
+      const ctx = audioCtxRef.current;
+      
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false, latency: 0 } 
+      });
+
+      const source = ctx.createMediaStreamSource(stream);
+      sourcesRef.current[deviceId] = source;
+
+      if (!analyserRef.current) {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyserRef.current = analyser;
+
+        const outGain = ctx.createGain();
+        outGain.gain.value = 1.0;
+        outGainRef.current = outGain;
+        analyser.connect(outGain);
+        outGain.connect(ctx.destination);
+        startAnalyzers();
+      }
+
+      setNodes(prev => [...prev, {
+        id: `sys_in_${deviceId.slice(0, 6)}`,
+        type: 'SYS_IN',
+        x: 50, 
+        y: 200 + (Object.keys(sourcesRef.current).length * 150),
+        label: (label || 'INPUT').substring(0, 15),
+        isSystem: true,
+        params: { deviceId }
+      }]);
+
+      setAudioReady(true);
+      setShowDeviceMenu(false);
+    } catch (err) {
+      console.error("Error connecting specific device:", err);
+    }
+  };
+
+  const rebuildAudioGraph = useCallback((currentNodes, currentConns) => {
+    if (!audioCtxRef.current) return;
+    const ctx = audioCtxRef.current;
+
+    Object.values(nodeAudioMapRef.current).forEach(n => {
+      if (n.in) n.in.disconnect();
+      if (n.out && n.out !== outGainRef.current) n.out.disconnect();
+      if (n.lfo) { n.lfo.stop(); n.lfo.disconnect(); }
+      if (n.analyser) n.analyser.disconnect();
+      if (n.analysers) {
+        Object.values(n.analysers).forEach(a => a.disconnect());
+      }
+    });
+    nodeAudioMapRef.current = {};
+
+    currentNodes.forEach(node => {
+      let inNode, outNode, lfo, nodeAnalyser;
+      let inPorts = null, outPorts = null;
+      let analysers = {}; 
+
+      // BYPASS LOGIC
+      if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter'].includes(node.type)) {
+        inNode = ctx.createGain();
+        outNode = inNode; 
+      } 
+      else if (node.type === 'SYS_IN') {
+        inNode = sourcesRef.current[node.params?.deviceId];
+        if (!inNode) inNode = ctx.createGain(); 
+        outNode = inNode;
+      } 
+      else if (node.type === 'SYS_OUT') {
+        inNode = ctx.createGain();
+        inNode.connect(analyserRef.current); 
+        outNode = inNode;
+      }
+      else if (node.type === 'sm57_sim') {
+        const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 100;
+        const p1 = ctx.createBiquadFilter(); p1.type = 'peaking'; p1.frequency.value = 3000; p1.gain.value = 4;
+        const p2 = ctx.createBiquadFilter(); p2.type = 'peaking'; p2.frequency.value = 6000; p2.gain.value = 2;
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 12000;
+        outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+        hp.connect(p1); p1.connect(p2); p2.connect(lp); lp.connect(outNode);
+        inNode = hp;
+      }
+      else if (node.type === 'u87_sim') {
+        const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 40;
+        const hs = ctx.createBiquadFilter(); hs.type = 'highshelf'; hs.frequency.value = 8000; hs.gain.value = 3;
+        outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+        hp.connect(hs); hs.connect(outNode);
+        inNode = hp;
+      }
+      else if (node.type === 'ribbon_sim') {
+        inNode = ctx.createWaveShaper(); inNode.curve = makeDistortionCurve(10); 
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 8000;
+        const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 60;
+        outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+        inNode.connect(lp); lp.connect(hp); hp.connect(outNode);
+      }
+      else if (node.type === 'vocal_doubler') {
+        inNode = ctx.createGain(); outNode = ctx.createGain();
+        const delayL = ctx.createDelay(1.0); delayL.delayTime.value = 0.02; 
+        const delayR = ctx.createDelay(1.0); delayR.delayTime.value = 0.03; 
+        lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 1.5;
+        const lfoDepth = ctx.createGain(); lfoDepth.gain.value = (node.params.spread ?? 0.5) * 0.005;
+        lfo.connect(lfoDepth); lfoDepth.connect(delayL.delayTime); lfoDepth.connect(delayR.delayTime); lfo.start();
+        const wetMix = ctx.createGain(); wetMix.gain.value = node.params.mix ?? 0.5;
+        const dryMix = ctx.createGain(); dryMix.gain.value = 1.0 - (node.params.mix ?? 0.5);
+        inNode.connect(dryMix); dryMix.connect(outNode);
+        inNode.connect(delayL); inNode.connect(delayR);
+        delayL.connect(wetMix); delayR.connect(wetMix);
+        wetMix.connect(outNode);
+      }
+      else if (node.type === 'compressor' || node.type === 'noise_gate') {
+        inNode = ctx.createDynamicsCompressor();
+        inNode.threshold.value = node.params.threshold ?? -24;
+        inNode.ratio.value = node.type === 'noise_gate' ? 20 : (node.params.ratio ?? 4); 
+        inNode.attack.value = 0.005; 
+        inNode.release.value = node.params.decay ?? 0.1;
+        outNode = ctx.createGain(); 
+        outNode.gain.value = node.params.makeup ?? 1.0;
+        inNode.connect(outNode);
+      }
+      else if (node.type === 'eq7') {
+        const freqs = [100, 200, 400, 800, 1600, 3200, 6400];
+        const filters = freqs.map((f) => {
+          const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.414;
+          const paramKey = `b${f >= 1000 ? (f/1000).toString().replace('.','k') : f}`;
+          filter.gain.value = node.params[paramKey] ?? 0;
+          return filter;
+        });
+        inNode = filters[0];
+        for(let i=0; i<filters.length-1; i++) filters[i].connect(filters[i+1]);
+        outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+        filters[filters.length-1].connect(outNode);
+      }
+      else if (node.type === 'master_eq') {
+        if (node.bypassed) {
+          inNode = ctx.createGain(); outNode = inNode;
+        } else {
+          const sub = ctx.createBiquadFilter(); sub.type = 'lowshelf'; sub.frequency.value = 80; sub.gain.value = (node.params.sub ?? 0) * 10;
+          const low = ctx.createBiquadFilter(); low.type = 'peaking'; low.frequency.value = 250; low.gain.value = (node.params.low ?? 0) * 10; low.Q.value = 1.4;
+          const mid = ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1000; mid.gain.value = (node.params.mid ?? 0) * 10; mid.Q.value = 1.4;
+          const high = ctx.createBiquadFilter(); high.type = 'peaking'; high.frequency.value = 4000; high.gain.value = (node.params.high ?? 0) * 10; high.Q.value = 1.4;
+          const air = ctx.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 10000; air.gain.value = (node.params.air ?? 0) * 10;
+          
+          nodeAnalyser = ctx.createAnalyser();
+          nodeAnalyser.fftSize = 512;
+          nodeAnalyser.smoothingTimeConstant = 0.8;
+          
+          outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+          inNode = sub;
+          sub.connect(low); low.connect(mid); mid.connect(high); high.connect(air); air.connect(nodeAnalyser); nodeAnalyser.connect(outNode);
+        }
+      }
+      else if (node.type === 'graphic_eq') {
+        if (node.bypassed) {
+          inNode = ctx.createGain(); outNode = inNode;
+        } else {
+          const freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+          const filters = freqs.map((f) => {
+            const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.4;
+            const paramKey = f >= 1000 ? `b${f/1000}k` : `b${f}`;
+            filter.gain.value = (node.params[paramKey] ?? 0) * 12; // +/- 12 dB
+            return filter;
+          });
+          inNode = filters[0];
+          for(let i=0; i<filters.length-1; i++) filters[i].connect(filters[i+1]);
+          outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+          
+          nodeAnalyser = ctx.createAnalyser();
+          nodeAnalyser.fftSize = 512;
+          nodeAnalyser.smoothingTimeConstant = 0.8;
+          
+          filters[filters.length-1].connect(outNode);
+          outNode.connect(nodeAnalyser);
+        }
+      }
+      else if (node.type === 'vu_meter') {
+        inNode = ctx.createGain(); 
+        outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+        inNode.connect(outNode);
+        nodeAnalyser = ctx.createAnalyser();
+        nodeAnalyser.fftSize = 512;
+        nodeAnalyser.smoothingTimeConstant = 0.8;
+        outNode.connect(nodeAnalyser);
+      }
+      else if (node.type === 'auto_wah' || node.type === 'tron') {
+        inNode = ctx.createBiquadFilter();
+        inNode.type = 'bandpass';
+        inNode.frequency.value = node.params.baseFreq ?? 400;
+        inNode.Q.value = node.type === 'tron' ? 8.0 : 4.0; 
+
+        lfo = ctx.createOscillator();
+        lfo.type = node.type === 'tron' ? 'sawtooth' : 'sine';
+        lfo.frequency.value = node.params.rate ?? 2.0;
+
+        const lfoDepth = ctx.createGain();
+        lfoDepth.gain.value = node.params.sweep ?? 1500;
+
+        lfo.connect(lfoDepth);
+        lfoDepth.connect(inNode.frequency);
+        lfo.start();
+        outNode = ctx.createGain(); outNode.gain.value = 1.2; 
+        inNode.connect(outNode);
+      }
+      else if (node.type === 'bitcrush') {
+        inNode = ctx.createWaveShaper();
+        inNode.curve = makeBitcrusherCurve(node.params.bits ?? 4);
+        outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.5;
+        inNode.connect(outNode);
+      }
+      else if (node.type === 'boost' || node.type === 'splitter') {
+        inNode = ctx.createGain(); 
+        inNode.gain.value = node.params.gain ?? node.params.output ?? 1.0; 
+        outNode = inNode;
+      }
+      else if (node.type === 'console_mixer') {
+        outNode = ctx.createGain();
+        outNode.gain.value = node.params.master ?? 1.0;
+        inPorts = {};
+        const numCh = node.params.channels || 4;
+        
+        const masterAn = ctx.createAnalyser();
+        masterAn.fftSize = 512;
+        outNode.connect(masterAn);
+        analysers.master = masterAn;
+
+        for(let i=1; i<=numCh; i++) {
+           const chGain = ctx.createGain();
+           chGain.gain.value = node.params[`ch${i}`] ?? 1.0;
+           
+           const chAn = ctx.createAnalyser();
+           chAn.fftSize = 512;
+           chGain.connect(chAn);
+           chAn.connect(outNode);
+           
+           analysers[`ch${i}`] = chAn;
+           inPorts[`ch${i}`] = chGain;
+        }
+        inNode = ctx.createGain(); // Unused, just a fallback
+      }
+      else if (node.type === 'crossover') {
+        inNode = ctx.createGain();
+        const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = node.params.freq ?? 800;
+        const high = ctx.createBiquadFilter(); high.type = 'highpass'; high.frequency.value = node.params.freq ?? 800;
+        inNode.connect(low); inNode.connect(high);
+        outPorts = { low, high };
+      }
+      else if (node.type === 'centaur') {
+        inNode = ctx.createGain(); outNode = ctx.createGain(); outNode.gain.value = node.params.output ?? 0.5;
+        const cleanGain = ctx.createGain(); cleanGain.gain.value = Math.max(0, 1.0 - ((node.params.drive ?? 500) / 1500));
+        const drivePath = ctx.createWaveShaper(); drivePath.curve = makeDistortionCurve(node.params.drive ?? 500);
+        const treble = ctx.createBiquadFilter(); treble.type = 'highshelf'; treble.frequency.value = 2000; treble.gain.value = ((node.params.highs ?? 5) - 5) * 2;
+        inNode.connect(cleanGain); cleanGain.connect(outNode);
+        inNode.connect(drivePath); drivePath.connect(treble); treble.connect(outNode);
+      }
+      else if (node.type === 'octa_fuzz') {
+        inNode = ctx.createBiquadFilter(); inNode.type = 'highpass'; inNode.frequency.value = 100; 
+        const rect = ctx.createWaveShaper(); rect.curve = makeRectifierCurve();
+        const dcBlocker = ctx.createBiquadFilter(); dcBlocker.type = 'highpass'; dcBlocker.frequency.value = 80; 
+        const fuzz = ctx.createWaveShaper(); fuzz.curve = makeDistortionCurve(node.params.drive ?? 600);
+        const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = node.params.tone ?? 3000;
+        outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
+        inNode.connect(rect); rect.connect(dcBlocker); dcBlocker.connect(fuzz); fuzz.connect(tone); tone.connect(outNode);
+      }
+      else if (node.type === 'tape_echo') {
+        inNode = ctx.createGain(); outNode = ctx.createGain();
+        const delay = ctx.createDelay(5.0); delay.delayTime.value = node.params.time ?? 0.4;
+        const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.6;
+        const lowpass = ctx.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 4000 - ((node.params.age ?? 0.5) * 3000);
+        lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 1.2;
+        const lfoDepth = ctx.createGain(); lfoDepth.gain.value = (node.params.age ?? 0.5) * 0.008;
+        lfo.connect(lfoDepth); lfoDepth.connect(delay.delayTime); lfo.start();
+        const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.5;
+        inNode.connect(outNode); 
+        inNode.connect(delay); delay.connect(lowpass); lowpass.connect(wetGain); wetGain.connect(outNode);
+        lowpass.connect(feedback); feedback.connect(delay);
+      }
+      else if (node.type.startsWith('amp_')) {
+        inNode = ctx.createWaveShaper(); 
+        inNode.curve = makeDistortionCurve((node.params.gain ?? 50) * 10); 
+        inNode.oversample = '4x';
+        
+        const bass = ctx.createBiquadFilter(); bass.type = 'lowshelf'; bass.frequency.value = 120; bass.gain.value = ((node.params.bass ?? 1.0) - 1) * 10;
+        const mid = ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = node.type === 'amp_modern' ? 500 : 800; mid.gain.value = ((node.params.mid ?? 1.0) - 1) * 10; mid.Q.value = 1.0;
+        const treble = ctx.createBiquadFilter(); treble.type = 'highshelf'; treble.frequency.value = 4000; treble.gain.value = ((node.params.treble ?? 1.0) - 1) * 10;
+        const presence = ctx.createBiquadFilter(); presence.type = 'lowpass'; presence.frequency.value = node.params.presence ?? 3000; 
+        
+        outNode = ctx.createGain(); outNode.gain.value = node.params.master ?? 0.8;
+        inNode.connect(bass); bass.connect(mid); mid.connect(treble); treble.connect(presence); presence.connect(outNode);
+      }
+      else if (['metal', 'muff', 'overdrive', 'fuzz', 'ds1', 'screamer', 'blues_od', 'rat'].includes(node.type)) {
+        inNode = ctx.createWaveShaper();
+        const driveAmount = (node.type === 'fuzz' || node.type === 'muff' || node.type === 'metal') ? (node.params.drive ?? 800) * 5 : (node.params.drive ?? 400);
+        inNode.curve = node.type === 'blues_od' ? makeAsymmetricCurve(driveAmount) : makeDistortionCurve(driveAmount); 
+        inNode.oversample = '4x';
+        
+        if (node.type === 'metal' || node.type === 'ds1') {
+          const midCut = ctx.createBiquadFilter(); midCut.type = 'peaking'; midCut.frequency.value = node.params.midFreq ?? 800; midCut.gain.value = node.params.midCut ?? -10; midCut.Q.value = 2.0;
+          outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
+          inNode.connect(midCut); midCut.connect(outNode);
+        } else if (node.type === 'rat') {
+          outNode = ctx.createBiquadFilter(); outNode.type = 'lowpass'; outNode.frequency.value = node.params.filter ?? 1500;
+          const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.4;
+          inNode.connect(outNode); outNode.connect(gain); outNode = gain; 
+        } else {
+          outNode = ctx.createBiquadFilter(); outNode.type = 'lowpass'; outNode.frequency.value = node.params.tone ?? 3000;
+          const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.5;
+          inNode.connect(outNode); outNode.connect(gain); outNode = gain; 
+        }
+      } 
+      else if (['chorus', 'flanger', 'delay', 'slapback', 'vibrato', 'rotary'].includes(node.type)) {
+        inNode = ctx.createGain(); outNode = ctx.createGain();
+        const delay = ctx.createDelay(5.0); 
+        delay.delayTime.value = node.type === 'chorus' ? 0.03 : node.type === 'flanger' ? 0.005 : node.type === 'vibrato' ? 0.02 : (node.params.time ?? 0.0);
+        
+        if (node.type !== 'delay' && node.type !== 'slapback') {
+          lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 1.0;
+          const lfoDepth = ctx.createGain(); lfoDepth.gain.value = node.type === 'chorus' ? (node.params.depth ?? 1.0) * 0.01 : (node.params.depth ?? 0.005);
+          lfo.connect(lfoDepth); lfoDepth.connect(delay.delayTime); lfo.start();
+        }
+        
+        if (node.type === 'rotary') {
+          const tremoloGain = ctx.createGain();
+          const tremLfo = ctx.createOscillator(); tremLfo.type = 'sine'; tremLfo.frequency.value = node.params.rate ?? 6.0;
+          const tremDepth = ctx.createGain(); tremDepth.gain.value = 0.5;
+          tremLfo.connect(tremDepth); tremDepth.connect(tremoloGain.gain); tremLfo.start();
+          delay.connect(tremoloGain);
+          tremoloGain.connect(outNode);
+        } else {
+          delay.connect(outNode);
+        }
+
+        if (node.type !== 'vibrato') inNode.connect(outNode); 
+        inNode.connect(delay); 
+
+        if (node.type === 'flanger' || node.type === 'delay' || node.type === 'slapback') {
+           const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.5;
+           delay.connect(feedback); feedback.connect(delay);
+           if (node.params.mix !== undefined) {
+             const wetMix = ctx.createGain(); wetMix.gain.value = node.params.mix;
+             delay.disconnect(outNode); 
+             delay.connect(wetMix); wetMix.connect(outNode);
+           }
+        }
+      }
+      else if (node.type === 'phaser') {
+        inNode = ctx.createGain(); outNode = ctx.createGain();
+        const filters = [];
+        for(let i=0; i<4; i++) { const f = ctx.createBiquadFilter(); f.type = 'allpass'; f.frequency.value = 1000; filters.push(f); }
+        lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 0.8;
+        const lfoDepth = ctx.createGain(); lfoDepth.gain.value = node.params.sweep ?? 800;
+        lfo.connect(lfoDepth); filters.forEach(f => lfoDepth.connect(f.frequency)); lfo.start();
+        inNode.connect(filters[0]); filters[0].connect(filters[1]); filters[1].connect(filters[2]); filters[2].connect(filters[3]); filters[3].connect(outNode);
+        inNode.connect(outNode); 
+      }
+      else if (node.type === 'tremolo') {
+        inNode = ctx.createGain(); outNode = inNode; 
+        lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.speed ?? 5.0;
+        const lfoDepth = ctx.createGain(); lfoDepth.gain.value = node.params.depth ?? 0.5;
+        lfo.connect(lfoDepth); lfoDepth.connect(inNode.gain); lfo.start();
+      }
+      else if (node.type.endsWith('_verb')) {
+        inNode = ctx.createGain(); outNode = ctx.createGain();
+        const convolver = ctx.createConvolver(); 
+        const type = node.type.replace('_verb', '');
+        convolver.buffer = createReverbIR(ctx, node.params.decay ?? 3.0, 5.0, type);
+        const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.5;
+        inNode.connect(convolver); convolver.connect(wetGain); wetGain.connect(outNode); inNode.connect(outNode); 
+      }
+
+      nodeAudioMapRef.current[node.id] = { 
+        in: inNode, 
+        out: outNode, 
+        inPorts: inPorts || { main: inNode },
+        outPorts: outPorts || { main: outNode },
+        lfo: lfo,
+        analyser: nodeAnalyser,
+        analysers: analysers
+      };
+    });
+
+    currentConns.forEach(conn => {
+      const fromData = nodeAudioMapRef.current[conn.from];
+      const toData = nodeAudioMapRef.current[conn.to];
+      if (fromData && toData) {
+        const outAudioNode = fromData.outPorts[conn.fromPort || 'main'];
+        const inAudioNode = toData.inPorts[conn.toPort || 'main'];
+        if (outAudioNode && inAudioNode) {
+          outAudioNode.connect(inAudioNode);
+        }
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (audioReady) rebuildAudioGraph(nodes, connections);
+  }, [nodes, connections, rebuildAudioGraph, audioReady]);
+
+  const startAnalyzers = () => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Float32Array(bufferLength);
+
+    const updateLoop = () => {
+      analyser.getFloatTimeDomainData(dataArray);
+      let sumSquares = 0;
+      for (let i = 0; i < bufferLength; i++) sumSquares += dataArray[i] * dataArray[i];
+      setInputLevel(Math.sqrt(sumSquares / bufferLength) * 10); 
+
+      const freq = autoCorrelate(dataArray, audioCtxRef.current.sampleRate);
+      if (freq !== -1 && freq > 40 && freq < 2000) {
+        const note = noteFromPitch(freq);
+        setCurrentPitch({ freq: Math.round(freq), note: noteStrings[note % 12], octave: Math.floor(note / 12) - 1 });
+      }
+      animationRef.current = requestAnimationFrame(updateLoop);
+    };
+    updateLoop();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      if (audioCtxRef.current) audioCtxRef.current.close();
+    };
+  }, []);
+
+  const addNode = (category, type) => {
+    const template = PEDAL_LIBRARY[category].find(p => p.type === type);
+    if (!template) return;
+    
+    setNodes(prev => [...prev, { 
+      id: Math.random().toString(36).substr(2, 9), 
+      ...template, 
+      params: { ...template.defaultParams },
+      bypassed: false, 
+      x: 300 + Math.random() * 100, 
+      y: 200 + Math.random() * 100 
+    }]);
+  };
+
+  const removeNode = (id) => {
+    const nodeToRemove = nodes.find(n => n.id === id);
+    if (nodeToRemove && nodeToRemove.type === 'SYS_IN' && nodeToRemove.params?.deviceId) {
+      const deviceId = nodeToRemove.params.deviceId;
+      if (sourcesRef.current[deviceId]) {
+        const track = sourcesRef.current[deviceId].mediaStream.getTracks()[0];
+        if (track) track.stop();
+        delete sourcesRef.current[deviceId];
+      }
+    }
+    
+    setNodes(prev => prev.filter(n => n.id !== id));
+    setConnections(prev => prev.filter(c => c.from !== id && c.to !== id));
+  };
+  
+  const clearBoard = () => {
+    setNodes(prev => prev.filter(n => n.isSystem));
+    setConnections([]);
+  };
+
+  const updateNodeParam = (id, param, value) => {
+    const floatValue = parseFloat(value);
+    const safeValue = Number.isFinite(floatValue) ? floatValue : 0;
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, params: { ...n.params, [param]: safeValue } } : n));
+  };
+  
+  const updateNodePos = (id, x, y) => {
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, x, y } : n));
+  };
+  
+  const toggleNodeBypass = (id) => {
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, bypassed: !n.bypassed } : n));
+  };
+
+  const addConnection = (fromId, fromPort, toId, toPort) => {
+    if (fromId === toId) return; 
+    if (connections.some(c => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) return;
+    setConnections(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort, to: toId, toPort }]);
+  };
+  
+  const removeConnection = (id) => {
+    setConnections(prev => prev.filter(c => c.id !== id));
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans flex flex-col">
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+        
+        @keyframes dash-flow {
+          to { stroke-dashoffset: -24; }
+        }
+        .animate-dash-flow {
+          animation: dash-flow 0.5s linear infinite;
+        }
+      `}}></style>
+
+      <header className="bg-neutral-900 border-b border-neutral-800 p-4 flex justify-between items-center shadow-md z-[100] relative shrink-0">
+        <div className="flex items-center gap-3">
+          <Activity className="text-orange-500 w-8 h-8" />
+          <h1 className="text-2xl font-black tracking-tighter text-white">TONE<span className="text-orange-500">FRAME</span></h1>
+          
+          <div className="relative ml-4">
+            <button 
+              onClick={getDevices} 
+              className="bg-orange-500 hover:bg-orange-400 text-black font-bold py-1.5 px-4 rounded-full flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(249,115,22,0.4)] text-sm"
+            >
+              <Mic className="w-4 h-4" /> 
+              {Object.keys(sourcesRef.current).length === 0 ? 'Connect Input' : 'Add Input'}
+            </button>
+            {showDeviceMenu && (
+              <div className="absolute top-full mt-2 left-0 w-72 bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl z-50 overflow-hidden">
+                <div className="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center">
+                  <span className="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
+                  <button onClick={() => setShowDeviceMenu(false)}><X className="w-4 h-4 text-neutral-500 hover:text-white" /></button>
+                </div>
+                <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                  {devices.length === 0 ? (
+                     <div className="p-4 text-center text-sm text-neutral-500">No audio inputs found. Check permissions.</div>
+                  ) : (
+                    devices.map(d => (
+                      <button 
+                        key={d.deviceId} 
+                        onClick={() => connectDevice(d.deviceId, d.label)} 
+                        className="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
+                        title={d.label || `Unknown Input (${d.deviceId.slice(0,5)})`}
+                      >
+                        {d.label || `Unknown Input (${d.deviceId.slice(0,5)})`}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {audioReady && (
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2 bg-neutral-800 px-4 py-2 rounded-lg border border-neutral-700">
+              <span className="text-xs text-neutral-400 font-mono">PITCH</span>
+              <span className="text-xl font-bold w-12 text-center text-orange-400">{currentPitch.note || '-'}</span>
+              <span className="text-xs text-neutral-500 w-12">{currentPitch.freq}Hz</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-neutral-500" />
+              <div className="w-32 h-3 bg-neutral-800 rounded-full overflow-hidden border border-neutral-700 shadow-inner">
+                <div className="h-full bg-green-500 transition-all duration-75" style={{ width: `${Math.min(100, inputLevel * 100)}%` }} />
+              </div>
+            </div>
+          </div>
+        )}
+      </header>
+
+      <nav className="flex justify-center gap-2 p-4 bg-neutral-950 z-20 relative border-b border-neutral-900 shrink-0 shadow-lg">
+        {[
+          { id: 'pedalboard', icon: Sliders, label: 'Patch System' },
+          { id: 'jam', icon: Play, label: 'Session Jam' },
+          { id: 'game', icon: Gamepad2, label: 'Guitarcade' }
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold transition-all ${activeTab === tab.id ? 'bg-neutral-800 text-white shadow-inner border border-neutral-700' : 'text-neutral-500 hover:text-white hover:bg-neutral-900'}`}>
+            <tab.icon className="w-5 h-5" /> {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      <main className="flex-1 overflow-hidden relative flex flex-col">
+        {activeTab === 'pedalboard' && (
+          <NodeGraphView 
+            nodes={nodes} 
+            connections={connections}
+            nodeAudioMapRef={nodeAudioMapRef}
+            addNode={addNode} 
+            removeNode={removeNode} 
+            clearBoard={clearBoard}
+            updateNodeParam={updateNodeParam} 
+            updateNodePos={updateNodePos}
+            toggleNodeBypass={toggleNodeBypass}
+            addConnection={addConnection}
+            removeConnection={removeConnection}
+            audioReady={audioReady}
+          />
+        )}
+        {activeTab === 'jam' && <JamMode audioCtx={audioCtxRef.current} audioReady={audioReady} pitch={currentPitch} />}
+        {activeTab === 'game' && <Guitarcade analyzerRef={analyserRef} audioReady={audioReady} currentPitch={currentPitch} />}
+      </main>
+    </div>
+  );
+}
+
+// --- NEW: LED METER COMPONENT ---
+function LedMeter({ analyser, width = 6, height = 96 }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    if (!analyser || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    let animationId;
+    const dataArray = new Float32Array(analyser.fftSize);
+
+    const draw = () => {
+      analyser.getFloatTimeDomainData(dataArray);
+      let sumSquares = 0;
+      for (let i = 0; i < dataArray.length; i++) sumSquares += dataArray[i] * dataArray[i];
+      const rms = Math.sqrt(sumSquares / dataArray.length);
+
+      // Convert RMS to Decibels (assuming max sine wave is ~0.707)
+      // Range is roughly -60dB to 0dB. 
+      const db = 20 * Math.log10(Math.max(rms, 0.0001));
+      const pct = (db + 60) / 60; // 0 to 1 scaling
+      const level = Math.max(0, Math.min(1, pct));
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      const numSegments = 20;
+      const segmentHeight = canvas.height / numSegments;
+      const gap = 1;
+      
+      for (let i = 0; i < numSegments; i++) {
+         const segmentThreshold = 1 - (i / numSegments);
+         const isActive = level >= segmentThreshold;
+         
+         let color = '#22c55e'; // green
+         if (i < 3) color = '#ef4444'; // red (top)
+         else if (i < 7) color = '#eab308'; // yellow
+         
+         ctx.fillStyle = isActive ? color : 'rgba(0,0,0,0.5)';
+         ctx.fillRect(0, i * segmentHeight, canvas.width, segmentHeight - gap);
+      }
+      animationId = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(animationId);
+  }, [analyser]);
+
+  return <canvas ref={canvasRef} width={width} height={height} className="rounded-[1px] bg-black border border-neutral-900 shadow-inner" />;
+}
+
+// --- VERTICAL STUDIO FADER COMPONENT ---
+function VerticalFader({ label, min, max, value, onChange, analyser }) {
+  const [isDragging, setIsDragging] = useState(false);
+  const startYRef = useRef(0);
+  const startValRef = useRef(0);
+
+  const safeVal = Number.isFinite(value) ? value : min;
+  const pct = (safeVal - min) / (max - min); 
+
+  const handlePointerDown = (e) => {
+    e.stopPropagation();
+    setIsDragging(true);
+    startYRef.current = e.clientY;
+    startValRef.current = safeVal;
+    document.body.style.cursor = 'ns-resize';
+  };
+
+  const handlePointerMove = useCallback((e) => {
+    if (!isDragging) return;
+    const dy = startYRef.current - e.clientY;
+    const range = max - min;
+    const deltaVal = (dy / 80) * range; 
+    let newVal = startValRef.current + deltaVal;
+    newVal = Math.max(min, Math.min(max, newVal));
+    onChange(newVal);
+  }, [isDragging, min, max, onChange]);
+
+  const handlePointerUp = useCallback(() => {
+    setIsDragging(false);
+    document.body.style.cursor = '';
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+    }
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [isDragging, handlePointerMove, handlePointerUp]);
+
+  return (
+    <div className="flex flex-col items-center shrink-0 select-none px-1 w-10">
+      <div className="flex gap-1.5 items-center h-24">
+        {analyser && <LedMeter analyser={analyser} />}
+        <div className="relative w-2 h-full bg-black/80 rounded-full shadow-inner flex justify-center">
+          <div className="absolute w-6 h-full flex flex-col justify-between py-1 pointer-events-none opacity-20">
+             <div className="w-full h-px bg-white"></div>
+             <div className="w-full h-px bg-white"></div>
+             <div className="w-full h-px bg-white"></div>
+             <div className="w-full h-px bg-white"></div>
+             <div className="w-full h-px bg-white"></div>
+          </div>
+          <div
+            onPointerDown={handlePointerDown}
+            className="absolute w-7 h-4 bg-gradient-to-b from-zinc-300 to-zinc-500 rounded-sm shadow-[0_2px_4px_rgba(0,0,0,0.8)] border border-zinc-600 cursor-ns-resize flex items-center justify-center hover:brightness-110 active:brightness-95"
+            style={{ bottom: `${pct * 100}%`, transform: 'translateY(50%)' }}
+          >
+            <div className="w-4 h-0.5 bg-black/60 shadow-inner rounded-full"></div>
+          </div>
+        </div>
+      </div>
+      <span className="text-[8px] font-black uppercase mt-3 text-white/80 tracking-widest text-center truncate w-full">{label}</span>
+    </div>
+  );
+}
+
+// --- 3D ROTARY KNOB COMPONENT ---
+function RotaryKnob({ label, min, max, value, onChange, theme, compact }) {
+  const [isDragging, setIsDragging] = useState(false);
+  const startYRef = useRef(0);
+  const startValRef = useRef(0);
+
+  const safeVal = Number.isFinite(value) ? value : min;
+  const angle = ((safeVal - min) / (max - min)) * 270 - 135;
+
+  const handlePointerDown = (e) => {
+    e.stopPropagation();
+    setIsDragging(true);
+    startYRef.current = e.clientY;
+    startValRef.current = safeVal;
+    document.body.style.cursor = 'ns-resize';
+  };
+
+  const handlePointerMove = useCallback((e) => {
+    if (!isDragging) return;
+    const dy = startYRef.current - e.clientY;
+    const range = max - min;
+    const deltaVal = (dy / 150) * range;
+    let newVal = startValRef.current + deltaVal;
+    newVal = Math.max(min, Math.min(max, newVal));
+    onChange(newVal);
+  }, [isDragging, min, max, onChange]);
+
+  const handlePointerUp = useCallback(() => {
+    setIsDragging(false);
+    document.body.style.cursor = '';
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+    }
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [isDragging, handlePointerMove, handlePointerUp]);
+
+  const isDark = theme === 'dark';
+
+  return (
+    <div className={`flex flex-col items-center select-none shrink-0 ${compact ? 'm-0.5' : 'm-1'}`}>
+      <div 
+        onPointerDown={handlePointerDown}
+        className={`${compact ? 'w-9 h-9' : 'w-12 h-12'} rounded-full relative cursor-ns-resize shadow-[0_5px_10px_rgba(0,0,0,0.5),inset_0_2px_2px_rgba(255,255,255,0.2)] flex items-center justify-center border
+          ${isDark ? 'bg-gradient-to-br from-neutral-700 to-black border-neutral-600' : 'bg-gradient-to-br from-neutral-100 to-neutral-400 border-neutral-300'}`}
+      >
+        <div className={`${compact ? 'w-7 h-7' : 'w-10 h-10'} rounded-full border border-dashed opacity-30 ${isDark ? 'border-white' : 'border-black'}`} />
+        <div className="absolute w-full h-full top-0 left-0" style={{ transform: `rotate(${Number.isFinite(angle) ? angle : 0}deg)` }}>
+          <div className={`absolute ${compact ? 'top-1' : 'top-1.5'} left-1/2 -translate-x-1/2 w-1 ${compact ? 'h-2.5' : 'h-3'} rounded-full shadow-sm ${isDark ? 'bg-white shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'bg-black'}`} />
+        </div>
+      </div>
+      <span className={`text-[8px] font-black uppercase ${compact ? 'mt-1' : 'mt-2'} tracking-wider ${isDark ? 'text-white/80' : 'text-black/80'}`}>{label}</span>
+    </div>
+  );
+}
+
+// --- CONSOLE MIXER NODE ---
+function ConsoleNode({ node, onRemove, onChange, onDragStart, audioDataMap }) {
+  const numCh = node.params.channels || 4;
+  const w = 110 + (numCh * 48); // dynamically width mapped with enough padding
+  const analysers = audioDataMap[node.id]?.analysers || {};
+
+  return (
+    <div className={`relative h-[240px] bg-gradient-to-br ${node.color} rounded-xl border-t border-l border-t-white/20 border-l-white/20 border-r-black/50 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_10px_rgba(0,0,0,0.5)] flex flex-col transition-all duration-300 ${node.bypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}`} style={{ width: `${w}px` }}>
+      <div className="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
+      
+      <div 
+        onPointerDown={onDragStart}
+        className="w-full h-10 border-b border-white/10 flex items-center justify-between px-4 cursor-grab active:cursor-grabbing shrink-0 z-10"
+      >
+        <span className="text-[10px] font-black text-white/90 tracking-widest uppercase drop-shadow-md">{node.label}</span>
+        <div className="flex items-center gap-1.5 bg-black/40 rounded px-2 py-1">
+          <button onClick={() => onChange('channels', Math.max(1, numCh - 1))} className="text-white/50 hover:text-white px-1 font-mono">-</button>
+          <span className="text-[9px] font-bold text-white/70 w-8 text-center">{numCh} CH</span>
+          <button onClick={() => onChange('channels', Math.min(16, numCh + 1))} className="text-white/50 hover:text-white px-1 font-mono">+</button>
+          <div className="w-px h-3 bg-white/20 mx-1"></div>
+          <button onClick={onRemove} className="text-white/50 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      </div>
+      
+      <div className="flex-1 flex px-4 pt-4 pb-2 z-10 justify-between">
+        <div className="flex gap-2">
+          {Array.from({length: numCh}).map((_, i) => {
+            const key = `ch${i+1}`;
+            return <VerticalFader key={key} label={key} min={0} max={2} value={node.params[key] ?? 1.0} onChange={(v) => onChange(key, v)} analyser={analysers[key]} />
+          })}
+        </div>
+        <div className="w-px bg-black/50 mx-4 border-r border-white/10"></div>
+        <div className="flex">
+          <VerticalFader label="MASTER" min={0} max={2} value={node.params.master ?? 1.0} onChange={(v) => onChange('master', v)} analyser={analysers.master} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- WINAMP GRAPHIC EQ NODE ---
+function GraphicEqNode({ node, onRemove, onChange, onDragStart, onToggleBypass, audioDataMap }) {
+  const isBypassed = node.bypassed;
+  const analyser = audioDataMap[node.id]?.analyser;
+  const bands = [31, 62, 125, 250, 500, '1k', '2k', '4k', '8k', '16k'];
+
+  return (
+    <div className={`relative w-[480px] h-[240px] bg-gradient-to-br ${node.color} rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col group transition-all duration-300 ${isBypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}`}>
+      <div className="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
+      
+      <div className="flex justify-between items-center p-3 z-20">
+         <div onPointerDown={onDragStart} className="flex-1 text-left font-black tracking-widest text-lg uppercase cursor-grab active:cursor-grabbing select-none text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] px-2">
+            {node.label}
+         </div>
+         <div className="flex items-center gap-4">
+            <div 
+              onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
+              className={`w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-colors ${!isBypassed ? 'bg-red-500 border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)]' : 'bg-red-950 border-black shadow-black'}`}
+            ></div>
+            <button onClick={onRemove} className="text-white/50 hover:text-white transition-colors"><X className="w-5 h-5 drop-shadow-md bg-black/30 rounded-full" /></button>
+          </div>
+      </div>
+
+      <div className="flex flex-1 px-4 pb-4 z-20 gap-2">
+         {bands.map(b => (
+           <VerticalFader key={`b${b}`} label={b} min={-1} max={1} value={node.params[`b${b}`] ?? 0} onChange={(v) => onChange(`b${b}`, v)} />
+         ))}
+         <div className="w-px h-full bg-black/50 mx-2 border-r border-white/10"></div>
+         <VerticalFader label="LEVEL" min={0} max={2} value={node.params.level ?? 1.0} onChange={(v) => onChange('level', v)} analyser={analyser} />
+      </div>
+    </div>
+  );
+}
+
+// --- STANDALONE VU METER NODE ---
+function VuMeterNode({ node, onRemove, onChange, onDragStart, audioDataMap }) {
+  const analyser = audioDataMap[node.id]?.analyser;
+
+  return (
+    <div className={`relative w-[120px] h-[200px] bg-gradient-to-br ${node.color} rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col transition-all duration-300`}>
+      <div className="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
+      <button onClick={onRemove} className="absolute top-2 right-2 text-white/50 hover:text-white transition-colors z-20"><X className="w-4 h-4 drop-shadow-md" /></button>
+      
+      <div onPointerDown={onDragStart} className="text-center font-black mt-2 tracking-widest text-xs uppercase cursor-grab active:cursor-grabbing select-none text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] z-20">
+        VU
+      </div>
+      
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 z-20 mt-2">
+         <LedMeter analyser={analyser} width={12} height={80} />
+         <RotaryKnob label="TRIM" min={0} max={2} value={node.params.level ?? 1.0} theme={node.theme} onChange={(v) => onChange('level', v)} />
+      </div>
+    </div>
+  );
+}
+
+// --- NODE GRAPH VIEW (The Board) ---
+function NodeGraphView({ nodes, connections, addNode, removeNode, clearBoard, updateNodeParam, updateNodePos, toggleNodeBypass, addConnection, removeConnection, audioReady, nodeAudioMapRef }) {
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const boardRef = useRef(null);
+  const [wiring, setWiring] = useState(null); 
+  const [draggingNode, setDraggingNode] = useState(null); 
+
+  const getJackCoords = (node, isOutput, portId = 'main') => {
+    let w = 200, h = 340; // Default pedal size
+    if (node.isSystem) { w = 80; h = 140; }
+    else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
+    else if (node.type === 'master_eq') { w = 440; h = 200; }
+    else if (node.type === 'graphic_eq') { w = 480; h = 240; }
+    else if (node.type === 'vu_meter') { w = 120; h = 200; }
+    else if (node.type === 'console_mixer') {
+      const numCh = node.params.channels || 4;
+      w = 110 + (numCh * 48);
+      h = 240;
+    }
+
+    const ports = getNodePorts(node)[isOutput ? 'out' : 'in'];
+    const portIdx = Math.max(0, ports.indexOf(portId));
+    const totalPorts = ports.length;
+    
+    const yOffset = ((portIdx + 1) * h) / (totalPorts + 1);
+
+    return {
+      x: node.x + (isOutput ? w : 0),
+      y: node.y + yOffset
+    };
+  };
+
+  const handlePointerMove = (e) => {
+    if (!boardRef.current) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    const ex = e.clientX - rect.left;
+    const ey = e.clientY - rect.top;
+
+    if (wiring) {
+      setWiring(prev => ({ ...prev, x: ex, y: ey }));
+    } else if (draggingNode) {
+      const dx = ex - draggingNode.startMouseX;
+      const dy = ey - draggingNode.startMouseY;
+      updateNodePos(draggingNode.id, draggingNode.startNodeX + dx, draggingNode.startNodeY + dy);
+    }
+  };
+
+  const handlePointerUp = () => {
+    if (wiring) setWiring(null); 
+    if (draggingNode) setDraggingNode(null);
+  };
+
+  const startDragNode = (e, node) => {
+    e.stopPropagation();
+    if (!boardRef.current) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    setDraggingNode({ id: node.id, startMouseX: e.clientX - rect.left, startMouseY: e.clientY - rect.top, startNodeX: node.x, startNodeY: node.y });
+  };
+
+  const startWire = (e, nodeId, portId) => {
+    e.stopPropagation();
+    if (!boardRef.current) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    setWiring({ fromId: nodeId, fromPort: portId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
+  const dropWire = (e, toNodeId, toPortId) => {
+    e.stopPropagation();
+    if (wiring && wiring.fromId !== toNodeId) addConnection(wiring.fromId, wiring.fromPort, toNodeId, toPortId);
+    setWiring(null);
+  };
+
+  const grabCable = (e, conn) => {
+    e.stopPropagation();
+    if (!boardRef.current) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    removeConnection(conn.id);
+    setWiring({ fromId: conn.from, fromPort: conn.fromPort, x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
+  return (
+    <div className="absolute inset-0 flex flex-col bg-neutral-950">
+      {!audioReady && (
+        <div className="absolute inset-0 bg-neutral-950/80 z-50 flex items-center justify-center backdrop-blur-sm">
+          <p className="text-xl text-neutral-400 font-medium">Connect instrument to enable DSP chain</p>
+        </div>
+      )}
+      
+      <div className="flex justify-between items-center p-4 w-full relative z-40 bg-neutral-950 border-b border-neutral-900 shadow-xl shrink-0">
+        <div className="relative flex-1">
+          <button 
+            onClick={() => setShowAddMenu(!showAddMenu)} 
+            className="flex items-center gap-2 px-6 py-2 rounded-md border border-orange-500/50 bg-gradient-to-b from-orange-900/30 to-neutral-900 hover:from-orange-800/40 transition-all font-bold tracking-wider text-sm text-orange-400 shadow-md"
+          >
+            <Plus className="w-4 h-4" /> ADD MODULE <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
+          </button>
+          
+          {showAddMenu && (
+            <div className="absolute top-full mt-4 left-0 w-[800px] max-w-[90vw] max-h-[70vh] bg-neutral-900/95 backdrop-blur-xl border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 flex flex-col overflow-hidden">
+               <div className="p-4 border-b border-neutral-800 bg-black/40 flex justify-between items-center shrink-0">
+                  <span className="text-sm font-black tracking-widest text-neutral-300">MODULE LIBRARY</span>
+                  <button onClick={() => setShowAddMenu(false)} className="text-neutral-500 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
+               </div>
+               <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-8">
+                    {Object.keys(PEDAL_LIBRARY).map(category => (
+                       <div key={category} className="flex flex-col gap-2">
+                          <h4 className="text-[10px] font-black text-orange-500/80 tracking-widest uppercase mb-2 border-b border-neutral-800 pb-2">{category.replace('_', ' ')}</h4>
+                          {PEDAL_LIBRARY[category].map(def => (
+                             <button 
+                               key={def.type} 
+                               onClick={() => { addNode(category, def.type); setShowAddMenu(false); }} 
+                               className="text-left px-3 py-2 rounded-md hover:bg-neutral-800 transition-colors flex items-center justify-between group border border-transparent hover:border-neutral-700"
+                             >
+                               <span className="font-bold text-xs text-neutral-300 group-hover:text-white transition-colors">{def.label}</span>
+                               <div className={`w-2.5 h-2.5 rounded-full bg-gradient-to-br ${def.color} shadow-sm border border-black/50`} />
+                             </button>
+                          ))}
+                       </div>
+                    ))}
+                  </div>
+               </div>
+            </div>
+          )}
+        </div>
+
+        <button onClick={clearBoard} className="ml-4 flex items-center gap-2 px-4 py-2 rounded-md border border-red-900 bg-red-950/30 hover:bg-red-900/50 text-red-500 hover:text-red-400 transition-colors font-bold tracking-wider text-sm shrink-0">
+          <Trash2 className="w-4 h-4" /> CLEAR
+        </button>
+      </div>
+
+      <div 
+        ref={boardRef}
+        className="flex-1 w-full overflow-hidden bg-black relative cursor-crosshair touch-none"
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+      >
+        <svg className="w-0 h-0 absolute pointer-events-none">
+          <defs>
+            <filter id="metal-texture">
+              <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" result="noise" />
+              <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.15 0" in="noise" result="coloredNoise" />
+              <feBlend in="SourceGraphic" in2="coloredNoise" mode="multiply" />
+            </filter>
+            <filter id="cable-shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="8" stdDeviation="6" floodOpacity="0.8"/>
+            </filter>
+          </defs>
+        </svg>
+
+        <WebGLBackground />
+
+        {/* CABLES LAYER */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
+          {(() => {
+            if (!wiring) return null;
+            const fromNode = nodes.find(n => n.id === wiring.fromId);
+            if (!fromNode) return null;
+            const start = getJackCoords(fromNode, true, wiring.fromPort);
+            const end = { x: wiring.x, y: wiring.y };
+            const dist = Math.abs(end.x - start.x) * 0.6;
+            const d = `M ${start.x} ${start.y} C ${start.x + dist} ${start.y}, ${end.x - dist} ${end.y}, ${end.x} ${end.y}`;
+            return (
+              <g>
+                <path d={d} stroke="#f97316" strokeWidth="6" fill="none" strokeLinecap="round" opacity="0.9" filter="url(#cable-shadow)" />
+                <path d={d} stroke="#ffffff" strokeWidth="2" fill="none" strokeLinecap="round" strokeDasharray="4 12" className="animate-dash-flow pointer-events-none" />
+              </g>
+            );
+          })()}
+
+          {connections.map(c => {
+             const fromNode = nodes.find(n => n.id === c.from);
+             const toNode = nodes.find(n => n.id === c.to);
+             if (!fromNode || !toNode) return null;
+             
+             const start = getJackCoords(fromNode, true, c.fromPort);
+             const end = getJackCoords(toNode, false, c.toPort);
+             const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
+             const d = `M ${start.x} ${start.y} C ${start.x + dist} ${start.y}, ${end.x - dist} ${end.y}, ${end.x} ${end.y}`;
+             
+             return (
+               <g key={c.id} className="pointer-events-auto group">
+                 <path d={d} stroke="transparent" strokeWidth="24" fill="none" className="cursor-grab active:cursor-grabbing" onPointerDown={(e) => grabCable(e, c)} />
+                 <path d={d} stroke="rgba(0,0,0,0.8)" strokeWidth="12" fill="none" transform="translate(0,6)" className="blur-sm pointer-events-none" />
+                 <path d={d} stroke="#171717" strokeWidth="10" fill="none" strokeLinecap="round" className="pointer-events-none" />
+                 <path d={d} stroke="#3f3f46" strokeWidth="3" fill="none" strokeLinecap="round" className="pointer-events-none" />
+                 
+                 <path d={d} stroke="#f97316" strokeWidth="2" fill="none" strokeLinecap="round" strokeDasharray="4 12" className="animate-dash-flow pointer-events-none opacity-80" />
+                 
+                 <g className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
+                   <circle cx={(start.x+end.x)/2} cy={(start.y+end.y)/2} r="14" fill="#ef4444" className="drop-shadow-md" />
+                   <text x={(start.x+end.x)/2} y={(start.y+end.y)/2 + 4} fill="white" fontSize="14" fontWeight="bold" textAnchor="middle">X</text>
+                 </g>
+               </g>
+             );
+          })}
+        </svg>
+
+        {/* NODES LAYER */}
+        {nodes.map(node => {
+          const ports = getNodePorts(node);
+          
+          return (
+          <div key={node.id} className="absolute z-20" style={{ transform: `translate(${node.x}px, ${node.y}px)` }}>
+            
+            {/* Input Jacks */}
+            {node.type !== 'SYS_IN' && ports.in.map(port => {
+              const coords = getJackCoords(node, false, port);
+              return (
+                <div 
+                  key={`in-${port}`}
+                  className="absolute left-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+                  style={{ top: `${coords.y - node.y}px`, transform: 'translateY(-50%)' }}
+                  onPointerUp={(e) => dropWire(e, node.id, port)}
+                  title={`Patch In: ${port.toUpperCase()}`}
+                >
+                   <div className="w-4 h-6 bg-gradient-to-r from-zinc-400 to-zinc-600 rounded-sm border border-zinc-700 shadow-[2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
+                      <div className="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
+                   </div>
+                   {ports.in.length > 1 && <span className="absolute -left-6 text-[10px] font-black text-white/50">{port.toUpperCase()}</span>}
+                </div>
+              );
+            })}
+
+            {/* Output Jacks */}
+            {node.type !== 'SYS_OUT' && ports.out.map(port => {
+              const coords = getJackCoords(node, true, port);
+              return (
+                <div 
+                  key={`out-${port}`}
+                  className="absolute right-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+                  style={{ top: `${coords.y - node.y}px`, transform: 'translateY(-50%)' }}
+                  onPointerDown={(e) => startWire(e, node.id, port)}
+                  title={`Drag out from: ${port.toUpperCase()}`}
+                >
+                   <div className="w-4 h-6 bg-gradient-to-r from-zinc-600 to-zinc-400 rounded-sm border border-zinc-700 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
+                      <div className="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
+                   </div>
+                   {ports.out.length > 1 && <span className="absolute -right-10 text-[10px] font-black text-white/50">{port.toUpperCase()}</span>}
+                </div>
+              );
+            })}
+
+            {/* System Nodes */}
+            {node.type === 'SYS_IN' ? (
+               <div 
+                 onPointerDown={(e) => startDragNode(e, node)}
+                 className="flex flex-col items-center justify-center w-24 h-[140px] border-2 border-green-700 bg-gradient-to-b from-green-900/40 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing relative group"
+               >
+                 <button onClick={() => removeNode(node.id)} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity z-20"><X className="w-4 h-4 text-red-500 hover:text-red-400" /></button>
+                 <span className="transform -rotate-90 text-xs font-black tracking-widest text-green-500 drop-shadow-md select-none whitespace-nowrap truncate w-[120px] text-center">{node.label}</span>
+               </div>
+            ) : node.type === 'SYS_OUT' ? (
+               <div 
+                 onPointerDown={(e) => startDragNode(e, node)}
+                 className="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-neutral-700 bg-gradient-to-b from-neutral-800 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing"
+               >
+                 <span className="transform -rotate-90 text-sm font-black tracking-widest text-orange-500 drop-shadow-md select-none whitespace-nowrap">{node.label}</span>
+               </div>
+            ) : node.type === 'master_eq' ? (
+               <RackNode 
+                 node={node} 
+                 onRemove={() => removeNode(node.id)} 
+                 onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+                 onDragStart={(e) => startDragNode(e, node)}
+                 onToggleBypass={() => toggleNodeBypass(node.id)}
+                 audioDataMap={nodeAudioMapRef.current}
+               />
+            ) : node.type === 'graphic_eq' ? (
+               <GraphicEqNode 
+                 node={node} 
+                 onRemove={() => removeNode(node.id)} 
+                 onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+                 onDragStart={(e) => startDragNode(e, node)}
+                 onToggleBypass={() => toggleNodeBypass(node.id)}
+                 audioDataMap={nodeAudioMapRef.current}
+               />
+            ) : node.type === 'vu_meter' ? (
+               <VuMeterNode 
+                 node={node} 
+                 onRemove={() => removeNode(node.id)} 
+                 onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+                 onDragStart={(e) => startDragNode(e, node)}
+                 audioDataMap={nodeAudioMapRef.current}
+               />
+            ) : node.type === 'console_mixer' ? (
+               <ConsoleNode 
+                 node={node} 
+                 onRemove={() => removeNode(node.id)} 
+                 onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+                 onDragStart={(e) => startDragNode(e, node)}
+                 audioDataMap={nodeAudioMapRef.current}
+               />
+            ) : (node.type === 'splitter' || node.type === 'crossover') ? (
+               <div 
+                 className={`w-[140px] h-[180px] bg-gradient-to-br ${node.color} rounded-xl border-t border-l border-t-white/20 border-l-white/20 border-r-black/50 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_10px_rgba(0,0,0,0.5)] p-4 flex flex-col transition-all duration-300 ${node.bypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}`}
+                 style={{ filter: 'url(#metal-texture)' }}
+               >
+                 <div 
+                   onPointerDown={(e) => startDragNode(e, node)} 
+                   className="text-center font-black mb-4 text-xs uppercase text-white/90 drop-shadow-md cursor-grab active:cursor-grabbing select-none"
+                 >
+                   {node.label}
+                 </div>
+                 <button onClick={() => removeNode(node.id)} className="absolute top-2 right-2 text-white/50 hover:text-white transition-colors z-20"><X className="w-5 h-5 drop-shadow-md" /></button>
+                 
+                 <div className="flex-1 flex flex-wrap justify-center gap-2 z-10">
+                    {Object.entries(node.params).map(([key, val]) => {
+                      let min = 0, max = 2;
+                      if (key === 'freq') { min = 100; max = 5000; }
+                      return <RotaryKnob key={key} label={key} min={min} max={max} value={val} theme={node.theme} onChange={(v) => updateNodeParam(node.id, key, v)} />
+                    })}
+                 </div>
+               </div>
+            ) : (
+               <PedalNode 
+                 pedal={node} 
+                 onRemove={() => removeNode(node.id)} 
+                 onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+                 onDragStart={(e) => startDragNode(e, node)}
+                 onToggleBypass={() => toggleNodeBypass(node.id)}
+               />
+            )}
+          </div>
+        )})}
+      </div>
+    </div>
+  );
+}
+
+// 3D Realistic Skeuomorphic Pedal Render
+function PedalNode({ pedal, onRemove, onChange, onDragStart, onToggleBypass }) {
+  const isDark = pedal.theme === 'dark';
+  const isCompact = Object.keys(pedal.params).length > 4;
+  const isBypassed = pedal.bypassed;
+
+  return (
+    <div 
+      className={`relative w-[200px] h-[340px] bg-gradient-to-br ${pedal.color} rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] p-5 flex flex-col group transition-all duration-300 ${isBypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}`}
+    >
+      <div className="absolute inset-0 rounded-xl mix-blend-multiply opacity-50 pointer-events-none" style={{ filter: 'url(#metal-texture)' }} />
+
+      {[[3,3], [3, 11], [18, 3], [18, 11]].map(([t, l], i) => (
+         <div key={i} className={`absolute w-2.5 h-2.5 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-[inset_0_1px_1px_rgba(0,0,0,0.8),0_1px_1px_rgba(255,255,255,0.2)] flex items-center justify-center border border-black/40 pointer-events-none ${i===0?'top-3 left-3':i===1?'top-3 right-3':i===2?'bottom-24 left-3':'bottom-24 right-3'}`}>
+           <div className={`w-1.5 h-[1px] bg-black/60 transform ${i%2===0?'rotate-45':'-rotate-12'}`} />
+         </div>
+      ))}
+
+      <button onClick={onRemove} className={`absolute top-3 right-3 transition-all opacity-0 group-hover:opacity-100 z-30 ${isDark ? 'text-white hover:text-red-400' : 'text-black/70 hover:text-red-600'}`} title="Remove Pedal">
+        <X className="w-5 h-5 drop-shadow-md bg-black/10 rounded-full" />
+      </button>
+      
+      <div 
+        onPointerDown={onDragStart}
+        className={`text-center font-black ${isCompact ? 'mb-2 mt-0' : 'mb-6 mt-4'} tracking-widest text-lg uppercase cursor-grab active:cursor-grabbing select-none z-20 ${isDark ? 'text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]' : 'text-black/80 drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]'}`}
+      >
+        {pedal.label}
+      </div>
+      
+      <div className={`flex-1 flex flex-wrap justify-center content-start ${isCompact ? 'gap-1.5' : 'gap-3'} z-20`}>
+        {Object.entries(pedal.params).map(([key, val]) => {
+          let min = 0, max = 1;
+          if (['sub', 'low', 'mid', 'high', 'air'].includes(key)) { min = -1; max = 1; }
+          else if (['tone', 'midFreq', 'presence', 'baseFreq', 'filter'].includes(key)) { min = 100; max = 5000; }
+          else if (['drive', 'fuzz'].includes(key)) { min = 0; max = 1000; }
+          else if (['speed', 'rate'].includes(key)) { min = 0.1; max = 15; }
+          else if (key === 'threshold') { min = -60; max = 0; }
+          else if (key === 'ratio') { min = 1; max = 20; }
+          else if (key === 'highs') { min = 0; max = 10; }
+          else if (['makeup', 'gain', 'bass', 'treble'].includes(key)) { min = 0; max = 5; }
+          else if (['decay', 'time'].includes(key)) { min = 0; max = 3; }
+          else if (key.startsWith('b') && key.length <= 4) { min = -15; max = 15; } 
+          else if (key === 'midCut') { min = -20; max = 0; }
+          else if (['sweep', 'spread'].includes(key)) { min = 100; max = 3000; }
+          else if (key === 'bits') { min = 2; max = 16; }
+
+          return (
+            <RotaryKnob key={key} label={key} min={min} max={max} value={val} theme={pedal.theme} compact={isCompact} onChange={(v) => onChange(key, v)} />
+          );
+        })}
+      </div>
+      
+      <div 
+        className={`absolute bottom-[4.5rem] left-1/2 -translate-x-1/2 w-2 h-2 rounded-full z-20 shadow-[0_1px_1px_rgba(255,255,255,0.5)] border border-black transition-colors duration-300 ${!isBypassed ? 'bg-red-500 box-shadow-[0_0_10px_2px_rgba(239,68,68,0.8)]' : 'bg-neutral-800'}`} 
+        style={!isBypassed ? { boxShadow: '0 0 12px 3px rgba(239,68,68,0.8)' } : {}} 
+      />
+
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-[0_5px_10px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.5)] border border-black/50 flex items-center justify-center z-20">
+        <div className="w-10 h-10 rounded-full bg-black/80 flex items-center justify-center shadow-inner">
+          <div 
+            onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
+            className={`w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-200 to-zinc-500 border border-zinc-400 shadow-[0_2px_4px_rgba(0,0,0,0.9),inset_0_2px_2px_rgba(255,255,255,0.8)] flex items-center justify-center cursor-pointer active:scale-95 transition-transform select-none ${isBypassed ? 'brightness-75' : 'brightness-100'}`}
+          >
+             <div className="w-5 h-5 rounded-full border border-black/10 pointer-events-none"></div>
+             <div className="absolute w-2 h-2 rounded-full border border-black/10 pointer-events-none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- JAM MODE (Procedural Backing Track) ---
+function JamMode({ audioCtx, audioReady, pitch }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [tempo, setTempo] = useState(120);
+  const sequenceRef = useRef(null);
+  const nextNoteTimeRef = useRef(0);
+  const current16thNoteRef = useRef(0);
+
+  const scheduleNote = useCallback((beatNumber, time) => {
+    if (!audioCtx) return;
+    if (beatNumber % 8 === 0) {
+      const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(150, time); osc.frequency.exponentialRampToValueAtTime(0.001, time + 0.5);
+      gain.gain.setValueAtTime(0.8, time); gain.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
+      osc.start(time); osc.stop(time + 0.5);
+    }
+    if (beatNumber % 8 === 4) {
+      const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+      osc.type = 'triangle'; osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(250, time); gain.gain.setValueAtTime(0.5, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+      osc.start(time); osc.stop(time + 0.2);
+    }
+    if (beatNumber % 2 === 0) {
+      const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+      osc.type = 'square'; osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(8000, time); gain.gain.setValueAtTime(0.1, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+      osc.start(time); osc.stop(time + 0.05);
+    }
+  }, [audioCtx]);
+
+  const scheduler = useCallback(() => {
+    if (!audioCtx) return;
+    while (nextNoteTimeRef.current < audioCtx.currentTime + 0.1) {
+      scheduleNote(current16thNoteRef.current, nextNoteTimeRef.current);
+      const secondsPerBeat = 60.0 / tempo;
+      nextNoteTimeRef.current += 0.25 * secondsPerBeat;
+      current16thNoteRef.current++;
+      if (current16thNoteRef.current === 16) current16thNoteRef.current = 0;
+    }
+    sequenceRef.current = setTimeout(scheduler, 25.0);
+  }, [audioCtx, tempo, scheduleNote]);
+
+  useEffect(() => {
+    if (isPlaying && audioCtx) {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      current16thNoteRef.current = 0;
+      nextNoteTimeRef.current = audioCtx.currentTime + 0.05;
+      scheduler();
+    } else {
+      clearTimeout(sequenceRef.current);
+    }
+    return () => clearTimeout(sequenceRef.current);
+  }, [isPlaying, scheduler, audioCtx]);
+
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 bg-black overflow-hidden">
+      <WebGLBackground />
+      {!audioReady && (
+        <div className="absolute inset-0 bg-neutral-950/80 z-10 flex items-center justify-center backdrop-blur-sm">
+          <p className="text-xl text-neutral-400 font-medium">Connect instrument to enable Jam Session</p>
+        </div>
+      )}
+      <div className="bg-neutral-900/90 border border-neutral-700 p-8 rounded-2xl w-full max-w-2xl text-center shadow-2xl backdrop-blur-md z-20">
+        <h2 className="text-3xl font-black mb-2 text-white">AI DRUMMER</h2>
+        <p className="text-neutral-400 mb-8">Auto-accompaniment engine</p>
+        <div className="flex flex-col items-center gap-8">
+          <button onClick={() => setIsPlaying(!isPlaying)} className={`w-24 h-24 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all ${isPlaying ? 'bg-red-500 hover:bg-red-400' : 'bg-green-500 hover:bg-green-400'}`}>
+            {isPlaying ? <Square className="w-10 h-10 text-black fill-current" /> : <Play className="w-10 h-10 text-black fill-current ml-2" />}
+          </button>
+          <div className="w-full max-w-xs">
+            <div className="flex justify-between text-sm text-neutral-400 mb-2"><span>Tempo</span><span className="font-mono text-white">{tempo} BPM</span></div>
+            <input type="range" min="60" max="200" value={tempo} onChange={(e) => setTempo(e.target.value)} className="w-full accent-orange-500" />
+          </div>
+        </div>
+      </div>
+      {pitch.freq > 0 && (
+        <div className="absolute inset-0 z-10 overflow-hidden pointer-events-none opacity-30">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 mix-blend-screen transition-all duration-100 blur-[100px]" style={{ width: `${Math.min(1200, pitch.freq)}px`, height: `${Math.min(1200, pitch.freq)}px` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- GUITARCADE (Canvas Game controlled by audio) ---
+function Guitarcade({ analyzerRef, audioReady, currentPitch }) {
+  const canvasRef = useRef(null);
+  const gameRef = useRef({ playerY: 200, lasers: [], enemies: [], score: 0, lastFire: 0, gameOver: false });
+
+  useEffect(() => {
+    if (!audioReady || !canvasRef.current || !analyzerRef.current) return;
+    const canvas = canvasRef.current; const ctx = canvas.getContext('2d');
+    let animationId;
+    const analyser = analyzerRef.current;
+    const dataArray = new Float32Array(analyser.fftSize);
+    let previousRms = 0;
+
+    const gameLoop = (time) => {
+      analyser.getFloatTimeDomainData(dataArray);
+      let sumSquares = 0;
+      for (let i = 0; i < dataArray.length; i++) sumSquares += dataArray[i] * dataArray[i];
+      const rms = Math.sqrt(sumSquares / dataArray.length);
+      const state = gameRef.current;
+
+      if (currentPitch.freq > 0 && currentPitch.freq > 60 && currentPitch.freq < 1000) {
+        const minLog = Math.log2(82); const maxLog = Math.log2(880); const currentLog = Math.log2(currentPitch.freq);
+        let normalized = (currentLog - minLog) / (maxLog - minLog); normalized = Math.max(0, Math.min(1, normalized));
+        const targetY = canvas.height - (normalized * canvas.height);
+        state.playerY += (targetY - state.playerY) * 0.2;
+      }
+
+      const deltaRms = rms - previousRms;
+      if (deltaRms > 0.05 && time - state.lastFire > 200 && !state.gameOver) {
+        state.lasers.push({ x: 100, y: state.playerY }); state.lastFire = time;
+      }
+      previousRms = rms;
+
+      if (!state.gameOver) {
+        state.lasers.forEach(l => l.x += 15); state.lasers = state.lasers.filter(l => l.x < canvas.width);
+        if (Math.random() < 0.03) state.enemies.push({ x: canvas.width, y: Math.random() * (canvas.height - 40) + 20, speed: Math.random() * 3 + 2 });
+        state.enemies.forEach(e => e.x -= e.speed);
+        
+        state.lasers.forEach(l => {
+          state.enemies.forEach(e => {
+            if (!e.dead && !l.dead && Math.abs(l.x - e.x) < 30 && Math.abs(l.y - e.y) < 30) { e.dead = true; l.dead = true; state.score += 10; }
+          });
+        });
+        state.lasers = state.lasers.filter(l => !l.dead); state.enemies = state.enemies.filter(e => !e.dead);
+        state.enemies.forEach(e => { if (e.x < 120 && Math.abs(state.playerY - e.y) < 30) state.gameOver = true; });
+        state.enemies = state.enemies.filter(e => e.x > -50);
+      }
+
+      ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#262626'; ctx.lineWidth = 1;
+      for (let i = 0; i < canvas.width; i += 50) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke(); }
+
+      ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.moveTo(100, state.playerY); ctx.lineTo(60, state.playerY - 20); ctx.lineTo(60, state.playerY + 20); ctx.fill();
+      ctx.fillStyle = '#22d3ee'; state.lasers.forEach(l => ctx.fillRect(l.x, l.y - 2, 20, 4));
+      ctx.fillStyle = '#ef4444'; state.enemies.forEach(e => { ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI * 2); ctx.fill(); });
+      
+      ctx.fillStyle = 'white'; ctx.font = '24px monospace'; ctx.fillText(`SCORE: ${state.score}`, 20, 40);
+      ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText(`INPUT PITCH: ${currentPitch.note} (${currentPitch.freq}Hz)`, 20, canvas.height - 20);
+
+      if (state.gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white'; ctx.font = '48px monospace'; ctx.textAlign = 'center'; ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
+        ctx.font = '24px monospace'; ctx.fillText('Strum loudly to restart', canvas.width/2, canvas.height/2 + 50); ctx.textAlign = 'left';
+        if (deltaRms > 0.1) { state.gameOver = false; state.score = 0; state.enemies = []; state.lasers = []; state.playerY = canvas.height/2; }
+      }
+      animationId = requestAnimationFrame(gameLoop);
+    };
+    animationId = requestAnimationFrame(gameLoop);
+    return () => cancelAnimationFrame(animationId);
+  }, [audioReady, analyzerRef, currentPitch]);
+
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 bg-black">
+      <WebGLBackground />
+      {!audioReady && (
+        <div className="absolute inset-0 bg-neutral-950/80 z-10 flex items-center justify-center backdrop-blur-sm">
+          <p className="text-xl text-neutral-400 font-medium">Connect instrument to play Pitch Invaders</p>
+        </div>
+      )}
+      <div className="text-center mb-4 z-20"><h2 className="text-3xl font-black text-white tracking-widest drop-shadow-lg">PITCH INVADERS</h2><p className="text-neutral-400 text-sm drop-shadow-md">Play High/Low notes to move. Strum aggressively to shoot.</p></div>
+      <div className="relative border-4 border-neutral-800 rounded-xl overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.5)] z-20"><canvas ref={canvasRef} width={800} height={500} className="bg-black/90 backdrop-blur-md" /></div>
+    </div>
+  );
+}

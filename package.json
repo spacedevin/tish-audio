@@ -1,0 +1,24 @@
+{
+  "name": "tish-audio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/sync-react-entries.mjs",
+    "prebuild": "node scripts/sync-react-entries.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "postbuild": "node scripts/rename-dist.mjs"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.2.2",
+    "vite": "^8.0.8"
+  },
+  "dependencies": {
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  }
+}
