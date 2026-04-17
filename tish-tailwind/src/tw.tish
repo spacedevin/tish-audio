@@ -1,0 +1,22 @@
+/** Concatenate utility class names (Tailwind-style). Skips null/undefined/false. */
+export fn tw(parts) {
+  if (parts === null) {
+    return ""
+  }
+  if (typeof parts === "string") {
+    return parts
+  }
+  if (Array.isArray(parts)) {
+    let out = []
+    let i = 0
+    while (i < parts.length) {
+      let p = tw(parts[i])
+      if (p.length > 0) {
+        out.push(p)
+      }
+      i = i + 1
+    }
+    return out.join(" ")
+  }
+  return ""
+}

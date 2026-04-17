@@ -1,0 +1,21 @@
+import { writeFile } from "fs"
+import { getPreflight } from "./preflight.tish"
+import { getUtilities } from "./utilities.tish"
+import { process } from "process"
+
+export fn fullStylesheet() {
+  return getPreflight() + "\n" + getUtilities()
+}
+
+export async fn emitStylesheet(outputPath) {
+  let css = fullStylesheet()
+  await writeFile(outputPath, css)
+  console.log("Emitted CSS to " + outputPath)
+}
+
+// If run directly
+let outPath = "dist/assets/tish-tailwind.css"
+if (process !== null && process.env !== null && "OUT_CSS" in process.env) {
+  outPath = process.env.OUT_CSS
+}
+emitStylesheet(outPath)

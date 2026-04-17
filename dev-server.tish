@@ -1,0 +1,39 @@
+import { serve } from "http"
+import { readFile, fileExists } from "fs"
+import { process } from "process"
+
+async fn handleRequest(req) {
+  let path = req.path
+  if (path === "/") {
+    path = "/index.html"
+  }
+  
+  // Map to dist folder
+  let targetPath = "dist" + path
+  
+  if (await fileExists(targetPath)) {
+    let body = await readFile(targetPath)
+    
+    let contentType = "text/plain"
+    if (path.indexOf(".html") !== -1) contentType = "text/html"
+    else if (path.indexOf(".js") !== -1) contentType = "application/javascript"
+    else if (path.indexOf(".css") !== -1) contentType = "text/css"
+    else if (path.indexOf(".svg") !== -1) contentType = "image/svg+xml"
+    
+    return {
+      status: 200,
+      headers: { "Content-Type": contentType },
+      body: body
+    }
+  }
+  
+  return { status: 404, body: "Not Found" }
+}
+
+let port = 8080
+if (process !== null && process.env !== null && "PORT" in process.env) {
+  port = parseInt(process.env.PORT)
+}
+
+console.log("Starting server on http://localhost:" + String(port))
+serve(port, handleRequest)

@@ -4,21 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node scripts/sync-react-entries.mjs",
-    "prebuild": "node scripts/sync-react-entries.mjs",
-    "dev": "vite",
-    "build": "vite build",
-    "postbuild": "node scripts/rename-dist.mjs"
-  },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.2.2",
-    "@vitejs/plugin-react": "^6.0.1",
-    "tailwindcss": "^4.2.2",
-    "vite": "^8.0.8"
+    "build": "mkdir -p dist/assets && OUT_CSS=dist/assets/tish-tailwind.css tish run --feature full tish-tailwind/src/emit.tish && tish build --target js src/main.tish -o dist/main && cp index.html dist/index.html",
+    "dev": "tish run --feature full dev-server.tish"
   },
   "dependencies": {
-    "lucide-react": "^1.8.0",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "lattish": "file:../tish/lattish"
   }
 }
