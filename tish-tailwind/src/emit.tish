@@ -23,6 +23,7 @@ export async fn fullStylesheet() {
   try { content = content + await readFile("src/ui/JamMode.tish"); } catch (e) {}
   try { content = content + await readFile("src/ui/Guitarcade.tish"); } catch (e) {}
   try { content = content + await readFile("src/ui/TuningMode.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/ChordInstrumentPresetBar.tish"); } catch (e) {}
   try { content = content + await readFile("src/ui/TuningMonophonicStrip.tish"); } catch (e) {}
   try { content = content + await readFile("src/ui/ChordPolyLiveGrid.tish"); } catch (e) {}
   try { content = content + await readFile("src/ui/chordPolyLiveDom.tish"); } catch (e) {}

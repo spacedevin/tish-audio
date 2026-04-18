@@ -1,20 +1,25 @@
 import { h } from "lattish"
 import { ChordPolyLiveGrid } from "./ChordPolyLiveGrid.tish"
 
-// Poly decode card (no <select> here — lives in TuningMode above RAF-driven strips).
+// Poly decode card (instrument <select> lives in parent tab header).
 export fn ChordFretboardPanel(props) {
 let tabActive = props.tabActive === true;
 let analyserRef = props.analyserRef;
 let audioReady = props.audioReady === true;
 let spec = props.spec;
 let polyOpts = props.polyOpts;
+let variant = props.variant;
+let title = 'Poly chord decode';
+let blurb = 'Dry input → FFT peaks → joint string/fret assignment (MRV + bounded search). Instrument is chosen above; the live grid paints imperatively from the analyser loop.';
+if (variant === 'learn') {
+title = 'Live chord shape';
+blurb = 'Watch which frets light up as you play. Same engine as before: peaks on the dry path, then joint string/fret picks. Use it to relate what you hear to where your fingers are.';
+}
 
 return h('div', { class: 'rounded-xl border border-neutral-700 bg-neutral-950/95 p-4 space-y-4' }, [
 h('div', {}, [
-h('p', { class: 'text-[10px] text-neutral-500 font-bold uppercase tracking-widest' }, ['Poly chord decode']),
-h('p', { class: 'text-sm text-neutral-300 max-w-xl leading-snug' }, [
-'Dry input → FFT peaks → joint string/fret assignment (MRV + bounded search). Instrument is chosen above; poly updates only setState when the analysis snapshot key changes.'
-])
+h('p', { class: 'text-[10px] text-neutral-500 font-bold uppercase tracking-widest' }, [title]),
+h('p', { class: 'text-sm text-neutral-300 max-w-xl leading-snug' }, [blurb])
 ]),
 h(ChordPolyLiveGrid, {
 tabActive,

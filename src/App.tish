@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, h } from "lattish"
-import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork } from "./icons.tish"
+import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2 } from "./icons.tish"
 import { PEDAL_LIBRARY } from "./audio/pedalLibrary.tish"
 import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
@@ -237,7 +237,7 @@ setConnections(prev => prev.filter(c => c.id !== id));
 };
 
 // Lattish uses one global hook stack per App() flush; NodeGraphView runs O(nodes) FC hooks.
-// Keep Patch (NodeGraphView) after Jam / Arcade / Tuning in <main> so adding SYS_IN never shifts their useState slots.
+// Keep Patch (NodeGraphView) after Jam / Arcade / Tuning / Chords in <main> so adding SYS_IN never shifts their useState slots.
 
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans">
@@ -284,7 +284,8 @@ title="Preview all modules in a chain (layout only)"
 { id: 'pedalboard', icon: Sliders, label: 'Patch' },
 { id: 'jam', icon: Play, label: 'Jam' },
 { id: 'game', icon: Gamepad2, label: 'Arcade' },
-{ id: 'tuning', icon: TuningFork, label: 'Tuning' }
+{ id: 'tuning', icon: TuningFork, label: 'Tuning' },
+{ id: 'chords', icon: Music2, label: 'Chords' }
 ].map(tab => (
 <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-950")}>
 {tab.icon({ class: "w-4 h-4 sm:w-5 sm:h-5" })} {tab.label}
@@ -303,8 +304,14 @@ title="Preview all modules in a chain (layout only)"
 <div class={activeTab === 'game' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
 <Guitarcade tabActive={activeTab === 'game'} analyzerRef={analyserRef} pitchAnalyzerRef={pitchAnalyserRef} audioReady={audioReady} />
 </div>
-<div class={activeTab === 'tuning' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
-<TuningMode tabActive={activeTab === 'tuning'} analyzerRef={analyserRef} pitchAnalyzerRef={pitchAnalyserRef} audioReady={audioReady} />
+<div class={activeTab === 'tuning' || activeTab === 'chords' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
+<TuningMode
+variant={activeTab === 'chords' ? 'chords' : 'tuning'}
+tabActive={activeTab === 'tuning' || activeTab === 'chords'}
+analyzerRef={analyserRef}
+pitchAnalyzerRef={pitchAnalyserRef}
+audioReady={audioReady}
+/>
 </div>
 <div class={activeTab === 'pedalboard' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
 <NodeGraphView 
