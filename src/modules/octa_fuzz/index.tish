@@ -1,0 +1,65 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'octa_fuzz';
+export const category = 'MULTI_FX';
+
+export const metadata = {
+  label: 'Octavia Fuzz',
+  color: 'from-fuchsia-700 to-fuchsia-950',
+  theme: 'dark',
+  defaultParams: {"drive":600,"tone":3000,"level":0.4}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metadata.defaultParams.drive} />
+      <RotaryKnob label={formatKnobLabel('tone')} min={100} max={5000} value={node.params.tone} theme={node.theme} onChange={(v) => onChange('tone', v)} resetValue={metadata.defaultParams.tone} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createBiquadFilter(); inNode.type = 'highpass'; inNode.frequency.value = 100; 
+const rect = ctx.createWaveShaper(); rect.curve = makeRectifierCurve();
+const dcBlocker = ctx.createBiquadFilter(); dcBlocker.type = 'highpass'; dcBlocker.frequency.value = 80; 
+const fuzz = ctx.createWaveShaper(); fuzz.curve = makeDistortionCurve(node.params.drive ?? 600);
+const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = node.params.tone ?? 3000;
+outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
+inNode.connect(rect); rect.connect(dcBlocker); dcBlocker.connect(fuzz); fuzz.connect(tone); tone.connect(outNode);
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+fuzz.curve = makeDistortionCurve(p.drive ?? 600);
+smoothAudioParam(tone.frequency, p.tone ?? 3000, ctx);
+smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

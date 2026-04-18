@@ -1,0 +1,72 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'tape_echo';
+export const category = 'MULTI_FX';
+
+export const metadata = {
+  label: 'Space Echo',
+  color: 'from-emerald-700 to-emerald-950',
+  theme: 'dark',
+  defaultParams: {"time":0.4,"feedback":0.6,"age":0.5,"mix":0.5}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={metadata.defaultParams.time} />
+      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={metadata.defaultParams.feedback} />
+      <RotaryKnob label={formatKnobLabel('age')} min={0} max={1} value={node.params.age} theme={node.theme} onChange={(v) => onChange('age', v)} resetValue={metadata.defaultParams.age} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createGain(); outNode = ctx.createGain();
+const delay = ctx.createDelay(5.0); delay.delayTime.value = node.params.time ?? 0.4;
+const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.6;
+const lowpass = ctx.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 4000 - ((node.params.age ?? 0.5) * 3000);
+lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 1.2;
+const lfoDepth = ctx.createGain(); lfoDepth.gain.value = (node.params.age ?? 0.5) * 0.008;
+lfo.connect(lfoDepth); lfoDepth.connect(delay.delayTime); lfo.start();
+const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.5;
+inNode.connect(outNode); 
+inNode.connect(delay); delay.connect(lowpass); lowpass.connect(wetGain); wetGain.connect(outNode);
+lowpass.connect(feedback); feedback.connect(delay);
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+smoothAudioParam(delay.delayTime, p.time ?? 0.4, ctx);
+smoothAudioParam(feedback.gain, p.feedback ?? 0.6, ctx);
+smoothAudioParam(lowpass.frequency, 4000 - ((p.age ?? 0.5) * 3000), ctx);
+smoothAudioParam(lfoDepth.gain, (p.age ?? 0.5) * 0.008, ctx);
+smoothAudioParam(wetGain.gain, p.mix ?? 0.5, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

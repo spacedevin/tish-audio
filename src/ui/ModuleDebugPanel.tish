@@ -1,7 +1,7 @@
 import { h } from "lattish"
 import { X } from "../icons.tish"
 import { PEDAL_LIBRARY } from "../audio/pedalLibrary.tish"
-import { PedalNode, RackNode, GraphicEqNode, ConsoleNode, VuMeterNode } from "./nodes.tish"
+import { MODULE_REGISTRY } from "../modules/registry.tish"
 
 export fn ModuleDebugPanel(props) {
 let onClose = props.onClose;
@@ -61,66 +61,30 @@ const isEq7 = mod.type === 'eq7';
 const isAmpSim = String(mod.type).startsWith('amp_');
 
 let preview = null;
-if (mod.type === 'graphic_eq') {
-preview = h(GraphicEqNode, {
-node: mod,
-previewOnly: true,
-onRemove: noop,
-onChange: noop,
-onDragStart: noop,
-onToggleBypass: noop,
-audioDataMap: dbgAudioMap,
-meterSync: 0,
-onFaderDragEnd: noop
-});
-} else if (mod.type === 'master_eq') {
-preview = h(RackNode, {
-node: mod,
-previewOnly: true,
-onRemove: noop,
-onChange: noop,
-onDragStart: noop,
-onToggleBypass: noop,
-audioDataMap: dbgAudioMap,
-meterSync: 0,
-onFaderDragEnd: noop
-});
-} else if (mod.type === 'console_mixer') {
-preview = h(ConsoleNode, {
-node: mod,
-previewOnly: true,
-onRemove: noop,
-onChange: noop,
-onDragStart: noop,
-audioDataMap: dbgAudioMap,
-meterSync: 0,
-onFaderDragEnd: noop
-});
-} else if (isVu) {
-preview = h(VuMeterNode, {
-node: mod,
-previewOnly: true,
-onRemove: noop,
-onChange: noop,
-onDragStart: noop,
-audioDataMap: dbgAudioMap
-});
-} else {
-preview = h(PedalNode, {
-pedal: mod,
-previewOnly: true,
-onRemove: noop,
-onChange: noop,
-onDragStart: noop,
-onToggleBypass: noop
-});
+if (MODULE_REGISTRY[mod.type]?.View) {
+  preview = h(MODULE_REGISTRY[mod.type].View, {
+    node: mod,
+    previewOnly: true,
+    onRemove: noop,
+    onChange: noop,
+    onDragStart: noop,
+    onToggleBypass: noop,
+    audioDataMap: dbgAudioMap,
+    meterSync: 0,
+    onFaderDragEnd: noop
+  });
 }
 
-const slotW = isWide ? rackSlotW : (isEq7 ? Math.round(400 * pedalScale) : (isAmpSim ? Math.round(300 * pedalScale) : (isVu ? Math.round(120 * pedalScale) : pedalSlotW)));
-const slotH = isWide ? rackSlotH : (isVu ? Math.round(200 * pedalScale) : pedalSlotH);
-const innerW = isWide ? 640 : (isEq7 ? 400 : (isAmpSim ? 300 : (isVu ? 120 : 200)));
-const innerH = isWide ? 216 : (isVu ? 200 : 340);
-const sc = isWide ? rackScale : pedalScale;
+const layout = MODULE_REGISTRY[mod.type]?.layout || { width: 200, height: 340 };
+const isRack = layout.width > 500;
+const isWidePedal = layout.width > 250 && !isRack;
+const isVuMeter = layout.width === 120;
+
+const sc = isRack ? rackScale : pedalScale;
+const slotW = Math.round(layout.width * sc);
+const slotH = Math.round(layout.height * sc);
+const innerW = layout.width;
+const innerH = layout.height;
 
 return (
 <div key={mod.id} class="shrink-0 cursor-pointer transition-transform hover:scale-105 hover:z-10 focus:outline-none" tabIndex="0" onClick={() => { if (props.addNode) props.addNode(mod.category, mod.type); onClose(); }}>

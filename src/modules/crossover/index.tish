@@ -1,0 +1,60 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'crossover';
+export const category = 'UTILITY';
+
+export const metadata = {
+  label: 'Freq Split',
+  color: 'from-blue-800 to-indigo-950',
+  theme: 'dark',
+  defaultParams: {"freq":800}
+};
+
+export const layout = {"width":140,"height":180};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('freq')} min={0} max={1} value={node.params.freq} theme={node.theme} onChange={(v) => onChange('freq', v)} resetValue={metadata.defaultParams.freq} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createGain();
+const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = node.params.freq ?? 800;
+const high = ctx.createBiquadFilter(); high.type = 'highpass'; high.frequency.value = node.params.freq ?? 800;
+inNode.connect(low); inNode.connect(high);
+outPorts = { low, high };
+nodeParamSync = (ctx, n) => {
+const fv = n.params.freq ?? 800;
+smoothAudioParam(low.frequency, fv, ctx);
+smoothAudioParam(high.frequency, fv, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

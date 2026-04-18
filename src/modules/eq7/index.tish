@@ -1,0 +1,79 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'eq7';
+export const category = 'DYNAMICS';
+
+export const metadata = {
+  label: '7-Band EQ',
+  color: 'from-stone-300 to-stone-500',
+  theme: 'light',
+  defaultParams: {"b100":0,"b200":0,"b400":0,"b800":0,"b1k6":0,"b3k2":0,"b6k4":0,"level":1}
+};
+
+export const layout = {"width":400,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={true}
+    >
+      <RotaryKnob label={formatKnobLabel('b100')} min={-15} max={15} value={node.params.b100} theme={node.theme} compact={true} onChange={(v) => onChange('b100', v)} resetValue={metadata.defaultParams.b100} />
+      <RotaryKnob label={formatKnobLabel('b200')} min={-15} max={15} value={node.params.b200} theme={node.theme} compact={true} onChange={(v) => onChange('b200', v)} resetValue={metadata.defaultParams.b200} />
+      <RotaryKnob label={formatKnobLabel('b400')} min={-15} max={15} value={node.params.b400} theme={node.theme} compact={true} onChange={(v) => onChange('b400', v)} resetValue={metadata.defaultParams.b400} />
+      <RotaryKnob label={formatKnobLabel('b800')} min={-15} max={15} value={node.params.b800} theme={node.theme} compact={true} onChange={(v) => onChange('b800', v)} resetValue={metadata.defaultParams.b800} />
+      <RotaryKnob label={formatKnobLabel('b1k6')} min={-15} max={15} value={node.params.b1k6} theme={node.theme} compact={true} onChange={(v) => onChange('b1k6', v)} resetValue={metadata.defaultParams.b1k6} />
+      <RotaryKnob label={formatKnobLabel('b3k2')} min={-15} max={15} value={node.params.b3k2} theme={node.theme} compact={true} onChange={(v) => onChange('b3k2', v)} resetValue={metadata.defaultParams.b3k2} />
+      <RotaryKnob label={formatKnobLabel('b6k4')} min={-15} max={15} value={node.params.b6k4} theme={node.theme} compact={true} onChange={(v) => onChange('b6k4', v)} resetValue={metadata.defaultParams.b6k4} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} compact={true} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+const freqs = [100, 200, 400, 800, 1600, 3200, 6400];
+const filters = freqs.map((f) => {
+const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.414;
+const paramKey = "b" + (f >= 1000 ? (f/1000).toString().replace(".", "k") : String(f));
+filter.gain.value = node.params[paramKey] ?? 0;
+return filter;
+});
+inNode = filters[0];
+for(let i=0; i<filters.length-1; i = i + 1) filters[i].connect(filters[i+1]);
+outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+filters[filters.length-1].connect(outNode);
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+let fi = 0;
+while (fi < filters.length) {
+const f = freqs[fi];
+const paramKey = "b" + (f >= 1000 ? (f/1000).toString().replace(".", "k") : String(f));
+smoothAudioParam(filters[fi].gain, p[paramKey] ?? 0, ctx);
+fi = fi + 1;
+}
+smoothAudioParam(outNode.gain, p.level ?? 1.0, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

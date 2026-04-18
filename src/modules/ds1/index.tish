@@ -1,0 +1,95 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'ds1';
+export const category = 'DRIVE';
+
+export const metadata = {
+  label: 'Orange Dist',
+  color: 'from-orange-500 to-orange-700',
+  theme: 'dark',
+  defaultParams: {"drive":600,"tone":4000,"level":0.4}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metadata.defaultParams.drive} />
+      <RotaryKnob label={formatKnobLabel('tone')} min={100} max={5000} value={node.params.tone} theme={node.theme} onChange={(v) => onChange('tone', v)} resetValue={metadata.defaultParams.tone} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createWaveShaper();
+const driveAmount = (node.type === 'fuzz' || node.type === 'muff' || node.type === 'metal') ? (node.params.drive ?? 800) * 5 : (node.params.drive ?? 400);
+inNode.curve = node.type === 'blues_od' ? makeAsymmetricCurve(driveAmount) : makeDistortionCurve(driveAmount); 
+inNode.oversample = '4x';
+
+if (node.type === 'metal' || node.type === 'ds1') {
+const midCut = ctx.createBiquadFilter(); midCut.type = 'peaking'; midCut.frequency.value = node.params.midFreq ?? 800; midCut.gain.value = node.params.midCut ?? -10; midCut.Q.value = 2.0;
+outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
+inNode.connect(midCut); midCut.connect(outNode);
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+const typ = n.type;
+const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
+inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
+smoothAudioParam(midCut.frequency, p.midFreq ?? 800, ctx);
+smoothAudioParam(midCut.gain, p.midCut ?? -10, ctx);
+smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
+};
+} else if (node.type === 'rat') {
+const toneBp = ctx.createBiquadFilter(); toneBp.type = 'lowpass'; toneBp.frequency.value = node.params.filter ?? 1500;
+const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.4;
+inNode.connect(toneBp); toneBp.connect(gain); outNode = gain;
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+const typ = n.type;
+const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
+inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
+smoothAudioParam(toneBp.frequency, p.filter ?? 1500, ctx);
+smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
+};
+} else {
+const toneBp = ctx.createBiquadFilter(); toneBp.type = 'lowpass'; toneBp.frequency.value = node.params.tone ?? 3000;
+const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.5;
+inNode.connect(toneBp); toneBp.connect(gain); outNode = gain;
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+const typ = n.type;
+const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
+inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
+smoothAudioParam(toneBp.frequency, p.tone ?? 3000, ctx);
+smoothAudioParam(outNode.gain, p.level ?? 0.5, ctx);
+};
+}
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

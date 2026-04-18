@@ -1,0 +1,99 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'rotary';
+export const category = 'MODULATION';
+
+export const metadata = {
+  label: 'Rotary Spkr',
+  color: 'from-stone-500 to-stone-700',
+  theme: 'dark',
+  defaultParams: {"rate":6,"mix":0.5}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={metadata.defaultParams.rate} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createGain(); outNode = ctx.createGain();
+const delay = ctx.createDelay(5.0); 
+delay.delayTime.value = node.type === 'chorus' ? 0.03 : node.type === 'flanger' ? 0.005 : node.type === 'vibrato' ? 0.02 : (node.params.time ?? 0.0);
+let lfoDepthMod = null;
+let feedbackGain = null;
+let wetMixGain = null;
+
+if (node.type !== 'delay' && node.type !== 'slapback') {
+lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 1.0;
+lfoDepthMod = ctx.createGain(); lfoDepthMod.gain.value = node.type === 'chorus' ? (node.params.depth ?? 1.0) * 0.01 : (node.params.depth ?? 0.005);
+lfo.connect(lfoDepthMod); lfoDepthMod.connect(delay.delayTime); lfo.start();
+}
+
+if (node.type === 'rotary') {
+const tremoloGain = ctx.createGain();
+const tremLfo = ctx.createOscillator(); tremLfo.type = 'sine'; tremLfo.frequency.value = node.params.rate ?? 6.0;
+const tremDepth = ctx.createGain(); tremDepth.gain.value = 0.5;
+tremLfo.connect(tremDepth); tremDepth.connect(tremoloGain.gain); tremLfo.start();
+delay.connect(tremoloGain);
+tremoloGain.connect(outNode);
+} else {
+delay.connect(outNode);
+}
+
+if (node.type !== 'vibrato') inNode.connect(outNode); 
+inNode.connect(delay); 
+
+if (node.type === 'flanger' || node.type === 'delay' || node.type === 'slapback') {
+feedbackGain = ctx.createGain(); feedbackGain.gain.value = node.params.feedback ?? 0.5;
+delay.connect(feedbackGain); feedbackGain.connect(delay);
+if (node.params.mix !== undefined) {
+wetMixGain = ctx.createGain(); wetMixGain.gain.value = node.params.mix;
+delay.disconnect(outNode); 
+delay.connect(wetMixGain); wetMixGain.connect(outNode);
+}
+}
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+const typ = n.type;
+if (typ === 'delay' || typ === 'slapback') smoothAudioParam(delay.delayTime, p.time ?? 0, ctx);
+if (lfo) smoothAudioParam(lfo.frequency, p.rate ?? 1.0, ctx);
+if (lfoDepthMod) {
+const dv = typ === 'chorus' ? (p.depth ?? 1.0) * 0.01 : (p.depth ?? 0.005);
+smoothAudioParam(lfoDepthMod.gain, dv, ctx);
+}
+if (feedbackGain) smoothAudioParam(feedbackGain.gain, p.feedback ?? 0.5, ctx);
+if (wetMixGain) smoothAudioParam(wetMixGain.gain, p.mix ?? 1.0, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

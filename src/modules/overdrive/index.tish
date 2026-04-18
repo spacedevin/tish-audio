@@ -1,0 +1,66 @@
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { makeDistortionCurve } from "../../audio/dsp.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'overdrive';
+export const category = 'DRIVE';
+
+export const metadata = {
+  label: 'Tube Drive',
+  color: 'from-yellow-400 to-yellow-600',
+  theme: 'light',
+  defaultParams: { drive: 400, tone: 3000, level: 0.5 }
+};
+
+export const layout = { width: 200, height: 340 };
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+    >
+      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metadata.defaultParams.drive} />
+      <RotaryKnob label={formatKnobLabel('tone')} min={100} max={5000} value={node.params.tone} theme={node.theme} onChange={(v) => onChange('tone', v)} resetValue={metadata.defaultParams.tone} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  const inNode = ctx.createWaveShaper();
+  const driveAmount = node.params.drive ?? 400;
+  inNode.curve = makeDistortionCurve(driveAmount); 
+  inNode.oversample = '4x';
+
+  const toneBp = ctx.createBiquadFilter(); 
+  toneBp.type = 'lowpass'; 
+  toneBp.frequency.value = node.params.tone ?? 3000;
+  
+  const gain = ctx.createGain(); 
+  gain.gain.value = node.params.level ?? 0.5;
+  
+  inNode.connect(toneBp); 
+  toneBp.connect(gain); 
+  
+  const outNode = gain;
+
+  const nodeParamSync = (ctx, n) => {
+    const p = n.params;
+    const dAmt = p.drive ?? 400;
+    inNode.curve = makeDistortionCurve(dAmt);
+    smoothAudioParam(toneBp.frequency, p.tone ?? 3000, ctx);
+    smoothAudioParam(outNode.gain, p.level ?? 0.5, ctx);
+  };
+
+  return { "in": inNode, "out": outNode, nodeParamSync };
+}

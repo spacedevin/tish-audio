@@ -1,0 +1,45 @@
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+// import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'plate_verb';
+export const category = 'TIME';
+
+export const metadata = {
+  label: 'Plate Verb',
+  color: 'from-slate-400 to-slate-600',
+  theme: 'light',
+  defaultParams: {"mix":0.4,"decay":2}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('decay')} min={0} max={8} value={node.params.decay} theme={node.theme} onChange={(v) => onChange('decay', v)} resetValue={metadata.defaultParams.decay} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  // TODO: extract from rebuildAudioGraph.tish
+  const inNode = ctx.createGain();
+  const outNode = ctx.createGain();
+  inNode.connect(outNode);
+  return { "in": inNode, "out": outNode };
+}

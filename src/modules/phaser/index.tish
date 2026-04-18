@@ -1,0 +1,65 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'phaser';
+export const category = 'MODULATION';
+
+export const metadata = {
+  label: 'Phase 90',
+  color: 'from-orange-500 to-orange-700',
+  theme: 'dark',
+  defaultParams: {"rate":0.8,"sweep":800}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={metadata.defaultParams.rate} />
+      <RotaryKnob label={formatKnobLabel('sweep')} min={100} max={3000} value={node.params.sweep} theme={node.theme} onChange={(v) => onChange('sweep', v)} resetValue={metadata.defaultParams.sweep} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createGain(); outNode = ctx.createGain();
+const filters = [];
+for(let i=0; i<4; i = i + 1) { const f = ctx.createBiquadFilter(); f.type = 'allpass'; f.frequency.value = 1000; filters.push(f); }
+lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 0.8;
+const lfoDepth = ctx.createGain(); lfoDepth.gain.value = node.params.sweep ?? 800;
+lfo.connect(lfoDepth); filters.forEach(f => lfoDepth.connect(f.frequency)); lfo.start();
+inNode.connect(filters[0]); filters[0].connect(filters[1]); filters[1].connect(filters[2]); filters[2].connect(filters[3]); filters[3].connect(outNode);
+inNode.connect(outNode); 
+const lfoDepthPhaser = lfoDepth;
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+if (lfo) smoothAudioParam(lfo.frequency, p.rate ?? 0.8, ctx);
+if (lfoDepthPhaser) smoothAudioParam(lfoDepthPhaser.gain, p.sweep ?? 800, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

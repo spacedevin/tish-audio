@@ -1,0 +1,60 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'bitcrush';
+export const category = 'MULTI_FX';
+
+export const metadata = {
+  label: '8-Bit Crush',
+  color: 'from-pink-600 to-purple-900',
+  theme: 'dark',
+  defaultParams: {"bits":4,"level":0.5}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('bits')} min={2} max={16} value={node.params.bits} theme={node.theme} onChange={(v) => onChange('bits', v)} resetValue={metadata.defaultParams.bits} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createWaveShaper();
+inNode.curve = makeBitcrusherCurve(node.params.bits ?? 4);
+outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.5;
+inNode.connect(outNode);
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+inNode.curve = makeBitcrusherCurve(p.bits ?? 4);
+smoothAudioParam(outNode.gain, p.level ?? 0.5, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

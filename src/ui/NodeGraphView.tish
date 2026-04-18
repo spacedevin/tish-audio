@@ -9,12 +9,16 @@ import { getNodePorts } from "../audio/pedalLibrary.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
 import { RotaryKnob } from "./controls.tish"
 import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode, hardwareRemoveClass } from "./nodes.tish"
+import { MODULE_REGISTRY } from "../modules/registry.tish"
 
 const SNAP_PEER_PX = 14;
 const SNAP_X_EDGE_GAP_PX = 20;
 
 const getNodeSize = (node) => {
 let w = 200; let h = 340;
+if (MODULE_REGISTRY[node.type]?.layout) {
+return { w: MODULE_REGISTRY[node.type].layout.width, h: MODULE_REGISTRY[node.type].layout.height };
+}
 if (node.type === 'SYS_IN') { w = 96; h = 140; }
 else if (node.type === 'SYS_OUT') { w = 80; h = 140; }
 else if (node.isSystem) { w = 80; h = 140; }
@@ -280,6 +284,17 @@ class="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-
 >
 <span class="transform -rotate-90 text-sm font-black tracking-widest text-orange-500 drop-shadow-md select-none whitespace-nowrap">{node.label}</span>
 </div>
+) : MODULE_REGISTRY[node.type]?.View ? (
+h(MODULE_REGISTRY[node.type].View, {
+  node: node,
+  onRemove: () => removeNode(node.id),
+  onChange: (param, val) => updateNodeParam(node.id, param, val),
+  onDragStart: (e) => startDragNode(e, node),
+  onToggleBypass: () => toggleNodeBypass(node.id),
+  audioDataMap: nodeAudioMapRef.current,
+  meterSync: audioGraphTick,
+  onFaderDragEnd: onAudioUiBump
+})
 ) : node.type === 'master_eq' ? (
 <RackNode 
 node={node} 

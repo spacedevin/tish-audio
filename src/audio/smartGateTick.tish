@@ -1,59 +1,26 @@
-// RMS follower gate: ducks to silence when input stays below threshold (dBFS).
-// Driven from App via requestAnimationFrame (not layout-only sync).
+import { MODULE_REGISTRY } from "../modules/registry.tish"
 
 export fn tickSmartGates(mapRef, nodes) {
-if (!mapRef || !mapRef.current || !nodes) return;
-const map = mapRef.current;
-let i = 0;
-while (i < nodes.length) {
-const n = nodes[i];
-i = i + 1;
-if (!n || n.type !== 'smart_gate' || n.bypassed) continue;
-const box = map[n.id];
-if (!box || !box.smartGateRuntime) continue;
-const rt = box.smartGateRuntime;
-const analyser = rt.analyser;
-const gateGain = rt.gateGain;
-const buf = rt.buf;
-const st = rt.st;
-if (!analyser || !gateGain || !buf || !st) continue;
-analyser.getFloatTimeDomainData(buf);
-let sum = 0;
-let j = 0;
-while (j < buf.length) {
-const s = buf[j];
-sum = sum + s * s;
-j = j + 1;
-}
-const rms = Math.sqrt(sum / buf.length);
-if (!Number.isFinite(rms)) continue;
-const p = n.params || {};
-let thrDb = typeof p.threshold === 'number' ? p.threshold : parseFloat(String(p.threshold ?? '-42'));
-if (!Number.isFinite(thrDb)) thrDb = -42;
-if (thrDb >= 0) thrDb = -30;
-const threshLin = Math.pow(10, thrDb / 20);
-const openTh = threshLin * 1.25;
-const closeTh = threshLin * 0.72;
-let target = 0;
-if (st.gainSmoo > 0.04) {
-target = rms >= closeTh ? 1 : 0;
-} else {
-target = rms >= openTh ? 1 : 0;
-}
-let attack = typeof p.attack === 'number' ? p.attack : parseFloat(String(p.attack ?? '0.006'));
-let release = typeof p.release === 'number' ? p.release : parseFloat(String(p.release ?? '0.2'));
-if (!Number.isFinite(attack)) attack = 0.006;
-if (!Number.isFinite(release)) release = 0.2;
-const nowSec = performance.now() * 0.001;
-const dtRaw = st.lastNow > 0 ? nowSec - st.lastNow : 1/60;
-const dt = dtRaw > 0 ? Math.min(0.1, dtRaw) : 1/60;
-st.lastNow = nowSec;
-const tau = target > st.gainSmoo ? Math.max(0.0004, attack) : Math.max(0.003, release);
-const k = 1 - Math.exp(-dt / tau);
-if (!Number.isFinite(k) || !Number.isFinite(st.gainSmoo)) { st.gainSmoo = 1; gateGain.gain.value = 1; continue; }
-st.gainSmoo = st.gainSmoo + (target - st.gainSmoo) * k;
-if (st.gainSmoo < 0.00008) st.gainSmoo = 0;
-if (st.gainSmoo > 0.9999) st.gainSmoo = 1;
-gateGain.gain.value = st.gainSmoo;
-}
+  if (!mapRef || !mapRef.current || !nodes) return;
+  const map = mapRef.current;
+  
+  let i = 0;
+  while (i < nodes.length) {
+    const n = nodes[i];
+    i = i + 1;
+    
+    if (!n || n.bypassed) continue;
+    
+    const def = MODULE_REGISTRY[n.type];
+    if (def && def.tickFrame) {
+      const box = map[n.id];
+      if (box && box.smartGateRuntime) {
+         // for smart_gate specifically or anything else using that generic key
+         def.tickFrame(n, box.smartGateRuntime);
+      } else if (box) {
+         // generic
+         def.tickFrame(n, box);
+      }
+    }
+  }
 }

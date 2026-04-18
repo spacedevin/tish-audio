@@ -1,0 +1,146 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'smart_gate';
+export const category = 'DYNAMICS';
+
+export const metadata = {
+  label: 'Smart Gate',
+  color: 'from-emerald-950 via-zinc-900 to-black',
+  theme: 'dark',
+  defaultParams: {"threshold":-42,"attack":0.006,"release":0.22}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('threshold')} min={-60} max={0} value={node.params.threshold} theme={node.theme} onChange={(v) => onChange('threshold', v)} resetValue={metadata.defaultParams.threshold} />
+      <RotaryKnob label={formatKnobLabel('attack')} min={0.001} max={0.12} value={node.params.attack} theme={node.theme} onChange={(v) => onChange('attack', v)} resetValue={metadata.defaultParams.attack} />
+      <RotaryKnob label={formatKnobLabel('release')} min={0.02} max={0.85} value={node.params.release} theme={node.theme} onChange={(v) => onChange('release', v)} resetValue={metadata.defaultParams.release} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+const pass = ctx.createGain(); pass.gain.value = 1.0;
+const follower = ctx.createAnalyser();
+follower.fftSize = 2048;
+follower.smoothingTimeConstant = 0.55;
+const gateGain = ctx.createGain();
+gateGain.gain.value = 1.0;
+pass.connect(follower);
+follower.connect(gateGain);
+inNode = pass;
+outNode = gateGain;
+const buf = new Float32Array(follower.fftSize);
+const st = { gainSmoo: 1, lastNow: 0 };
+smartGateRuntime = { analyser: follower, gateGain: gateGain, buf: buf, st: st };
+nodeParamSync = null;
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}
+
+export fn tickFrame(node, runtime) {
+  const p = node.params || {};
+  const analyser = runtime.analyser;
+  const gateGain = runtime.gateGain;
+  const buf = runtime.buf;
+  const st = runtime.st;
+  if (!analyser || !gateGain || !buf || !st) return;
+
+  analyser.getFloatTimeDomainData(buf);
+  let sum = 0;
+  let j = 0;
+  while (j < buf.length) {
+    const s = buf[j];
+    sum = sum + s * s;
+    j = j + 1;
+  }
+  const rms = Math.sqrt(sum / buf.length);
+  if (!Number.isFinite(rms)) return;
+
+  let thrDb = typeof p.threshold === 'number' ? p.threshold : parseFloat(String(p.threshold ?? '-42'));
+  if (!Number.isFinite(thrDb)) thrDb = -42;
+  if (thrDb >= 0) thrDb = -30;
+  const threshLin = Math.pow(10, thrDb / 20);
+  const openTh = threshLin * 1.25;
+  const closeTh = threshLin * 0.72;
+  
+  let target = 0;
+  if (st.gainSmoo > 0.04) {
+    target = rms >= closeTh ? 1 : 0;
+  } else {
+    target = rms >= openTh ? 1 : 0;
+  }
+  
+  let attack = typeof p.attack === 'number' ? p.attack : parseFloat(String(p.attack ?? '0.006'));
+  let release = typeof p.release === 'number' ? p.release : parseFloat(String(p.release ?? '0.2'));
+  if (!Number.isFinite(attack)) attack = 0.006;
+  if (!Number.isFinite(release)) release = 0.2;
+  
+  const nowSec = performance.now() * 0.001;
+  const dtRaw = st.lastNow > 0 ? nowSec - st.lastNow : 1/60;
+  const dt = dtRaw > 0 ? Math.min(0.1, dtRaw) : 1/60;
+  st.lastNow = nowSec;
+  const tau = target > st.gainSmoo ? Math.max(0.0004, attack) : Math.max(0.003, release);
+  const k = 1 - Math.exp(-dt / tau);
+  
+  if (!Number.isFinite(k) || !Number.isFinite(st.gainSmoo)) { 
+    st.gainSmoo = 1; 
+    gateGain.gain.value = 1; 
+    return; 
+  }
+  
+  st.gainSmoo = st.gainSmoo + (target - st.gainSmoo) * k;
+  if (st.gainSmoo < 0.00008) st.gainSmoo = 0;
+  if (st.gainSmoo > 0.9999) st.gainSmoo = 1;
+  gateGain.gain.value = st.gainSmoo;
+}
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+const pass = ctx.createGain(); pass.gain.value = 1.0;
+const follower = ctx.createAnalyser();
+follower.fftSize = 2048;
+follower.smoothingTimeConstant = 0.55;
+const gateGain = ctx.createGain();
+gateGain.gain.value = 1.0;
+pass.connect(follower);
+follower.connect(gateGain);
+inNode = pass;
+outNode = gateGain;
+const buf = new Float32Array(follower.fftSize);
+const st = { gainSmoo: 1, lastNow: 0 };
+smartGateRuntime = { analyser: follower, gateGain: gateGain, buf: buf, st: st };
+nodeParamSync = null;
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

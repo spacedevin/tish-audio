@@ -1,0 +1,67 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'noise_gate';
+export const category = 'DYNAMICS';
+
+export const metadata = {
+  label: 'Silencer',
+  color: 'from-zinc-400 to-zinc-600',
+  theme: 'dark',
+  defaultParams: {"threshold":-50,"decay":0.1}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('threshold')} min={-60} max={0} value={node.params.threshold} theme={node.theme} onChange={(v) => onChange('threshold', v)} resetValue={metadata.defaultParams.threshold} />
+      <RotaryKnob label={formatKnobLabel('decay')} min={0} max={8} value={node.params.decay} theme={node.theme} onChange={(v) => onChange('decay', v)} resetValue={metadata.defaultParams.decay} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createDynamicsCompressor();
+inNode.threshold.value = node.params.threshold ?? -24;
+inNode.ratio.value = node.type === 'noise_gate' ? 20 : (node.params.ratio ?? 4); 
+inNode.attack.value = 0.005; 
+inNode.release.value = node.params.decay ?? 0.1;
+outNode = ctx.createGain(); 
+outNode.gain.value = node.params.makeup ?? 1.0;
+inNode.connect(outNode);
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+const dyn = inNode;
+smoothAudioParam(dyn.threshold, p.threshold ?? -24, ctx);
+smoothAudioParam(dyn.ratio, n.type === 'noise_gate' ? 20 : (p.ratio ?? 4), ctx);
+smoothAudioParam(dyn.release, p.decay ?? 0.1, ctx);
+smoothAudioParam(outNode.gain, p.makeup ?? 1.0, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

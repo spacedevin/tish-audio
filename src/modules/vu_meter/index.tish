@@ -1,0 +1,58 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'vu_meter';
+export const category = 'UTILITY';
+
+export const metadata = {
+  label: 'VU Meter',
+  color: 'from-slate-800 to-slate-950',
+  theme: 'dark',
+  defaultParams: {"level":1}
+};
+
+export const layout = {"width":120,"height":200};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createGain(); 
+outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
+inNode.connect(outNode);
+nodeAnalyser = ctx.createAnalyser();
+nodeAnalyser.fftSize = 512;
+nodeAnalyser.smoothingTimeConstant = 0.8;
+outNode.connect(nodeAnalyser);
+nodeParamSync = (ctx, n) => { smoothAudioParam(outNode.gain, n.params.level ?? 1.0, ctx); };
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

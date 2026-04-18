@@ -1,0 +1,64 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'shimmer_verb';
+export const category = 'SIGNATURE';
+
+export const metadata = {
+  label: 'Shimmer Cloud',
+  color: 'from-sky-400 via-indigo-700 to-slate-950',
+  theme: 'dark',
+  defaultParams: {"mix":0.38,"decay":3.2,"sheen":0.65}
+};
+
+export const layout = {"width":200,"height":340};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('decay')} min={0} max={8} value={node.params.decay} theme={node.theme} onChange={(v) => onChange('decay', v)} resetValue={metadata.defaultParams.decay} />
+      <RotaryKnob label={formatKnobLabel('sheen')} min={0} max={1} value={node.params.sheen} theme={node.theme} onChange={(v) => onChange('sheen', v)} resetValue={metadata.defaultParams.sheen} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createGain(); outNode = ctx.createGain();
+const convolver = ctx.createConvolver();
+convolver.buffer = createReverbIR(ctx, Math.min(4.5, node.params.decay ?? 3.2), 6.2, 'hall');
+const air = ctx.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 3200; air.gain.value = (node.params.sheen ?? 0.65) * 14;
+const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.38;
+inNode.connect(convolver); convolver.connect(air); air.connect(wetGain); wetGain.connect(outNode);
+inNode.connect(outNode);
+nodeParamSync = (ctx, n) => {
+const p = n.params;
+smoothAudioParam(wetGain.gain, p.mix ?? 0.38, ctx);
+smoothAudioParam(air.gain, (p.sheen ?? 0.65) * 14, ctx);
+};
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}

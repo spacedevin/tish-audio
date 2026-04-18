@@ -1,0 +1,17 @@
+export { PedalChassis, hardwareRemoveClass } from "./PedalChassis.tish"
+export { RackChassis } from "./RackChassis.tish"
+
+export const formatKnobLabel = (key) => {
+  const map = {
+    gain: 'GAIN', bass: 'BASS', mid: 'MID', treble: 'TREBLE', presence: 'PRESENCE', master: 'MASTER',
+    drive: 'DRIVE', tone: 'TONE', level: 'LEVEL', mix: 'MIX', threshold: 'THRESH', ratio: 'RATIO',
+    makeup: 'MAKEUP', highs: 'HIGHS', output: 'OUTPUT', depth: 'DEPTH', rate: 'RATE', speed: 'SPEED', attack: 'ATK', release: 'REL',
+    feedback: 'FDBK', time: 'TIME', decay: 'DECAY', spread: 'SPREAD', filter: 'FILTER', bits: 'BITS',
+    age: 'AGE', midFreq: 'MID F', midCut: 'MID CUT', baseFreq: 'BASE', sweep: 'SWEEP',
+    cut: 'CUT', scoop: 'SCOOP', dark: 'DARK', sheen: 'SHEEN'
+  };
+  if (map[key]) return map[key];
+  if (key.startsWith('b') && key.length > 1) return key.toUpperCase();
+  let parts = key.split('_');
+  return parts.join(' ').toUpperCase();
+};

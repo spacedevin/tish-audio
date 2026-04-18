@@ -1,5 +1,6 @@
 import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "./dsp.tish"
 import { smoothAudioParam } from "./smoothAudioParam.tish"
+import { MODULE_REGISTRY } from "../modules/registry.tish"
 
 export fn rebuildAudioGraph(ctx, deps, currentNodes, currentConns) {
 if (!ctx) return;
@@ -47,6 +48,18 @@ else if (node.type === 'SYS_OUT') {
 inNode = ctx.createGain();
 inNode.connect(analyserRef.current); 
 outNode = inNode;
+}
+else if (MODULE_REGISTRY[node.type]?.buildAudio) {
+const built = MODULE_REGISTRY[node.type].buildAudio(ctx, node);
+inNode = built["in"];
+outNode = built["out"];
+if (built.lfo) lfo = built.lfo;
+if (built.nodeAnalyser) nodeAnalyser = built.nodeAnalyser;
+if (built.inPorts) inPorts = built.inPorts;
+if (built.outPorts) outPorts = built.outPorts;
+if (built.analysers) analysers = built.analysers;
+if (built.nodeParamSync) nodeParamSync = built.nodeParamSync;
+if (built.smartGateRuntime) smartGateRuntime = built.smartGateRuntime;
 }
 else if (node.type === 'sm57_sim') {
 const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 100;

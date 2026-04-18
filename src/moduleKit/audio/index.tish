@@ -1,0 +1,8 @@
+export fn applyBypass(ctx, node, internalIn, internalOut) {
+  if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter'].includes(node.type)) {
+    const bypassGain = ctx.createGain();
+    bypassGain.gain.value = 1.0;
+    return { "in": bypassGain, "out": bypassGain };
+  }
+  return { "in": internalIn, "out": internalOut };
+}

@@ -1,0 +1,54 @@
+import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
+import { h } from "lattish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const type = 'splitter';
+export const category = 'UTILITY';
+
+export const metadata = {
+  label: 'Splitter',
+  color: 'from-zinc-700 to-zinc-900',
+  theme: 'dark',
+  defaultParams: {"output":1}
+};
+
+export const layout = {"width":140,"height":180};
+
+export fn View(props) {
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={layout.width}
+      panelH={layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <RotaryKnob label={formatKnobLabel('output')} min={0} max={1} value={node.params.output} theme={node.theme} onChange={(v) => onChange('output', v)} resetValue={metadata.defaultParams.output} />
+    </PedalChassis>
+  );
+}
+
+export fn buildAudio(ctx, node) {
+  let inNode; let outNode; let lfo; let nodeAnalyser;
+  let inPorts = null; let outPorts = null;
+  let analysers = {}; 
+  let nodeParamSync = null;
+  let smartGateRuntime = null;
+
+
+inNode = ctx.createGain(); 
+inNode.gain.value = node.params.gain ?? node.params.output ?? 1.0; 
+outNode = inNode;
+nodeParamSync = (ctx, n) => { smoothAudioParam(inNode.gain, n.params.gain ?? n.params.output ?? 1.0, ctx); };
+
+
+  return { "in": inNode, "out": outNode, lfo, nodeAnalyser, inPorts, outPorts, analysers, nodeParamSync, smartGateRuntime };
+}
