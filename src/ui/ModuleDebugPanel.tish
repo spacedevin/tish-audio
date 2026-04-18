@@ -57,6 +57,8 @@ return (
 {chain.map((mod, idx) => {
 const isWide = mod.type === 'graphic_eq' || mod.type === 'master_eq' || mod.type === 'console_mixer';
 const isVu = mod.type === 'vu_meter';
+const isEq7 = mod.type === 'eq7';
+const isAmpSim = String(mod.type).startsWith('amp_');
 
 let preview = null;
 if (mod.type === 'graphic_eq') {
@@ -114,10 +116,10 @@ onToggleBypass: noop
 });
 }
 
-const slotW = isWide ? rackSlotW : pedalSlotW;
-const slotH = isWide ? rackSlotH : pedalSlotH;
-const innerW = isWide ? 640 : 200;
-const innerH = isWide ? 216 : 340;
+const slotW = isWide ? rackSlotW : (isEq7 ? Math.round(400 * pedalScale) : (isAmpSim ? Math.round(300 * pedalScale) : (isVu ? Math.round(120 * pedalScale) : pedalSlotW)));
+const slotH = isWide ? rackSlotH : (isVu ? Math.round(200 * pedalScale) : pedalSlotH);
+const innerW = isWide ? 640 : (isEq7 ? 400 : (isAmpSim ? 300 : (isVu ? 120 : 200)));
+const innerH = isWide ? 216 : (isVu ? 200 : 340);
 const sc = isWide ? rackScale : pedalScale;
 
 return (

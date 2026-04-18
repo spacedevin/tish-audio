@@ -19,6 +19,8 @@ if (node.type === 'SYS_IN') { w = 96; h = 140; }
 else if (node.type === 'SYS_OUT') { w = 80; h = 140; }
 else if (node.isSystem) { w = 80; h = 140; }
 else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
+else if (node.type === 'eq7') { w = 400; h = 340; }
+else if (String(node.type).startsWith('amp_')) { w = 300; h = 340; }
 else if (node.type === 'master_eq') { w = 640; h = 216; }
 else if (node.type === 'graphic_eq') { w = 640; h = 216; }
 else if (node.type === 'vu_meter') { w = 120; h = 200; }

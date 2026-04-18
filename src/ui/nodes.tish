@@ -310,7 +310,8 @@ const isAmpSim = pedal.type && String(pedal.type).indexOf('amp_') === 0;
 const isCompact = !isAmpSim && Object.keys(pedal.params).length > 4;
 const knobCompact = isAmpSim || isCompact;
 const isBypassed = pedal.bypassed;
-const panelW = 200;
+const isEq7 = pedal.type === 'eq7';
+const panelW = isEq7 ? 400 : (isAmpSim ? 300 : 200);
 const panelH = 340;
 const screwBr = "bottom-24";
 
