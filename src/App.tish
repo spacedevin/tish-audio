@@ -153,8 +153,15 @@ sourcesRef.current = nextSources
 }
 }
 
+const applyRemove = () => {
 setNodes(prev => prev.filter(n => n.id !== id));
 setConnections(prev => prev.filter(c => c.from !== id && c.to !== id));
+};
+if (typeof queueMicrotask === "function") {
+queueMicrotask(applyRemove);
+} else {
+setTimeout(applyRemove, 0);
+}
 };
 
 const clearBoard = () => {

@@ -2,6 +2,8 @@ import { h, useEffect, useRef } from "lattish"
 import { VerticalFader, RotaryKnob, LedMeter } from "./controls.tish"
 import { X } from "../icons.tish"
 
+export const hardwareRemoveClass = "z-30 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-950/90 bg-gradient-to-b from-zinc-200 via-zinc-500 to-zinc-900 text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-4px_8px_rgba(0,0,0,0.55),0_3px_12px_rgba(0,0,0,0.55)] transition-all duration-200 hover:from-orange-200 hover:via-orange-400 hover:to-orange-950 hover:text-white hover:border-orange-950/80 hover:shadow-[0_0_14px_rgba(249,115,22,0.45)] active:scale-95";
+
 export fn ConsoleNode(props) { let node = props.node; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let audioDataMap = props.audioDataMap;
 let meterSync = props.meterSync;
 let onFaderDragEnd = props.onFaderDragEnd;
@@ -42,15 +44,15 @@ return (
 </div>
 ) : null}
 {!previewOnly ? (
-<button type="button" onClick={(e) => { e.stopPropagation(); onRemove(); }} class="text-zinc-500 hover:text-white transition-colors" title="Remove mixer">
-<X class="w-5 h-5 drop-shadow-md bg-black/40 rounded-full" />
+<button type="button" title="Remove mixer" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={hardwareRemoveClass}>
+<X class="w-4 h-4" />
 </button>
 ) : null}
 </div>
 </div>
 
 <div class={"flex flex-1 min-h-0 min-w-0 flex-row gap-1 px-1 py-1 items-stretch " + (previewOnly ? "pointer-events-none opacity-80" : "")}>
-<div class="flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex flex-row gap-0.5 items-stretch justify-start" style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}>
+<div class="flex-1 min-w-0 overflow-x-auto overflow-y-hidden flex flex-row gap-0.5 items-stretch justify-start" style={{ overscrollBehaviorX: 'contain' }}>
 {Array.from({length: numCh}).map((_, i) => {
 const key = "ch" + String(i + 1);
 return (
@@ -121,7 +123,9 @@ class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-color
 <div class={"w-6 h-6 rounded-full shadow-inner border pointer-events-none " + (!isBypassed ? "bg-red-500 border-red-300" : "bg-red-950 border-black")} />
 )}
 {!previewOnly ? (
-<button onClick={onRemove} class="text-zinc-500 hover:text-white transition-colors"><X class="w-5 h-5 drop-shadow-md bg-black/40 rounded-full" /></button>
+<button type="button" title="Remove EQ" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={hardwareRemoveClass}>
+<X class="w-4 h-4" />
+</button>
 ) : null}
 </div>
 </div>
@@ -164,7 +168,9 @@ VU
 <LedMeter analyser={analyser} width={12} height={80} />
 <RotaryKnob label="TRIM" min={0} max={2} value={node.params.level ?? 1.0} theme={node.theme} onChange={(v) => onChange('level', v)} />
 </div>
-<button onClick={onRemove} class="absolute top-2 right-2 text-white/50 hover:text-white transition-colors"><X class="w-4 h-4 drop-shadow-md" /></button>
+<button type="button" title="Remove meter" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-2 right-2 " + hardwareRemoveClass}>
+<X class="w-4 h-4" />
+</button>
 </div>
 );
 }
@@ -253,8 +259,8 @@ class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-color
 <div class={"w-6 h-6 rounded-full shadow-inner border pointer-events-none " + (!isBypassed ? "bg-red-500 border-red-300" : "bg-red-950 border-black")} />
 )}
 {!previewOnly ? (
-<button onClick={onRemove} class="text-zinc-500 hover:text-white transition-colors" title="Remove EQ">
-<X class="w-5 h-5 drop-shadow-md bg-black/40 rounded-full" />
+<button type="button" title="Remove rack" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={hardwareRemoveClass}>
+<X class="w-4 h-4" />
 </button>
 ) : null}
 </div>
@@ -394,8 +400,8 @@ class={"w-12 h-12 rounded-full cursor-pointer active:scale-95 transition-transfo
 </div>
 
 {!previewOnly ? (
-<button onClick={onRemove} class={"absolute top-3 right-3 transition-all opacity-0 group-hover:opacity-100 " + (isDark ? "text-white hover:text-red-400" : "text-neutral-800 hover:text-red-600")} title="Remove Pedal">
-<X class="w-5 h-5 drop-shadow-md bg-zinc-950 rounded-full" />
+<button type="button" title="Remove pedal" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-3 left-3 pointer-events-auto " + hardwareRemoveClass}>
+<X class="w-4 h-4" />
 </button>
 ) : null}
 </div>

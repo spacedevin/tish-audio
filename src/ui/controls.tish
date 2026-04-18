@@ -72,16 +72,23 @@ const pct = (safeVal - min) / (max - min);
 
 useEffect(() => {
 return () => {
-if (detachDragRef.current) {
-detachDragRef.current();
-detachDragRef.current = null;
+const d = detachDragRef.current;
+if (typeof d === 'function') {
+d();
 }
+detachDragRef.current = null;
 };
 }, []);
 
 const handlePointerDown = (e) => {
 e.stopPropagation();
-if (detachDragRef.current) return;
+const prevDetach = detachDragRef.current;
+if (prevDetach != null) {
+if (typeof prevDetach === 'function') {
+prevDetach();
+}
+detachDragRef.current = null;
+}
 const activePid = e.pointerId;
 fineDragRef.current = e.shiftKey === true;
 startYRef.current = e.clientY;
@@ -141,7 +148,7 @@ const troughClass = rackSlot
 
 return (
 <div class={"flex flex-col items-center shrink-0 select-none touch-none px-0.5 " + colW}>
-<div class={"relative flex gap-1 items-center touch-none " + heightClass}>
+<div class={"relative flex gap-1 items-center touch-none overflow-hidden rounded-sm " + heightClass}>
 <div
 ref={dragSurfaceRef}
 onPointerDown={handlePointerDown}
@@ -188,10 +195,11 @@ const fineDragRef = useRef(false);
 
 useEffect(() => {
 return () => {
-if (detachDragRef.current) {
-detachDragRef.current();
-detachDragRef.current = null;
+const d = detachDragRef.current;
+if (typeof d === 'function') {
+d();
 }
+detachDragRef.current = null;
 };
 }, []);
 
@@ -208,7 +216,13 @@ onChange(rv);
 
 const handlePointerDown = (e) => {
 e.stopPropagation();
-if (detachDragRef.current) return;
+const prevDetach = detachDragRef.current;
+if (prevDetach != null) {
+if (typeof prevDetach === 'function') {
+prevDetach();
+}
+detachDragRef.current = null;
+}
 const activePid = e.pointerId;
 fineDragRef.current = e.shiftKey === true;
 startYRef.current = e.clientY;
@@ -267,7 +281,7 @@ ref={dragSurfaceRef}
 onPointerDown={handlePointerDown}
 onDoubleClick={handleDoubleClick}
 title={"Drag: adjust value · Shift+drag: fine · Double-click: reset"}
-class="relative inline-flex cursor-ns-resize touch-none items-center justify-center rounded-full p-1.5 -m-1.5"
+class="relative inline-flex cursor-ns-resize touch-none items-center justify-center rounded-full p-1.5"
 >
 <div
 class={outer + " rounded-full relative pointer-events-none shrink-0 " + (isDark

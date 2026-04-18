@@ -8,7 +8,7 @@ import { X } from "../icons.tish"
 import { getNodePorts } from "../audio/pedalLibrary.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
 import { RotaryKnob } from "./controls.tish"
-import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode } from "./nodes.tish"
+import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode, hardwareRemoveClass } from "./nodes.tish"
 
 const SNAP_PEER_PX = 14;
 const SNAP_X_EDGE_GAP_PX = 20;
@@ -118,6 +118,10 @@ setWiring({ ...wiring, x: ex, y: ey });
 };
 
 const handlePointerUp = () => {
+if (wiring === null && draggingNode === null) {
+if (onAudioUiBump) onAudioUiBump();
+return;
+}
 setWiring(null);
 setDraggingNode(null);
 if (onAudioUiBump) onAudioUiBump();
@@ -226,7 +230,7 @@ const coords = getJackCoords(node, false, port);
 return (
 <div 
 key={"in-" + port}
-class="absolute left-[-14px] w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+class="absolute right-full mr-1 w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
 style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
 title={"Patch In: " + port.toUpperCase()}
@@ -245,7 +249,7 @@ const coords = getJackCoords(node, true, port);
 return (
 <div 
 key={"out-" + port}
-class="absolute right-[-14px] w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+class="absolute left-full ml-1 w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
 style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
 onPointerDown={(e) => startWire(e, node.id, port)}
 title={"Drag out from: " + port.toUpperCase()}
@@ -258,14 +262,14 @@ title={"Drag out from: " + port.toUpperCase()}
 );
 })}
 
-<div class="relative z-20 isolate">
+<div class="relative z-30 isolate">
 {node.type === 'SYS_IN' ? (
 <div 
 onPointerDown={(e) => startDragNode(e, node)}
 class="flex flex-col items-center justify-center w-24 h-[140px] border-2 border-green-700 bg-gradient-to-b from-green-900/40 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing relative group"
 >
 <span class="transform -rotate-90 text-xs font-black tracking-widest text-green-500 drop-shadow-md select-none whitespace-nowrap truncate w-[120px] text-center">{node.label}</span>
-<button onClick={() => removeNode(node.id)} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity"><X class="w-4 h-4 text-red-500 hover:text-red-400" /></button>
+<button type="button" title="Remove input" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity"><X class="w-4 h-4 text-red-500 hover:text-red-400" /></button>
 </div>
 ) : node.type === 'SYS_OUT' ? (
 <div 
@@ -333,7 +337,9 @@ if (key === 'freq') { min = 100; max = 5000; }
 return <RotaryKnob key={key} label={key} min={min} max={max} value={val} theme={node.theme} onChange={(v) => updateNodeParam(node.id, key, v)} />
 })}
 </div>
-<button onClick={() => removeNode(node.id)} class="absolute top-2 right-2 text-white/50 hover:text-white transition-colors"><X class="w-5 h-5 drop-shadow-md" /></button>
+<button type="button" title="Remove node" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class={"absolute top-2 left-2 " + hardwareRemoveClass}>
+<X class="w-4 h-4" />
+</button>
 </div>
 ) : (
 <PedalNode 
