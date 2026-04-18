@@ -55,8 +55,8 @@ if (draggingNode) {
 const dx = ex - draggingNode.startMouseX;
 const dy = ey - draggingNode.startMouseY;
 updateNodePos(draggingNode.id, draggingNode.startNodeX + dx, draggingNode.startNodeY + dy);
-} else {
-setWiring(prev => (prev ? { ...prev, x: ex, y: ey } : prev));
+} else if (wiring) {
+setWiring({ ...wiring, x: ex, y: ey });
 }
 };
 

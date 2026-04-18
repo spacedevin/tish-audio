@@ -1,6 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, h } from "lattish"
-import { Play, Volume2, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2 } from "./icons.tish"
-import { autoCorrelate, noteFromPitch, noteStrings } from "./audio/dsp.tish"
+import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2 } from "./icons.tish"
 import { PEDAL_LIBRARY } from "./audio/pedalLibrary.tish"
 import { audioGraphRebuildSignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
@@ -8,12 +7,11 @@ import { NodeGraphView } from "./ui/NodeGraphView.tish"
 import { ModuleLibraryPanel } from "./ui/ModuleLibraryPanel.tish"
 import { JamMode } from "./ui/JamMode.tish"
 import { Guitarcade } from "./ui/Guitarcade.tish"
+import { AudioMeterProvider, HeaderMeterReadout } from "./ui/AudioMeterContext.tish"
 
 export fn App() {
 let [activeTab, setActiveTab] = useState('pedalboard');
 let [audioReady, setAudioReady] = useState(false);
-let [inputLevel, setInputLevel] = useState(0);
-let [currentPitch, setCurrentPitch] = useState({ freq: 0, note: '-', cents: 0 });
 let [devices, setDevices] = useState([]);
 let [showDeviceMenu, setShowDeviceMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
@@ -29,9 +27,7 @@ const sourcesRef = useRef({});
 const analyserRef = useRef(null);
 const outGainRef = useRef(null);
 const nodeAudioMapRef = useRef({}); 
-const animationRef = useRef(null);
 const audioRebuildSigRef = useRef("");
-const lastInputLevelBucketRef = useRef(-1);
 
 async fn getDevices() {
 if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -78,7 +74,6 @@ outGain.gain.value = 1.0;
 outGainRef.current = outGain;
 analyser.connect(outGain);
 outGain.connect(ctx.destination);
-startAnalyzers();
 }
 
 setNodes(prev => [...prev, {
@@ -110,53 +105,8 @@ const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, an
 rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
 }, [nodes, connections, audioReady]);
 
-const startAnalyzers = () => {
-const analyser = analyserRef.current;
-if (!analyser) return;
-const bufferLength = analyser.fftSize;
-const dataArray = new Float32Array(bufferLength);
-let lastUiMs = 0;
-let lastPitchNote = '';
-let lastPitchFreq = 0;
-
-const updateLoop = () => {
-analyser.getFloatTimeDomainData(dataArray);
-let sumSquares = 0;
-for (let i = 0; i < bufferLength; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
-const level = Math.sqrt(sumSquares / bufferLength) * 10;
-
-const freq = autoCorrelate(dataArray, audioCtxRef.current.sampleRate);
-const now = performance.now();
-if (now - lastUiMs >= 80) {
-lastUiMs = now;
-const levelBucket = Math.min(100, Math.floor(level * 100 + 0.5));
-if (levelBucket !== lastInputLevelBucketRef.current) {
-lastInputLevelBucketRef.current = levelBucket;
-setInputLevel(level);
-}
-if (freq !== -1 && freq > 40 && freq < 2000) {
-const note = noteFromPitch(freq);
-const noteName = noteStrings[note % 12];
-const rounded = Math.round(freq);
-if (noteName !== lastPitchNote || Math.abs(rounded - lastPitchFreq) >= 2) {
-lastPitchNote = noteName;
-lastPitchFreq = rounded;
-setCurrentPitch({ freq: rounded, note: noteName, octave: Math.floor(note / 12) - 1 });
-}
-} else if (freq === -1 && lastPitchNote !== '-') {
-lastPitchNote = '-';
-lastPitchFreq = 0;
-setCurrentPitch({ freq: 0, note: '-', cents: 0 });
-}
-}
-animationRef.current = requestAnimationFrame(updateLoop);
-};
-updateLoop();
-};
-
 useEffect(() => {
 return () => {
-if (animationRef.current) cancelAnimationFrame(animationRef.current);
 if (audioCtxRef.current) audioCtxRef.current.close();
 };
 }, []);
@@ -248,6 +198,7 @@ animation: dash-flow 0.5s linear infinite;
 
 "}} />
 
+<AudioMeterProvider analyserRef={analyserRef} audioCtxRef={audioCtxRef} audioReady={audioReady}>
 <header class="bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
 <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
 <div class="flex flex-wrap items-center gap-3 min-w-0">
@@ -289,19 +240,7 @@ class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-orange-500
 ))}
 </div>
 
-<div class={"flex items-center gap-4 shrink-0 " + (audioReady ? "" : "hidden")}>
-<div class="flex items-center gap-2 bg-neutral-800 px-3 py-1.5 rounded-lg border border-neutral-700">
-<span class="text-[10px] text-neutral-400 font-mono">PITCH</span>
-<span class="text-lg font-bold w-10 text-center text-orange-400">{currentPitch.note || '-'}</span>
-<span class="text-[10px] text-neutral-500 w-10">{currentPitch.freq}Hz</span>
-</div>
-<div class="flex items-center gap-2">
-<Volume2 class="w-4 h-4 text-neutral-500" />
-<div class="w-24 sm:w-32 h-2.5 sm:h-3 bg-neutral-800 rounded-full overflow-hidden border border-neutral-700 shadow-inner">
-<div class="h-full bg-green-500 transition-all duration-75" style={{ width: String(Math.min(100, inputLevel * 100)) + "%" }} />
-</div>
-</div>
-</div>
+{audioReady ? <HeaderMeterReadout /> : null}
 </div>
 </header>
 
@@ -319,11 +258,12 @@ addConnection={addConnection}
 removeConnection={removeConnection}
 />
 ) : activeTab === 'jam' ? (
-<JamMode tabActive={true} audioCtx={audioCtxRef.current} pitch={currentPitch} />
+<JamMode tabActive={true} audioCtx={audioCtxRef.current} />
 ) : (
-<Guitarcade tabActive={true} analyzerRef={analyserRef} audioReady={audioReady} currentPitch={currentPitch} />
+<Guitarcade tabActive={true} analyzerRef={analyserRef} audioReady={audioReady} />
 )}
 </main>
+</AudioMeterProvider>
 
 {showDeviceMenu ? (
 <div class="w-72 bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-[20000] fixed" style={{ left: "1rem", top: "4.75rem", maxHeight: "calc(100vh - 5.5rem)" }}>

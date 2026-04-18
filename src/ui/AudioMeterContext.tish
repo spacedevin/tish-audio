@@ -1,0 +1,121 @@
+import { useLayoutEffect, useEffect, useRef, h } from "lattish"
+import { Volume2 } from "../icons.tish"
+import { autoCorrelate, noteFromPitch, noteStrings } from "../audio/dsp.tish"
+
+const defaultPitch = { freq: 0, note: '-', cents: 0 };
+
+export const audioMeterPitchRef = { current: defaultPitch };
+
+let headerMeterEls = {
+note: null,
+hz: null,
+levelFill: null
+};
+
+const writeHeaderMeterDom = (level, pitchNote, pitchHz) => {
+const els = headerMeterEls;
+if (els.levelFill) els.levelFill.style.width = String(Math.min(100, level * 100)) + "%";
+if (els.note) els.note.textContent = pitchNote || '-';
+if (els.hz) els.hz.textContent = String(pitchHz) + "Hz";
+};
+
+export fn AudioMeterProvider(props) {
+let children = props.children;
+let analyserRef = props.analyserRef;
+let audioCtxRef = props.audioCtxRef;
+let audioReady = props.audioReady;
+
+const lastInputLevelBucketRef = useRef(-1);
+const animationRef = useRef(null);
+
+useEffect(() => {
+if (!audioReady || !analyserRef.current || !audioCtxRef.current) return;
+const analyser = analyserRef.current;
+const bufferLength = analyser.fftSize;
+const dataArray = new Float32Array(bufferLength);
+let lastUiMs = 0;
+let lastPitchNote = '';
+let lastPitchFreq = 0;
+let cancelled = false;
+
+const updateLoop = () => {
+if (cancelled) return;
+analyser.getFloatTimeDomainData(dataArray);
+let sumSquares = 0;
+for (let i = 0; i < bufferLength; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
+const level = Math.sqrt(sumSquares / bufferLength) * 10;
+
+const freq = autoCorrelate(dataArray, audioCtxRef.current.sampleRate);
+const now = performance.now();
+if (now - lastUiMs >= 80) {
+lastUiMs = now;
+const levelBucket = Math.min(100, Math.floor(level * 100 + 0.5));
+if (levelBucket !== lastInputLevelBucketRef.current) {
+lastInputLevelBucketRef.current = levelBucket;
+writeHeaderMeterDom(level, audioMeterPitchRef.current.note, audioMeterPitchRef.current.freq);
+}
+if (freq !== -1 && freq > 40 && freq < 2000) {
+const note = noteFromPitch(freq);
+const noteName = noteStrings[note % 12];
+const rounded = Math.round(freq);
+if (noteName !== lastPitchNote || Math.abs(rounded - lastPitchFreq) >= 2) {
+lastPitchNote = noteName;
+lastPitchFreq = rounded;
+const next = { freq: rounded, note: noteName, octave: Math.floor(note / 12) - 1 };
+audioMeterPitchRef.current = next;
+writeHeaderMeterDom(level, next.note, next.freq);
+}
+} else if (freq === -1 && lastPitchNote !== '-') {
+lastPitchNote = '-';
+lastPitchFreq = 0;
+const next = { freq: 0, note: '-', cents: 0 };
+audioMeterPitchRef.current = next;
+writeHeaderMeterDom(level, '-', 0);
+}
+}
+if (!cancelled) animationRef.current = requestAnimationFrame(updateLoop);
+};
+updateLoop();
+return () => {
+cancelled = true;
+if (animationRef.current) cancelAnimationFrame(animationRef.current);
+animationRef.current = null;
+};
+}, [audioReady, analyserRef, audioCtxRef]);
+
+return children;
+}
+
+export fn HeaderMeterReadout() {
+const noteRef = useRef(null);
+const hzRef = useRef(null);
+const levelFillRef = useRef(null);
+
+useLayoutEffect(() => {
+headerMeterEls.note = noteRef.current;
+headerMeterEls.hz = hzRef.current;
+headerMeterEls.levelFill = levelFillRef.current;
+writeHeaderMeterDom(0, audioMeterPitchRef.current.note, audioMeterPitchRef.current.freq);
+return () => {
+headerMeterEls.note = null;
+headerMeterEls.hz = null;
+headerMeterEls.levelFill = null;
+};
+}, []);
+
+return (
+<div class="flex items-center gap-4 shrink-0">
+<div class="flex items-center gap-2 bg-neutral-800 px-3 py-1.5 rounded-lg border border-neutral-700">
+<span class="text-[10px] text-neutral-400 font-mono">PITCH</span>
+<span ref={noteRef} class="text-lg font-bold w-10 text-center text-orange-400">-</span>
+<span ref={hzRef} class="text-[10px] text-neutral-500 w-10">0Hz</span>
+</div>
+<div class="flex items-center gap-2">
+<Volume2 class="w-4 h-4 text-neutral-500" />
+<div class="w-24 sm:w-32 h-2.5 sm:h-3 bg-neutral-800 rounded-full overflow-hidden border border-neutral-700 shadow-inner">
+<div ref={levelFillRef} class="h-full bg-green-500 transition-all duration-75" style={{ width: "0%" }} />
+</div>
+</div>
+</div>
+);
+}

@@ -1,7 +1,8 @@
 import { useEffect, useRef, h } from "lattish"
 import { WebGLBackground } from "./WebGLBackground.tish"
+import { audioMeterPitchRef } from "./AudioMeterContext.tish"
 
-export fn Guitarcade(props) { let tabActive = props.tabActive; let analyzerRef = props.analyzerRef; let audioReady = props.audioReady; let currentPitch = props.currentPitch;
+export fn Guitarcade(props) { let tabActive = props.tabActive; let analyzerRef = props.analyzerRef; let audioReady = props.audioReady;
 const canvasRef = useRef(null);
 const gameRef = useRef({ playerY: 200, lasers: [], enemies: [], score: 0, lastFire: 0, gameOver: false });
 
@@ -20,8 +21,9 @@ for (let i = 0; i < dataArray.length; i = i + 1) sumSquares = sumSquares + (data
 const rms = Math.sqrt(sumSquares / dataArray.length);
 const state = gameRef.current;
 
-if (currentPitch.freq > 0 && currentPitch.freq > 60 && currentPitch.freq < 1000) {
-const minLog = Math.log2(82); const maxLog = Math.log2(880); const currentLog = Math.log2(currentPitch.freq);
+const cp = audioMeterPitchRef.current;
+if (cp.freq > 0 && cp.freq > 60 && cp.freq < 1000) {
+const minLog = Math.log2(82); const maxLog = Math.log2(880); const currentLog = Math.log2(cp.freq);
 let normalized = (currentLog - minLog) / (maxLog - minLog); normalized = Math.max(0, Math.min(1, normalized));
 const targetY = canvas.height - (normalized * canvas.height);
 state.playerY = state.playerY + ((targetY - state.playerY) * 0.2);
@@ -57,7 +59,8 @@ ctx.fillStyle = '#22d3ee'; state.lasers.forEach(l => ctx.fillRect(l.x, l.y - 2, 
 ctx.fillStyle = '#ef4444'; state.enemies.forEach(e => { ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI * 2); ctx.fill(); });
 
 ctx.fillStyle = 'white'; ctx.font = '24px monospace'; ctx.fillText("SCORE: " + String(state.score), 20, 40);
-ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText("INPUT PITCH: " + currentPitch.note + " (" + String(currentPitch.freq) + "Hz)", 20, canvas.height - 20);
+const cpHud = audioMeterPitchRef.current;
+ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText("INPUT PITCH: " + cpHud.note + " (" + String(cpHud.freq) + "Hz)", 20, canvas.height - 20);
 
 if (state.gameOver) {
 ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -69,7 +72,7 @@ animationId = requestAnimationFrame(gameLoop);
 };
 animationId = requestAnimationFrame(gameLoop);
 return () => cancelAnimationFrame(animationId);
-}, [tabActive, audioReady, analyzerRef, currentPitch]);
+}, [tabActive, audioReady, analyzerRef]);
 
 return (
 <div class="flex-1 min-h-0 flex flex-col items-center justify-center p-8 bg-black relative">

@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, h } from "lattish"
 import { Play, Square } from "../icons.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
+import { audioMeterPitchRef } from "./AudioMeterContext.tish"
 
-export fn JamMode(props) { let tabActive = props.tabActive; let audioCtx = props.audioCtx; let pitch = props.pitch;
+export fn JamMode(props) { let tabActive = props.tabActive; let audioCtx = props.audioCtx;
+let [pitch, setPitch] = useState({ freq: 0, note: '-' });
 let [isPlaying, setIsPlaying] = useState(false);
 let [tempo, setTempo] = useState(120);
 const sequenceRef = useRef(null);
@@ -59,6 +61,18 @@ clearTimeout(sequenceRef.current);
 }
 return () => clearTimeout(sequenceRef.current);
 }, [tabActive, isPlaying, scheduler, audioCtx]);
+
+useEffect(() => {
+if (!tabActive) return;
+let id = setInterval(() => {
+const p = audioMeterPitchRef.current;
+setPitch(prev => {
+if (prev.freq === p.freq && prev.note === p.note) return prev;
+return { freq: p.freq, note: p.note };
+});
+}, 100);
+return () => clearInterval(id);
+}, [tabActive]);
 
 return (
 <div class="flex-1 min-h-0 flex flex-col items-center justify-center p-8 bg-black overflow-hidden relative">
