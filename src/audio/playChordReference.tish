@@ -1,0 +1,33 @@
+import { midiAtFret, hzFromMidi } from "../guitar/instrumentSpec.tish"
+
+export fn playVoicingOsc(ctx, spec, frets) {
+if (!ctx || !spec || !spec.openMidis || !frets) return;
+const t0 = ctx.currentTime + 0.05;
+let played = 0;
+let s = 0;
+while (s < frets.length) {
+if (frets[s] !== -1) {
+const midi = midiAtFret(spec.openMidis[s], frets[s]);
+const freq = hzFromMidi(midi);
+
+const start = t0 + played * 0.025; // staggered strum
+const osc = ctx.createOscillator();
+const g = ctx.createGain();
+
+osc.type = 'triangle';
+osc.frequency.setValueAtTime(freq, start);
+
+g.gain.setValueAtTime(0.0001, start);
+g.gain.exponentialRampToValueAtTime(0.12, start + 0.015);
+g.gain.exponentialRampToValueAtTime(0.0001, start + 0.4);
+
+osc.connect(g);
+g.connect(ctx.destination);
+
+osc.start(start);
+osc.stop(start + 0.5);
+played = played + 1;
+}
+s = s + 1;
+}
+}

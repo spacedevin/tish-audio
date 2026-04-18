@@ -311,6 +311,7 @@ tabActive={activeTab === 'tuning' || activeTab === 'chords'}
 analyzerRef={analyserRef}
 pitchAnalyzerRef={pitchAnalyserRef}
 audioReady={audioReady}
+audioCtx={audioCtxRef.current}
 />
 </div>
 <div class={activeTab === 'pedalboard' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>

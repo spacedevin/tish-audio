@@ -13,11 +13,17 @@ return (
 <span class="text-[10px] text-neutral-500 font-bold uppercase tracking-wider">Chord instrument</span>
 <select
 class="bg-neutral-950 border border-neutral-600 rounded-lg px-2 py-2 text-sm text-white max-w-md"
-value={String(value)}
-onChange={(ev) => onChange(parseInt(ev.target.value, 10) || 0)}
+onChange={(ev) => {
+  let v = ev.target.value;
+  if (!v && ev.target.options && ev.target.selectedIndex >= 0) {
+    v = ev.target.options[ev.target.selectedIndex].value;
+  }
+  let nv = parseInt(v, 10) || 0;
+  onChange(nv);
+}}
 >
 {INSTRUMENT_PRESETS.map((p, idx) => (
-<option key={'inst-' + String(idx)} value={String(idx)}>{p.label}</option>
+<option key={'inst-' + String(idx)} value={String(idx)} selected={idx === value}>{p.label}</option>
 ))}
 </select>
 </label>

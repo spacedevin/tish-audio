@@ -1,18 +1,53 @@
-import { h } from "lattish"
-import { RocksmithStyleTuner } from "./RocksmithStyleTuner.tish"
-import { TunerReadout, useLiveGuitarPitch } from "./TunerReadout.tish"
+import { h, useEffect, useRef } from "lattish"
+import { RocksmithStyleTuner, paintRocksmithTunerDom } from "./RocksmithStyleTuner.tish"
+import { TunerReadout, useLiveGuitarPitch, paintTunerReadoutDom } from "./TunerReadout.tish"
 import { STANDARD_6_EADGBE_OPEN_MIDI } from "../guitar/tuningConfig.tish"
+import { tunerSnapshotThrottleKey, buildTunerSnapshot } from "../guitar/liveToneAndString.tish"
 
 // Rocksmith-style strip plus the detailed chromatic readout card below (same snapshot, no extra analyser work).
 export fn TuningMonophonicStrip(props) {
 let pitchRef = props.pitchRef;
 let audioReady = props.audioReady === true;
 let tabActive = props.tabActive === true;
-const { snapshot } = useLiveGuitarPitch(pitchRef, audioReady, tabActive, STANDARD_6_EADGBE_OPEN_MIDI);
+
+const rocksmithRef = useRef(null);
+const readoutRef = useRef(null);
+const lastKeyRef = useRef('');
+
+const { getSnapshot } = useLiveGuitarPitch(pitchRef, audioReady, tabActive, props.spec.openMidis);
+
+useEffect(() => {
+if (!tabActive || !audioReady) return;
+let cancelled = false;
+let raf = 0;
+const loop = () => {
+if (cancelled) return;
+const snap = getSnapshot(props.spec.openMidis);
+const k = tunerSnapshotThrottleKey(snap);
+if (k !== lastKeyRef.current) {
+lastKeyRef.current = k;
+if (rocksmithRef.current) paintRocksmithTunerDom(rocksmithRef.current, snap, props.spec.openMidis);
+if (readoutRef.current) paintTunerReadoutDom(readoutRef.current, snap, false);
+}
+raf = requestAnimationFrame(loop);
+};
+raf = requestAnimationFrame(loop);
+return () => {
+cancelled = true;
+cancelAnimationFrame(raf);
+};
+}, [tabActive, audioReady, props.spec.openMidis]);
+
+const initialSnap = buildTunerSnapshot(0, props.spec.openMidis, false);
+
 return (
-<div class="shrink-0 space-y-4 w-full">
-<RocksmithStyleTuner snapshot={snapshot} openMidis={STANDARD_6_EADGBE_OPEN_MIDI} tuningTitle="Standard tuning" refPitch="A440" />
-<TunerReadout snapshot={snapshot} />
+<div class="shrink-0 space-y-4 w-full" key={props.spec.label}>
+<div ref={rocksmithRef}>
+<RocksmithStyleTuner snapshot={initialSnap} openMidis={props.spec.openMidis} tuningTitle={props.spec.label} refPitch="A440" />
+</div>
+<div ref={readoutRef}>
+<TunerReadout snapshot={initialSnap} />
+</div>
 </div>
 );
 }

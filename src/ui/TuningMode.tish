@@ -13,6 +13,7 @@ let variant = props.variant != null && props.variant === 'chords' ? 'chords' : '
 let analyzerRef = props.analyzerRef;
 let pitchAnalyzerRef = props.pitchAnalyzerRef;
 let audioReady = props.audioReady === true;
+let audioCtx = props.audioCtx;
 const pitchRef = pitchAnalyzerRef != null ? pitchAnalyzerRef : analyzerRef;
 
 const [polyPresetIdx, setPolyPresetIdx] = useState(0);
@@ -60,7 +61,7 @@ hint={variant === 'chords'
 />
 </div>
 <div class={'relative z-10 flex gap-4 flex-1 min-h-0 w-full max-w-4xl mx-auto px-3 sm:px-5 pb-5 pt-3 overflow-y-auto custom-scrollbar isolate ' + (variant === 'chords' ? 'flex-col-reverse' : 'flex-col')}>
-<TuningMonophonicStrip pitchRef={pitchRef} audioReady={audioReady} tabActive={tabActive} />
+<TuningMonophonicStrip pitchRef={pitchRef} audioReady={audioReady} tabActive={tabActive} spec={spec} />
 <div class={variant === 'chords' ? '' : 'hidden'}>
 <ChordFretboardPanel
 variant="learn"
@@ -69,6 +70,7 @@ analyserRef={pitchRef}
 audioReady={audioReady}
 spec={spec}
 polyOpts={polyOpts}
+audioCtx={audioCtx}
 />
 </div>
 </div>

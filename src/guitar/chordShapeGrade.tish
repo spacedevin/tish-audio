@@ -1,0 +1,68 @@
+// Pure grading of live detected chord against an expected fingering
+
+export fn gradeLessonShape(expectedFrets, snap, thresholds) {
+const minConf = thresholds && typeof thresholds.minConfidence === 'number' ? thresholds.minConfidence : 0.15;
+const minRms = thresholds && typeof thresholds.minRms === 'number' ? thresholds.minRms : 0.005;
+
+const confOk = (snap.confidence != null ? snap.confidence : 0) > minConf;
+const okRMS = (snap.rmsHint != null ? snap.rmsHint : 0) > minRms;
+
+const matchedStrings = [];
+const wrongStrings = [];
+const missingStrings = [];
+
+if (!confOk || !okRMS) {
+return { ok: false, matchedStrings, wrongStrings, missingStrings, confidenceOk: false, message: 'Strum to check shape' };
+}
+
+const liveByString = {};
+let i = 0;
+if (snap.assignments) {
+while (i < snap.assignments.length) {
+const a = snap.assignments[i];
+liveByString[a.stringIndex] = a.fret;
+i = i + 1;
+}
+}
+
+let s = 0;
+while (s < expectedFrets.length) {
+const expFret = expectedFrets[s];
+const liveFret = liveByString[s];
+
+if (expFret === -1) {
+// Muted string: lenient for now. Polyphonic FFT often bleeds harmonics into muted strings.
+// A strict v2 could flag this if the string's assignment is very loud.
+} else {
+if (liveFret == null) {
+missingStrings.push(s);
+} else if (liveFret === expFret) {
+matchedStrings.push(s);
+} else {
+wrongStrings.push(s);
+}
+}
+s = s + 1;
+}
+
+const allMatched = (wrongStrings.length === 0 && missingStrings.length === 0);
+let message = '';
+if (allMatched) {
+message = 'Nice! That’s it.';
+} else if (wrongStrings.length > 0) {
+const ws = wrongStrings[0];
+message = 'Check string ' + String(ws + 1) + ' (expected fret ' + String(expectedFrets[ws]) + ')';
+} else if (missingStrings.length > 0) {
+const ms = missingStrings[0];
+message = 'Missing string ' + String(ms + 1) + ' in strum';
+}
+
+return {
+ok: allMatched,
+matchedStrings,
+wrongStrings,
+missingStrings,
+confidenceOk: true,
+message
+};
+}

@@ -1,0 +1,89 @@
+import { h } from "lattish"
+
+// Draws a small compact 6-string chord diagram
+export fn ChordShapeSvg(props) {
+const frets = props.frets;
+const wrongStrings = props.wrongStrings || [];
+const matchedStrings = props.matchedStrings || [];
+
+if (!frets || frets.length !== 6) return h('div', { class: 'w-full h-full bg-neutral-900 border border-neutral-800 rounded flex items-center justify-center text-[10px] text-neutral-500' }, ['?']);
+
+// Find active fret span
+let minF = 99;
+let maxF = 0;
+let i = 0;
+while (i < frets.length) {
+const f = frets[i];
+if (f > 0) {
+if (f < minF) minF = f;
+if (f > maxF) maxF = f;
+}
+i = i + 1;
+}
+
+let startFret = 1;
+if (maxF > 4) {
+startFret = minF;
+}
+
+const width = 60;
+const height = 80;
+const padX = 10;
+const padYTop = 15;
+const padYBot = 5;
+const fretCount = 4;
+const fretSpacing = (height - padYTop - padYBot) / fretCount;
+const stringSpacing = (width - padX * 2) / 5;
+
+const els = [];
+
+// Nut or top fret line
+if (startFret === 1) {
+els.push(h('path', { d: 'M ' + String(padX) + ' ' + String(padYTop) + ' L ' + String(width - padX) + ' ' + String(padYTop), stroke: '#a3a3a3', 'stroke-width': '2' }));
+} else {
+els.push(h('path', { d: 'M ' + String(padX) + ' ' + String(padYTop) + ' L ' + String(width - padX) + ' ' + String(padYTop), stroke: '#525252', 'stroke-width': '1' }));
+els.push(h('text', { x: '2', y: String(padYTop + fretSpacing / 2 + 3), fill: '#a3a3a3', 'font-size': '8', 'font-family': 'monospace' }, [String(startFret)]));
+}
+
+// Fret lines
+let f = 1;
+while (f <= fretCount) {
+const fy = padYTop + f * fretSpacing;
+els.push(h('path', { d: 'M ' + String(padX) + ' ' + String(fy) + ' L ' + String(width - padX) + ' ' + String(fy), stroke: '#525252', 'stroke-width': '1' }));
+f = f + 1;
+}
+
+// String lines & dots
+let s = 0;
+while (s < 6) {
+const sx = padX + s * stringSpacing;
+let isWrong = false;
+let isMatched = false;
+let w = 0; while (w < wrongStrings.length) { if (wrongStrings[w] === s) isWrong = true; w = w + 1; }
+let m = 0; while (m < matchedStrings.length) { if (matchedStrings[m] === s) isMatched = true; m = m + 1; }
+
+const strokeCol = isWrong ? '#f97316' : (isMatched ? '#34d399' : '#525252');
+
+// string line
+els.push(h('path', { 'data-coach-path': String(s), d: 'M ' + String(sx) + ' ' + String(padYTop) + ' L ' + String(sx) + ' ' + String(height - padYBot), stroke: strokeCol, 'stroke-width': '1' }));
+
+const fret = frets[s];
+if (fret === -1) {
+// X
+els.push(h('text', { 'data-coach-text': String(s), x: String(sx), y: String(padYTop - 4), fill: isWrong ? '#f97316' : '#a3a3a3', 'font-size': '8', 'text-anchor': 'middle', 'font-family': 'sans-serif' }, ['X']));
+} else if (fret === 0) {
+// O
+els.push(h('circle', { 'data-coach-circle': String(s), cx: String(sx), cy: String(padYTop - 5), r: '2.5', fill: 'none', stroke: isMatched ? '#34d399' : '#a3a3a3', 'stroke-width': '1' }));
+} else {
+// Dot
+const relFret = fret - startFret;
+if (relFret >= 0 && relFret < fretCount) {
+const cy = padYTop + relFret * fretSpacing + fretSpacing / 2;
+els.push(h('circle', { 'data-coach-dot': String(s), cx: String(sx), cy: String(cy), r: '3.5', fill: isMatched ? '#34d399' : (isWrong ? '#f97316' : '#e5e5e5') }));
+}
+}
+s = s + 1;
+}
+
+return h('svg', { viewBox: '0 0 ' + String(width) + ' ' + String(height), class: 'w-full h-full block' }, els);
+}

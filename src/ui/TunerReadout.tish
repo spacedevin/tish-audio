@@ -18,50 +18,92 @@ strum: false
 
 export fn useLiveGuitarPitch(analyserRef, audioReady, active, openMidis) {
 const midis = openMidis && openMidis.length ? openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
-const [snapshot, setSnapshot] = useState(buildTunerSnapshot(0, midis, false));
-const safeSnapshot = snapshot != null ? snapshot : buildTunerSnapshot(0, midis, false);
 const strumGateRef = useRef(null);
 if (!strumGateRef.current) strumGateRef.current = createStrumGate();
 const lastKeyRef = useRef('');
 
-useEffect(() => {
-if (!active || !audioReady) return;
-lastKeyRef.current = '';
-let cancelled = false;
-let raf = 0;
-let dataArray = null;
-const loop = (time) => {
-if (cancelled) return;
+// State moved to caller for imperative rendering.
+const getSnapshot = (overrideMidis) => {
+const midisToUse = overrideMidis && overrideMidis.length ? overrideMidis : midis;
 const analyser = analyserRef.current;
-if (!analyser) {
-raf = requestAnimationFrame(loop);
-return;
-}
-if (!dataArray || dataArray.length !== analyser.fftSize) dataArray = new Float32Array(analyser.fftSize);
+if (!analyser || !audioReady || !active) return buildTunerSnapshot(0, midisToUse, false);
+const dataArray = new Float32Array(analyser.fftSize);
 const sampleRate = analyser.context.sampleRate;
 try { if (analyser.context.state === 'suspended') void analyser.context.resume(); } catch (eR) {}
 analyser.getFloatTimeDomainData(dataArray);
 const frame = analyzeTimeDomainFrame(dataArray, sampleRate, { maxHz: 2200 });
-const strum = strumGateRef.current.update(frame.rms, time);
-const snap = buildTunerSnapshot(frame.freqHz, midis, strum);
-const k = tunerSnapshotThrottleKey(snap);
-if (k !== lastKeyRef.current) {
-lastKeyRef.current = k;
-setSnapshot(snap);
-}
-raf = requestAnimationFrame(loop);
+const strum = strumGateRef.current.update(frame.rms, performance.now());
+return buildTunerSnapshot(frame.freqHz, midisToUse, strum);
 };
-raf = requestAnimationFrame(loop);
-return () => {
-cancelled = true;
-cancelAnimationFrame(raf);
-};
-}, [active, audioReady, analyserRef, midis]);
 
 const resetGate = () => {
 strumGateRef.current.reset();
 };
-return { snapshot: safeSnapshot, resetStrumGate: resetGate };
+return { getSnapshot, resetStrumGate: resetGate };
+}
+
+export fn paintTunerReadoutDom(rootEl, snap, compact) {
+if (!rootEl) return;
+const cents = snap.hasPitch && typeof snap.tuningCents === 'number' ? snap.tuningCents : (snap.hasPitch ? snap.centsFromTarget : 0);
+const centsClamped = Math.max(-50, Math.min(50, cents));
+const centsNorm = (centsClamped + 50) / 100;
+
+if (compact) {
+const nn = rootEl.querySelector('[dataNn="1"]');
+const hz = rootEl.querySelector('[dataHz="1"]');
+const sl = rootEl.querySelector('[dataSl="1"]');
+const ct = rootEl.querySelector('[dataCt="1"]');
+
+if (nn) nn.textContent = snap.noteName;
+if (hz) hz.textContent = snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—';
+if (sl) {
+if (snap.hasPitch && snap.stringIndex >= 0) {
+sl.textContent = snap.stringLabel + ' · ' + String(snap.fret);
+sl.style.display = 'inline';
+} else {
+sl.style.display = 'none';
+}
+}
+if (ct) ct.textContent = snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' c' : '';
+return;
+}
+
+const bgNn = rootEl.querySelector('[dataBgNn="1"]');
+const bgOct = rootEl.querySelector('[dataBgOct="1"]');
+const bgHz = rootEl.querySelector('[dataBgHz="1"]');
+const bgSl = rootEl.querySelector('[dataBgSl="1"]');
+const bgSlNo = rootEl.querySelector('[dataBgSlNo="1"]');
+const slLb = rootEl.querySelector('[dataSlLb="1"]');
+const slFr = rootEl.querySelector('[dataSlFr="1"]');
+const nNeedle = rootEl.querySelector('[dataNneedle="1"]');
+const nCt = rootEl.querySelector('[dataNct="1"]');
+const stEdge = rootEl.querySelector('[dataStedge="1"]');
+
+if (bgNn) bgNn.textContent = snap.noteName;
+if (bgOct) bgOct.textContent = snap.hasPitch ? String(snap.octave) : '';
+if (bgHz) bgHz.textContent = snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—';
+
+if (bgSl && bgSlNo) {
+if (snap.hasPitch && snap.stringIndex >= 0) {
+bgSl.style.display = 'block';
+bgSlNo.style.display = 'none';
+if (slLb) slLb.textContent = snap.stringLabel;
+if (slFr) slFr.textContent = 'fret ' + String(snap.fret);
+} else {
+bgSl.style.display = 'none';
+bgSlNo.style.display = 'block';
+}
+}
+
+if (nNeedle) {
+nNeedle.style.left = String(centsNorm * 100) + '%';
+}
+if (nCt) {
+nCt.textContent = snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' cents' : '—';
+}
+if (stEdge) {
+stEdge.style.display = snap.strum ? 'block' : 'none';
+}
 }
 
 export fn TunerReadout(props) {
@@ -74,12 +116,10 @@ const centsNorm = (centsClamped + 50) / 100;
 if (compact) {
 return (
 <div class="flex flex-wrap items-center gap-3 text-xs font-mono text-neutral-300">
-<span class="text-orange-400 font-bold text-lg w-12 text-center">{snap.noteName}</span>
-<span class="text-neutral-500">{snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—'}</span>
-{snap.hasPitch && snap.stringIndex >= 0 ? (
-<span class="text-emerald-400/90">{snap.stringLabel + ' · ' + String(snap.fret)}</span>
-) : null}
-<span class="text-neutral-500">{snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' c' : ''}</span>
+<span dataNn="1" class="text-orange-400 font-bold text-lg w-12 text-center">{snap.noteName}</span>
+<span dataHz="1" class="text-neutral-500">{snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—'}</span>
+<span dataSl="1" class="text-emerald-400/90" style={{ display: snap.hasPitch && snap.stringIndex >= 0 ? 'inline' : 'none' }}>{snap.hasPitch && snap.stringIndex >= 0 ? (snap.stringLabel + ' · ' + String(snap.fret)) : ''}</span>
+<span dataCt="1" class="text-neutral-500">{snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' c' : ''}</span>
 </div>
 );
 }
@@ -88,32 +128,29 @@ return (
 <div class="flex items-end justify-between gap-4">
 <div>
 <p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest">Pitch</p>
-<p class="text-5xl font-black text-orange-400 tabular-nums">{snap.noteName}<span class="text-2xl text-neutral-500 font-bold ml-1">{snap.hasPitch ? String(snap.octave) : ''}</span></p>
+<p class="text-5xl font-black text-orange-400 tabular-nums"><span dataBgNn="1">{snap.noteName}</span><span dataBgOct="1" class="text-2xl text-neutral-500 font-bold ml-1">{snap.hasPitch ? String(snap.octave) : ''}</span></p>
 </div>
 <div class="text-right">
 <p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest">Frequency</p>
-<p class="text-2xl font-mono text-white">{snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—'}</p>
+<p dataBgHz="1" class="text-2xl font-mono text-white">{snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—'}</p>
 </div>
 </div>
-{snap.hasPitch && snap.stringIndex >= 0 ? (
-<div class="text-sm text-neutral-300">
+<div dataBgSl="1" class="text-sm text-neutral-300" style={{ display: snap.hasPitch && snap.stringIndex >= 0 ? 'block' : 'none' }}>
 <span class="text-neutral-500">String / fret</span>{' '}
-<span class="font-mono text-emerald-300">{snap.stringLabel}</span>
+<span dataSlLb="1" class="font-mono text-emerald-300">{snap.hasPitch && snap.stringIndex >= 0 ? snap.stringLabel : ''}</span>
 <span class="text-neutral-600"> · </span>
-<span class="font-mono text-white">fret {String(snap.fret)}</span>
+<span dataSlFr="1" class="font-mono text-white">{snap.hasPitch && snap.stringIndex >= 0 ? ('fret ' + String(snap.fret)) : ''}</span>
 </div>
-) : (
-<p class="text-sm text-neutral-500">Play a note. String and fret are a best guess (monophonic detector).</p>
-)}
+<p dataBgSlNo="1" class="text-sm text-neutral-500" style={{ display: snap.hasPitch && snap.stringIndex >= 0 ? 'none' : 'block' }}>Play a note. String and fret are a best guess (monophonic detector).</p>
 <div>
 <p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mb-2">Cents vs nearest note (A440 equal temperament)</p>
 <div class="relative h-3 rounded-full bg-neutral-800 border border-neutral-700 overflow-hidden">
 <div class="absolute left-1/2 top-0 bottom-0 w-px bg-neutral-500 z-10" />
-<div class="absolute top-0 bottom-0 w-1.5 rounded-sm bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.6)] transition-[left] duration-75" style={{ left: String(centsNorm * 100) + '%', transform: 'translateX(-50%)' }} />
+<div dataNneedle="1" class="absolute top-0 bottom-0 w-1.5 rounded-sm bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.6)] transition-[left] duration-75" style={{ left: String(centsNorm * 100) + '%', transform: 'translateX(-50%)' }} />
 </div>
-<p class="text-center text-xs font-mono text-neutral-400 mt-2">{snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' cents' : '—'}</p>
+<p dataNct="1" class="text-center text-xs font-mono text-neutral-400 mt-2">{snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' cents' : '—'}</p>
 </div>
-{snap.strum ? <p class="text-[10px] text-amber-500/90 font-mono">Strum edge detected (used by Arcade; chord-wide auto-tune is not available yet)</p> : null}
+<p dataStedge="1" class="text-[10px] text-amber-500/90 font-mono" style={{ display: snap.strum ? 'block' : 'none' }}>Strum edge detected (used by Arcade; chord-wide auto-tune is not available yet)</p>
 </div>
 );
 }

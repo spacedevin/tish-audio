@@ -1,0 +1,174 @@
+import { h, useState, useEffect, useRef } from "lattish"
+import { LESSON_VOICINGS } from "../guitar/chordLessonVoicings.tish"
+import { analyzeLiveChord } from "../guitar/liveChordDetect.tish"
+import { gradeLessonShape } from "../guitar/chordShapeGrade.tish"
+import { playVoicingOsc } from "../audio/playChordReference.tish"
+import { ChordShapeSvg } from "./ChordShapeSvg.tish"
+
+fn paintChordTutorialDom(rootEl, grade) {
+if (!rootEl) return;
+const msgEl = rootEl.querySelector('[data-coach-msg="1"]');
+const ringEl = rootEl.querySelector('[data-coach-ring="1"]');
+
+if (msgEl) {
+if (msgEl.textContent !== grade.message) msgEl.textContent = grade.message;
+const msgColor = grade.ok && grade.confidenceOk ? 'text-emerald-400 font-bold' : (grade.confidenceOk && (grade.wrongStrings.length > 0 || grade.missingStrings.length > 0) ? 'text-orange-400' : 'text-neutral-400');
+const newClass = 'text-sm mt-1 ' + msgColor;
+if (msgEl.className !== newClass) msgEl.className = newClass;
+}
+if (ringEl) {
+const ringClass = grade.ok && grade.confidenceOk ? 'border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'border-neutral-800';
+const newRingClass = 'flex items-center gap-6 rounded-xl border bg-neutral-950 p-5 transition-all duration-300 ' + ringClass;
+if (ringEl.className !== newRingClass) ringEl.className = newRingClass;
+}
+
+let s = 0;
+while (s < 6) {
+let isWrong = false;
+let isMatched = false;
+let w = 0; while (w < grade.wrongStrings.length) { if (grade.wrongStrings[w] === s) isWrong = true; w = w + 1; }
+let m = 0; while (m < grade.matchedStrings.length) { if (grade.matchedStrings[m] === s) isMatched = true; m = m + 1; }
+
+const strokeCol = isWrong ? '#f97316' : (isMatched ? '#34d399' : '#525252');
+
+const pathEl = rootEl.querySelector('[data-coach-path="' + String(s) + '"]');
+if (pathEl && pathEl.getAttribute('stroke') !== strokeCol) pathEl.setAttribute('stroke', strokeCol);
+
+const textEl = rootEl.querySelector('[data-coach-text="' + String(s) + '"]');
+if (textEl) {
+const fillCol = isWrong ? '#f97316' : '#a3a3a3';
+if (textEl.getAttribute('fill') !== fillCol) textEl.setAttribute('fill', fillCol);
+}
+
+const circEl = rootEl.querySelector('[data-coach-circle="' + String(s) + '"]');
+if (circEl) {
+const circCol = isMatched ? '#34d399' : '#a3a3a3';
+if (circEl.getAttribute('stroke') !== circCol) circEl.setAttribute('stroke', circCol);
+}
+
+const dotEl = rootEl.querySelector('[data-coach-dot="' + String(s) + '"]');
+if (dotEl) {
+const dotCol = isMatched ? '#34d399' : (isWrong ? '#f97316' : '#e5e5e5');
+if (dotEl.getAttribute('fill') !== dotCol) dotEl.setAttribute('fill', dotCol);
+}
+
+s = s + 1;
+}
+}
+
+export fn ChordTutorialCoach(props) {
+let spec = props.spec;
+let polyOpts = props.polyOpts;
+let analyserRef = props.analyserRef;
+let audioCtx = props.audioCtx;
+
+let [lessonId, setLessonId] = useState(LESSON_VOICINGS[0].id);
+
+const lastKeyRef = useRef('');
+const hearUntilRef = useRef(0);
+const heroRef = useRef(null);
+
+let lesson = LESSON_VOICINGS[0];
+let i = 0;
+while (i < LESSON_VOICINGS.length) {
+if (LESSON_VOICINGS[i].id === lessonId) lesson = LESSON_VOICINGS[i];
+i = i + 1;
+}
+
+const isValidSpec = spec && spec.openMidis && spec.openMidis.length === 6;
+
+useEffect(() => {
+if (!isValidSpec || !analyserRef || !analyserRef.current) return;
+let raf = 0;
+let cancelled = false;
+let lastTick = 0;
+
+const loop = (now) => {
+if (cancelled) return;
+
+if (now - lastTick > 100) {
+lastTick = now;
+
+if (Date.now() > hearUntilRef.current) {
+const snap = analyzeLiveChord(analyserRef.current, spec, polyOpts);
+const g = gradeLessonShape(lesson.frets, snap, { minConfidence: 0.15, minRms: 0.002 });
+
+const k = String(g.ok) + '|' + String(g.message) + '|' + String(g.matchedStrings.join(',')) + '|' + String(g.wrongStrings.join(','));
+if (k !== lastKeyRef.current) {
+lastKeyRef.current = k;
+if (heroRef.current) {
+paintChordTutorialDom(heroRef.current, g);
+}
+}
+}
+}
+raf = requestAnimationFrame(loop);
+};
+raf = requestAnimationFrame(loop);
+return () => {
+cancelled = true;
+cancelAnimationFrame(raf);
+};
+}, [isValidSpec, analyserRef, spec, polyOpts, lesson]);
+
+if (!isValidSpec) {
+return h('div', { class: 'rounded-xl border border-neutral-800 bg-neutral-950/80 p-4 text-center' }, [
+h('p', { class: 'text-sm text-neutral-500' }, ['Chord lessons require the standard 6-string instrument preset.'])
+]);
+}
+
+const onHear = () => {
+if (audioCtx) {
+if (audioCtx.state === 'suspended') void audioCtx.resume();
+hearUntilRef.current = Date.now() + 600;
+playVoicingOsc(audioCtx, spec, lesson.frets);
+if (heroRef.current) {
+paintChordTutorialDom(heroRef.current, { ok: false, matchedStrings: [], wrongStrings: [], missingStrings: [], confidenceOk: false, message: 'Strum to check shape' });
+lastKeyRef.current = '';
+}
+}
+};
+
+const initialGrade = { ok: false, matchedStrings: [], wrongStrings: [], missingStrings: [], confidenceOk: false, message: 'Strum to check shape' };
+const ringClass = 'border-neutral-800';
+const msgColor = 'text-neutral-400';
+
+return h('div', { class: 'space-y-4 mb-6' }, [
+h('div', { class: 'flex gap-3 overflow-x-auto pb-2 custom-scrollbar snap-x' }, 
+LESSON_VOICINGS.map(l => {
+const isSel = l.id === lessonId;
+const selClass = isSel ? 'border-orange-500 bg-neutral-900 ring-1 ring-orange-500/50' : 'border-neutral-800 bg-neutral-950/80 hover:border-neutral-600 hover:bg-neutral-900';
+return h('button', { 
+key: l.id,
+class: 'shrink-0 snap-start rounded-lg border p-2 w-20 flex flex-col items-center gap-2 transition-all ' + selClass,
+onClick: () => { 
+setLessonId(l.id); 
+lastKeyRef.current = ''; 
+if (heroRef.current) paintChordTutorialDom(heroRef.current, initialGrade);
+}
+}, [
+h('span', { class: 'text-xs font-bold text-neutral-300' }, [l.id]),
+h('div', { class: 'w-14 h-[4.5rem] bg-black/50 rounded pointer-events-none' }, [
+h(ChordShapeSvg, { frets: l.frets })
+])
+]);
+})
+),
+
+h('div', { ref: heroRef, 'data-coach-ring': '1', class: 'flex items-center gap-6 rounded-xl border bg-neutral-950 p-5 transition-all duration-300 ' + ringClass }, [
+h('div', { class: 'w-24 h-32 shrink-0 bg-neutral-900 border border-neutral-800 rounded-lg p-1' }, [
+h(ChordShapeSvg, { frets: lesson.frets })
+]),
+h('div', { class: 'flex-1 min-w-0 flex flex-col items-start gap-3' }, [
+h('div', {}, [
+h('h3', { class: 'text-2xl font-black text-white tracking-tight' }, [lesson.displayName]),
+h('p', { 'data-coach-msg': '1', class: 'text-sm mt-1 ' + msgColor }, [initialGrade.message])
+]),
+h('button', { 
+class: 'mt-auto px-4 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-600 rounded-md text-xs font-bold text-white uppercase tracking-wider transition-colors',
+onClick: onHear
+}, ['Hear'])
+])
+])
+]);
+}

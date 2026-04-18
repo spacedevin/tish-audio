@@ -19,7 +19,7 @@ const inf = inferStringFretFromMidi(exactMidi, midis, freqHz);
 if (!inf) {
 return { hasPitch: true, freqHz: Math.round(fStable), noteName, octave, centsFromTarget: 0, tuningCents, stringIndex: -1, fret: 0, stringLabel: '', strum };
 }
-const stringLabel = midis.length === 6 && STANDARD_6_STRING_LABELS[inf.stringIndex] ? STANDARD_6_STRING_LABELS[inf.stringIndex] : ('String idx ' + String(inf.stringIndex));
+const stringLabel = noteStrings[midis[inf.stringIndex] % 12];
 return {
 hasPitch: true,
 freqHz: Math.round(fStable),

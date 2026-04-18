@@ -32,51 +32,33 @@ h('polygon', { points: '9,14 0,0 18,0' })
 ]);
 };
 
-const stringRow = (i, snap, openMidis, chromaticInTune) => {
+const stringRow = (i, openMidis) => {
 const color = STRING_HEX[i];
 const label = pegLabel(i, openMidis[i]);
-const active = snap.hasPitch === true && snap.stringIndex === i;
-const pegBase = 'relative rounded-lg px-2 py-2 sm:px-3 sm:py-2.5 min-w-12 sm:min-w-14 text-center transition-all duration-150 border ';
-let pegClass = pegBase;
-if (active) pegClass = pegClass + 'border-transparent';
-else pegClass = pegClass + 'bg-neutral-800 border-neutral-600 shadow-inner';
-const pegTextClass = active ? 'text-lg sm:text-xl font-black tracking-tight text-white' : 'text-lg sm:text-xl font-black tracking-tight text-neutral-400';
+const pegBase = 'relative rounded-lg px-2 py-2 sm:px-3 sm:py-2.5 min-w-12 sm:min-w-14 text-center transition-all duration-150 border bg-neutral-800 border-neutral-600 shadow-inner';
+const pegTextClass = 'text-lg sm:text-xl font-black tracking-tight text-neutral-400';
 const pegInactive = { borderColor: 'rgba(82,82,91,0.8)', backgroundColor: 'rgba(38,38,42,0.92)' };
-const gradBg = 'linear-gradient(145deg, rgba(40,40,45,0.95), rgba(20,20,24,0.98))';
-let pegStyle = pegInactive;
-if (active) {
-pegStyle = {
-boxShadow: '0 0 28px ' + color + ', 0 0 12px rgba(255,255,255,0.35) inset',
-borderColor: color,
-background: gradBg
-};
-}
 const styleString = { backgroundColor: color };
-const glowStrong = active && chromaticInTune;
-const styleFill = { width: active ? '100%' : '0%', backgroundColor: color, opacity: active ? 1 : 0, boxShadow: glowStrong ? ('0 0 20px ' + color) : (active ? ('0 0 12px ' + color) : 'none') };
+const styleFill = { width: '0%', backgroundColor: color, opacity: 0, boxShadow: 'none' };
+
 return h('div', { class: 'flex items-center gap-2 sm:gap-4 py-2 sm:py-2.5' }, [
 h('div', { class: 'w-20 sm:w-24 shrink-0 flex justify-end pr-1 sm:pr-2' }, [
-h('div', { class: pegClass, style: pegStyle }, [
-h('div', { class: pegTextClass }, [label])
+h('div', { 'data-rs-peg': String(i), class: pegBase, style: pegInactive }, [
+h('div', { 'data-rs-peg-text': String(i), class: pegTextClass }, [label])
 ])
 ]),
 h('div', { class: 'flex-1 min-w-0 relative h-10 sm:h-11 flex flex-col justify-center gap-1' }, [
 h('div', { class: 'relative w-full h-1 sm:h-1.5 rounded-full overflow-hidden bg-neutral-900' }, [
 h('div', { class: 'absolute inset-0 rounded-full opacity-30', style: styleString }),
-h('div', { class: 'absolute inset-y-0 left-0 rounded-full transition-all duration-75', style: styleFill })
+h('div', { 'data-rs-fill': String(i), class: 'absolute inset-y-0 left-0 rounded-full transition-all duration-75', style: styleFill })
 ])
 ]),
 h('div', { class: 'w-8 sm:w-10 shrink-0 flex justify-center opacity-90' }, [pickSvg()])
 ]);
 };
 
-export fn RocksmithStyleTuner(props) {
-const raw = props.snapshot;
-const snap = raw != null && typeof raw === 'object' && raw.hasPitch !== undefined ? raw : defaultSnap();
-const openMidis = props.openMidis && props.openMidis.length === 6 ? props.openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
-const tuningTitle = props.tuningTitle || 'STANDARD EADGBE';
-const refPitch = props.refPitch || 'A440';
-
+export fn paintRocksmithTunerDom(rootEl, snap, openMidis) {
+if (!rootEl || !openMidis) return;
 const tuningCents = snap.hasPitch && typeof snap.tuningCents === 'number' ? snap.tuningCents : 0;
 const centsLo = 50;
 const centsHi = 50;
@@ -86,31 +68,85 @@ const centsNormChromatic = (centsClamped + centsLo) / (centsLo + centsHi);
 const chromaticInTune = snap.hasPitch && Math.abs(tuningCents) < 5;
 const centsPrefix = snap.hasPitch && tuningCents >= 0 ? '+' : '';
 
-let chromaticMeter = null;
+const meterEl = rootEl.querySelector('[data-rs-meter="1"]');
+const needleEl = rootEl.querySelector('[data-rs-needle="1"]');
+if (meterEl && needleEl) {
 if (snap.hasPitch) {
-const needleLeft = String(Math.max(0, Math.min(100, centsNormChromatic * 100))) + '%';
-const needleStyle = { left: needleLeft, marginLeft: '-4px', backgroundColor: chromaticInTune ? '#4ade80' : '#fb923c' };
-chromaticMeter = h('div', { class: 'px-1 pb-3 border-b border-neutral-800 border-opacity-60' }, [
-h('p', { class: 'text-[10px] text-neutral-400 uppercase tracking-widest mb-2' }, ['Tune to this strip (A440 equal temperament). Colored rows are a rough string guess only.']),
-h('div', { class: 'relative h-2.5 rounded-full bg-neutral-900 border border-neutral-700 overflow-hidden' }, [
-h('div', { class: 'absolute top-0 bottom-0 w-px bg-white opacity-50', style: { left: '50%' } }),
-h('div', { class: 'absolute top-0 bottom-0 w-2.5 rounded-sm transition-all duration-75', style: needleStyle })
-])
-]);
+meterEl.style.opacity = '1';
+needleEl.style.left = String(Math.max(0, Math.min(100, centsNormChromatic * 100))) + '%';
+needleEl.style.backgroundColor = chromaticInTune ? '#4ade80' : '#fb923c';
+} else {
+meterEl.style.opacity = '0';
+}
 }
 
-const bodyChildren = [];
-if (chromaticMeter !== null) bodyChildren.push(chromaticMeter);
 let ri = 0;
-while (ri < 6) {
-bodyChildren.push(stringRow(ri, snap, openMidis, chromaticInTune));
+while (ri < openMidis.length) {
+const color = STRING_HEX[ri % STRING_HEX.length];
+const active = snap.hasPitch === true && snap.stringIndex === ri;
+const pegEl = rootEl.querySelector('[data-rs-peg="' + String(ri) + '"]');
+const pegTextEl = rootEl.querySelector('[data-rs-peg-text="' + String(ri) + '"]');
+const fillEl = rootEl.querySelector('[data-rs-fill="' + String(ri) + '"]');
+
+if (pegEl) {
+const pegBase = 'relative rounded-lg px-2 py-2 sm:px-3 sm:py-2.5 min-w-12 sm:min-w-14 text-center transition-all duration-150 border ';
+if (active) {
+pegEl.className = pegBase + 'border-transparent';
+pegEl.style.boxShadow = '0 0 28px ' + color + ', 0 0 12px rgba(255,255,255,0.35) inset';
+pegEl.style.borderColor = color;
+pegEl.style.background = 'linear-gradient(145deg, rgba(40,40,45,0.95), rgba(20,20,24,0.98))';
+} else {
+pegEl.className = pegBase + 'bg-neutral-800 border-neutral-600 shadow-inner';
+pegEl.style.boxShadow = 'none';
+pegEl.style.borderColor = 'rgba(82,82,91,0.8)';
+pegEl.style.background = 'rgba(38,38,42,0.92)';
+}
+}
+if (pegTextEl) {
+pegTextEl.className = active ? 'text-lg sm:text-xl font-black tracking-tight text-white' : 'text-lg sm:text-xl font-black tracking-tight text-neutral-400';
+}
+if (fillEl) {
+const glowStrong = active && chromaticInTune;
+fillEl.style.width = active ? '100%' : '0%';
+fillEl.style.opacity = active ? '1' : '0';
+fillEl.style.boxShadow = glowStrong ? ('0 0 20px ' + color) : (active ? ('0 0 12px ' + color) : 'none');
+}
 ri = ri + 1;
 }
 
-const hzLine = snap.hasPitch ? String(snap.freqHz) + ' Hz' : 'off';
-const noteLine = snap.hasPitch ? (snap.noteName + (snap.stringIndex >= 0 ? (' · guess: ' + snap.stringLabel + ' fret ' + String(snap.fret)) : '')) : 'Play a string';
-const centsLine = snap.hasPitch ? centsPrefix + String(Math.round(tuningCents)) + ' cents (chromatic)' : '';
-const noteLineClass = snap.hasPitch ? (chromaticInTune ? 'text-emerald-400' : 'text-orange-300') : 'text-neutral-500';
+const hzEl = rootEl.querySelector('[data-rs-hz="1"]');
+const noteEl = rootEl.querySelector('[data-rs-note="1"]');
+const centsEl = rootEl.querySelector('[data-rs-cents="1"]');
+
+if (hzEl) hzEl.textContent = snap.hasPitch ? String(snap.freqHz) + ' Hz' : 'off';
+if (noteEl) {
+noteEl.textContent = snap.hasPitch ? (snap.noteName + (snap.stringIndex >= 0 ? (' · guess: ' + snap.stringLabel + ' fret ' + String(snap.fret)) : '')) : 'Play a string';
+noteEl.className = snap.hasPitch ? (chromaticInTune ? 'text-emerald-400' : 'text-orange-300') : 'text-neutral-500';
+}
+if (centsEl) {
+centsEl.textContent = snap.hasPitch ? centsPrefix + String(Math.round(tuningCents)) + ' cents (chromatic)' : '';
+}
+}
+
+export fn RocksmithStyleTuner(props) {
+const openMidis = props.openMidis && props.openMidis.length > 0 ? props.openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
+const tuningTitle = props.tuningTitle || 'STANDARD EADGBE';
+const refPitch = props.refPitch || 'A440';
+
+const chromaticMeter = h('div', { 'data-rs-meter': '1', class: 'px-1 pb-3 border-b border-neutral-800 border-opacity-60 transition-opacity duration-150', style: { opacity: '0' } }, [
+h('p', { class: 'text-[10px] text-neutral-400 uppercase tracking-widest mb-2' }, ['Tune to this strip (A440 equal temperament). Colored rows are a rough string guess only.']),
+h('div', { class: 'relative h-2.5 rounded-full bg-neutral-900 border border-neutral-700 overflow-hidden' }, [
+h('div', { class: 'absolute top-0 bottom-0 w-px bg-white opacity-50', style: { left: '50%' } }),
+h('div', { 'data-rs-needle': '1', class: 'absolute top-0 bottom-0 w-2.5 rounded-sm transition-all duration-75', style: { left: '50%', marginLeft: '-4px', backgroundColor: '#fb923c' } })
+])
+]);
+
+const bodyChildren = [chromaticMeter];
+let ri = 0;
+while (ri < openMidis.length) {
+bodyChildren.push(stringRow(ri, openMidis));
+ri = ri + 1;
+}
 
 return h('div', { class: 'relative w-full max-w-3xl mx-auto rounded-2xl overflow-hidden border border-neutral-800 shadow-2xl' }, [
 h('div', { class: 'absolute inset-0 bg-gradient-to-br from-zinc-950 via-neutral-950 to-black' }),
@@ -124,9 +160,9 @@ h('p', { class: 'text-xs text-neutral-500 font-mono tracking-wide' }, [refPitch]
 h('p', { class: 'text-2xl sm:text-3xl font-black text-white tracking-tight uppercase' }, [tuningTitle])
 ]),
 h('div', { class: 'text-right font-mono text-xs text-neutral-400 space-y-0.5' }, [
-h('p', {}, [hzLine]),
-h('p', { class: noteLineClass }, [noteLine]),
-h('p', {}, [centsLine])
+h('p', { 'data-rs-hz': '1' }, ['off']),
+h('p', { 'data-rs-note': '1', class: 'text-neutral-500' }, ['Play a string']),
+h('p', { 'data-rs-cents': '1' }, [''])
 ])
 ]),
 h('div', { class: 'flex flex-wrap items-center justify-center gap-x-4 gap-y-2 px-3 py-3 border-t border-neutral-800 bg-neutral-950 text-neutral-400 text-xs' }, [
