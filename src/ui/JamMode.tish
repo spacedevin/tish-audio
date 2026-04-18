@@ -3,6 +3,14 @@ import { Play, Square } from "../icons.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
 import { audioMeterPitchRef } from "./AudioMeterContext.tish"
 
+const pitchFallback = { freq: 0, note: '-' };
+const normPitch = (p) => {
+if (!p || typeof p !== 'object') return pitchFallback;
+const f = p.freq;
+const n = p.note;
+return { freq: Number.isFinite(f) ? f : 0, note: typeof n === 'string' ? n : '-' };
+};
+
 export fn JamMode(props) { let tabActive = props.tabActive; let audioCtx = props.audioCtx;
 let [pitch, setPitch] = useState({ freq: 0, note: '-' });
 let [isPlaying, setIsPlaying] = useState(false);
@@ -65,14 +73,17 @@ return () => clearTimeout(sequenceRef.current);
 useEffect(() => {
 if (!tabActive) return;
 let id = setInterval(() => {
-const p = audioMeterPitchRef.current;
+const p = normPitch(audioMeterPitchRef.current);
 setPitch(prev => {
-if (prev.freq === p.freq && prev.note === p.note) return prev;
-return { freq: p.freq, note: p.note };
+const sp = normPitch(prev);
+if (sp.freq === p.freq && sp.note === p.note) return sp;
+return p;
 });
 }, 100);
 return () => clearInterval(id);
 }, [tabActive]);
+
+const pitchV = normPitch(pitch);
 
 return (
 <div class="flex-1 min-h-0 flex flex-col items-center justify-center p-8 bg-black overflow-hidden relative">
@@ -92,9 +103,9 @@ return (
 </div>
 </div>
 </div>
-{pitch.freq > 0 ? (
+{pitchV.freq > 0 ? (
 <div class="absolute inset-0 overflow-hidden pointer-events-none opacity-30">
-<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 mix-blend-screen transition-all duration-100 blur-[100px]" style={{ width: String(Math.min(1200, pitch.freq)) + "px", height: String(Math.min(1200, pitch.freq)) + "px" }} />
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 mix-blend-screen transition-all duration-100 blur-[100px]" style={{ width: String(Math.min(1200, pitchV.freq)) + "px", height: String(Math.min(1200, pitchV.freq)) + "px" }} />
 </div>
 ) : null}
 </div>

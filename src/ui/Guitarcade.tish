@@ -2,6 +2,14 @@ import { useEffect, useRef, h } from "lattish"
 import { WebGLBackground } from "./WebGLBackground.tish"
 import { audioMeterPitchRef } from "./AudioMeterContext.tish"
 
+const normPitchRef = () => {
+const p = audioMeterPitchRef.current;
+if (!p || typeof p !== 'object') return { freq: 0, note: '-' };
+const f = p.freq;
+const n = p.note;
+return { freq: Number.isFinite(f) ? f : 0, note: typeof n === 'string' ? n : '-' };
+};
+
 export fn Guitarcade(props) { let tabActive = props.tabActive; let analyzerRef = props.analyzerRef; let audioReady = props.audioReady;
 const canvasRef = useRef(null);
 const gameRef = useRef({ playerY: 200, lasers: [], enemies: [], score: 0, lastFire: 0, gameOver: false });
@@ -21,7 +29,7 @@ for (let i = 0; i < dataArray.length; i = i + 1) sumSquares = sumSquares + (data
 const rms = Math.sqrt(sumSquares / dataArray.length);
 const state = gameRef.current;
 
-const cp = audioMeterPitchRef.current;
+const cp = normPitchRef();
 if (cp.freq > 0 && cp.freq > 60 && cp.freq < 1000) {
 const minLog = Math.log2(82); const maxLog = Math.log2(880); const currentLog = Math.log2(cp.freq);
 let normalized = (currentLog - minLog) / (maxLog - minLog); normalized = Math.max(0, Math.min(1, normalized));
@@ -59,7 +67,7 @@ ctx.fillStyle = '#22d3ee'; state.lasers.forEach(l => ctx.fillRect(l.x, l.y - 2, 
 ctx.fillStyle = '#ef4444'; state.enemies.forEach(e => { ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI * 2); ctx.fill(); });
 
 ctx.fillStyle = 'white'; ctx.font = '24px monospace'; ctx.fillText("SCORE: " + String(state.score), 20, 40);
-const cpHud = audioMeterPitchRef.current;
+const cpHud = normPitchRef();
 ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText("INPUT PITCH: " + cpHud.note + " (" + String(cpHud.freq) + "Hz)", 20, canvas.height - 20);
 
 if (state.gameOver) {

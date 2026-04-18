@@ -1,7 +1,6 @@
 import { h } from "lattish"
 import { X } from "../icons.tish"
 import { PEDAL_LIBRARY } from "../audio/pedalLibrary.tish"
-import { PedalNode, RackNode, GraphicEqNode, ConsoleNode } from "./nodes.tish"
 
 export fn ModuleDebugPanel(props) {
 let onClose = props.onClose;
@@ -29,8 +28,7 @@ di = di + 1;
 ci = ci + 1;
 }
 
-const noop = () => {};
-const noopChange = (a, b) => {};
+const paramKeys = (params) => Object.keys(params || {}).join(", ");
 
 return (
 <div class="fixed inset-0 z-[20000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
@@ -38,7 +36,7 @@ return (
 <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-3 border-b border-neutral-800 bg-neutral-900/80">
 <div>
 <span class="text-xs font-black tracking-widest text-orange-400">DEBUG</span>
-<p class="text-[11px] text-neutral-500 mt-0.5">All modules in library order (not connected to audio). Rack units (EQs, mixer) share one footprint; stompboxes use pedal layout. Scroll horizontally.</p>
+<p class="text-[11px] text-neutral-500 mt-0.5">Library order (no live controls — Lattish global hooks require static previews here). Add modules on the patch board to edit and hear them.</p>
 </div>
 <button type="button" onClick={onClose} class="text-neutral-500 hover:text-white p-2 rounded-lg hover:bg-neutral-800 transition-colors" title="Close">
 <X class="w-5 h-5" />
@@ -46,76 +44,20 @@ return (
 </div>
 <div class="overflow-x-auto overflow-y-auto custom-scrollbar p-4 flex flex-row items-end gap-0 flex-1 min-h-0">
 {chain.map((mod, idx) => {
-const isGraphicEq = mod.type === 'graphic_eq';
-const isStudioEq = mod.type === 'master_eq';
-const isConsoleMixer = mod.type === 'console_mixer';
-
-let innerW = 200;
-let innerH = 340;
-let scale = 0.52;
-if (isGraphicEq || isStudioEq || isConsoleMixer) {
-innerW = 640;
-innerH = 216;
-scale = isGraphicEq ? 0.36 : 0.38;
-}
-
-const slotW = Math.ceil(innerW * scale) + 12;
-const slotH = Math.ceil(innerH * scale) + 12;
-
-let inner = null;
-if (isGraphicEq) {
-inner = (
-<GraphicEqNode 
-node={mod} 
-previewOnly={true}
-onRemove={noop} 
-onChange={noopChange} 
-onDragStart={noop} 
-onToggleBypass={noop} 
-audioDataMap={{}} 
-/>
-);
-} else if (isStudioEq) {
-inner = (
-<RackNode 
-node={mod} 
-previewOnly={true}
-onRemove={noop} 
-onChange={noopChange} 
-onDragStart={noop} 
-onToggleBypass={noop} 
-audioDataMap={{}} 
-/>
-);
-} else if (isConsoleMixer) {
-inner = (
-<ConsoleNode 
-node={mod} 
-previewOnly={true}
-onRemove={noop} 
-onChange={noopChange} 
-onDragStart={noop} 
-audioDataMap={{}} 
-/>
-);
-} else {
-inner = (
-<PedalNode 
-pedal={mod} 
-previewOnly={true}
-onRemove={noop} 
-onChange={noopChange} 
-onDragStart={noop}
-onToggleBypass={noop}
-/>
-);
-}
+const isWide = mod.type === 'graphic_eq' || mod.type === 'master_eq' || mod.type === 'console_mixer';
+const slotW = isWide ? 248 : 118;
+const slotH = isWide ? 96 : 188;
+const paramLine = paramKeys(mod.params);
 
 return (
 <div key={mod.id} class="flex flex-row items-end shrink-0">
 <div class="shrink-0 overflow-hidden rounded-lg border border-neutral-800/80 bg-black/40" style={{ width: String(slotW) + "px", height: String(slotH) + "px" }}>
-<div style={{ width: String(innerW) + "px", height: String(innerH) + "px", transform: "scale(" + String(scale) + ")", transformOrigin: "top left" }}>
-{inner}
+<div class={"h-full w-full flex flex-col justify-between p-2 rounded-lg bg-gradient-to-br border border-black/40 " + mod.color}>
+<div class="min-h-0">
+<span class="block text-[10px] font-black uppercase tracking-wide text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] leading-tight truncate">{mod.label}</span>
+<span class="block text-[8px] font-mono text-orange-300/90 mt-0.5 truncate">{mod.type}</span>
+</div>
+<span class="block text-[7px] text-white/50 leading-snug line-clamp-3 break-all">{paramLine}</span>
 </div>
 </div>
 {idx < chain.length - 1 ? (

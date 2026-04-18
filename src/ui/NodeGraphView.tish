@@ -1,3 +1,8 @@
+// Lattish uses one global hookCursor for useRef/useState/useEffect across the whole root tree (see lattish/src/Lattish.tish).
+// nodes.map renders different FC types per row (PedalNode vs RackNode vs …); each type consumes a different number of hooks.
+// Reordering nodes or changing the type at a given index shifts hook slots for everything after that point until Lattish gains per-FC stacks.
+// App-level fixes (stable HeaderMeterReadout, always-mounted tab roots) keep the prefix before this subtree stable.
+
 import { h, useState, useRef } from "lattish"
 import { X } from "../icons.tish"
 import { getNodePorts } from "../audio/pedalLibrary.tish"

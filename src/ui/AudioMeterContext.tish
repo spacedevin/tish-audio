@@ -86,7 +86,8 @@ animationRef.current = null;
 return children;
 }
 
-export fn HeaderMeterReadout() {
+export fn HeaderMeterReadout(props) {
+let inactive = props.inactive === true;
 const noteRef = useRef(null);
 const hzRef = useRef(null);
 const levelFillRef = useRef(null);
@@ -104,7 +105,7 @@ headerMeterEls.levelFill = null;
 }, []);
 
 return (
-<div class="flex items-center gap-4 shrink-0">
+<div class={"flex items-center gap-4 shrink-0 " + (inactive ? "invisible pointer-events-none" : "")}>
 <div class="flex items-center gap-2 bg-neutral-800 px-3 py-1.5 rounded-lg border border-neutral-700">
 <span class="text-[10px] text-neutral-400 font-mono">PITCH</span>
 <span ref={noteRef} class="text-lg font-bold w-10 text-center text-orange-400">-</span>
