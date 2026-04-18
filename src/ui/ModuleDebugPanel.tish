@@ -1,7 +1,7 @@
 import { h } from "lattish"
 import { X } from "../icons.tish"
 import { PEDAL_LIBRARY } from "../audio/pedalLibrary.tish"
-import { PedalNode, RackNode, GraphicEqNode } from "./nodes.tish"
+import { PedalNode, RackNode, GraphicEqNode, ConsoleNode } from "./nodes.tish"
 
 export fn ModuleDebugPanel(props) {
 let onClose = props.onClose;
@@ -38,7 +38,7 @@ return (
 <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-3 border-b border-neutral-800 bg-neutral-900/80">
 <div>
 <span class="text-xs font-black tracking-widest text-orange-400">DEBUG</span>
-<p class="text-[11px] text-neutral-500 mt-0.5">All modules in library order (not connected to audio). Rack EQs use rack layout; stompboxes use pedal layout. Scroll horizontally.</p>
+<p class="text-[11px] text-neutral-500 mt-0.5">All modules in library order (not connected to audio). Rack units (EQs, mixer) share one footprint; stompboxes use pedal layout. Scroll horizontally.</p>
 </div>
 <button type="button" onClick={onClose} class="text-neutral-500 hover:text-white p-2 rounded-lg hover:bg-neutral-800 transition-colors" title="Close">
 <X class="w-5 h-5" />
@@ -48,18 +48,15 @@ return (
 {chain.map((mod, idx) => {
 const isGraphicEq = mod.type === 'graphic_eq';
 const isStudioEq = mod.type === 'master_eq';
+const isConsoleMixer = mod.type === 'console_mixer';
 
 let innerW = 200;
 let innerH = 340;
 let scale = 0.52;
-if (isGraphicEq) {
-innerW = 760;
-innerH = 248;
-scale = 0.35;
-} else if (isStudioEq) {
+if (isGraphicEq || isStudioEq || isConsoleMixer) {
 innerW = 640;
 innerH = 216;
-scale = 0.38;
+scale = isGraphicEq ? 0.36 : 0.38;
 }
 
 const slotW = Math.ceil(innerW * scale) + 12;
@@ -87,6 +84,17 @@ onRemove={noop}
 onChange={noopChange} 
 onDragStart={noop} 
 onToggleBypass={noop} 
+audioDataMap={{}} 
+/>
+);
+} else if (isConsoleMixer) {
+inner = (
+<ConsoleNode 
+node={mod} 
+previewOnly={true}
+onRemove={noop} 
+onChange={noopChange} 
+onDragStart={noop} 
 audioDataMap={{}} 
 />
 );

@@ -59,10 +59,10 @@ TIME: [
 ],
 MASTERING: [
 { type: 'master_eq', label: 'Studio EQ', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { sub: 0, low: 0, mid: 0, high: 0, air: 0, level: 1.0 } },
-{ type: 'graphic_eq', label: 'Graphic EQ', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { b31: 0, b62: 0, b125: 0, b250: 0, b500: 0, b1k: 0, b2k: 0, b4k: 0, b8k: 0, b16k: 0, level: 1.0 } }
+{ type: 'graphic_eq', label: 'Graphic EQ', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { b31: 0, b62: 0, b125: 0, b250: 0, b500: 0, b1k: 0, b2k: 0, b4k: 0, b8k: 0, b16k: 0, level: 1.0 } },
+{ type: 'console_mixer', label: 'Mixing Console', color: 'from-zinc-800 to-black', theme: 'dark', defaultParams: { channels: 4, ch1: 1.0, ch2: 1.0, ch3: 1.0, ch4: 1.0, master: 1.0 } }
 ],
 UTILITY: [
-{ type: 'console_mixer', label: 'Mixing Console', color: 'from-zinc-800 to-black', theme: 'dark', defaultParams: { channels: 4, ch1: 1.0, ch2: 1.0, ch3: 1.0, ch4: 1.0, master: 1.0 } },
 { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
 { type: 'crossover', label: 'Freq Split', color: 'from-blue-800 to-indigo-950', theme: 'dark', defaultParams: { freq: 800 } },
 { type: 'splitter', label: 'Splitter', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { output: 1.0 } }

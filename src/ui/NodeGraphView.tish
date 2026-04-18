@@ -15,13 +15,9 @@ else if (node.type === 'SYS_OUT') { w = 80; h = 140; }
 else if (node.isSystem) { w = 80; h = 140; }
 else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
 else if (node.type === 'master_eq') { w = 640; h = 216; }
-else if (node.type === 'graphic_eq') { w = 760; h = 248; }
+else if (node.type === 'graphic_eq') { w = 640; h = 216; }
 else if (node.type === 'vu_meter') { w = 120; h = 200; }
-else if (node.type === 'console_mixer') {
-const numCh = node.params.channels || 4;
-w = 160 + (numCh * 64);
-h = 300;
-}
+else if (node.type === 'console_mixer') { w = 640; h = 216; }
 return { w, h };
 };
 
@@ -175,10 +171,10 @@ return (
 <div class="flex-1 min-h-0 w-full min-w-0 flex flex-col relative">
 <div 
 ref={boardRef}
-class={"flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none ag-" + String(audioGraphTick)}
+class="flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none"
 onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
-onPointerLeave={handlePointerUp}
+onPointerLeave={(e) => { if (e.buttons === 0) handlePointerUp(); }}
 >
 <WebGLBackground />
 
@@ -225,7 +221,7 @@ const coords = getJackCoords(node, false, port);
 return (
 <div 
 key={"in-" + port}
-class="absolute left-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+class="absolute left-[-14px] w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
 style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
 title={"Patch In: " + port.toUpperCase()}
@@ -244,7 +240,7 @@ const coords = getJackCoords(node, true, port);
 return (
 <div 
 key={"out-" + port}
-class="absolute right-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+class="absolute right-[-14px] w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
 style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
 onPointerDown={(e) => startWire(e, node.id, port)}
 title={"Drag out from: " + port.toUpperCase()}
@@ -257,7 +253,7 @@ title={"Drag out from: " + port.toUpperCase()}
 );
 })}
 
-
+<div class="relative z-20 isolate">
 {node.type === 'SYS_IN' ? (
 <div 
 onPointerDown={(e) => startDragNode(e, node)}
@@ -304,12 +300,14 @@ onDragStart={(e) => startDragNode(e, node)}
 audioDataMap={nodeAudioMapRef.current}
 />
 ) : node.type === 'console_mixer' ? (
-<ConsoleNode 
-node={node} 
-onRemove={() => removeNode(node.id)} 
-onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+<ConsoleNode
+node={node}
+onRemove={() => removeNode(node.id)}
+onChange={(param, val) => updateNodeParam(node.id, param, val)}
 onDragStart={(e) => startDragNode(e, node)}
 audioDataMap={nodeAudioMapRef.current}
+meterSync={audioGraphTick}
+onFaderDragEnd={onAudioUiBump}
 />
 ) : (node.type === 'splitter' || node.type === 'crossover') ? (
 <div 
@@ -342,7 +340,9 @@ onToggleBypass={() => toggleNodeBypass(node.id)}
 />
 )}
 </div>
-)})}
+</div>
+);
+})}
 </div>
 </div>
 );
