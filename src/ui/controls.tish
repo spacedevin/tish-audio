@@ -1,26 +1,34 @@
 import { useState, useEffect, useRef, h } from "lattish"
 
 export fn LedMeter(props) { let analyser = props.analyser; let width = props.width ?? 6; let height = props.height ?? 96;
+let rev = props.rev;
 const canvasRef = useRef(null);
 
 useEffect(() => {
-if (!analyser || !canvasRef.current) return;
-const canvas = canvasRef.current;
-const ctx = canvas.getContext('2d');
+if (!analyser) return;
 let animationId;
 const dataArray = new Float32Array(analyser.fftSize);
 
 const draw = () => {
+animationId = requestAnimationFrame(draw);
+if (!analyser || !canvasRef.current) return;
+const canvas = canvasRef.current;
+const ctx2 = canvas.getContext('2d');
+if (!ctx2) return;
+try {
 analyser.getFloatTimeDomainData(dataArray);
+} catch (err) {
+return;
+}
 let sumSquares = 0;
 for (let i = 0; i < dataArray.length; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
 const rms = Math.sqrt(sumSquares / dataArray.length);
 
 const db = 20 * Math.log10(Math.max(rms, 0.0001));
-const pct = (db + 60) / 60; 
+const pct = (db + 52) / 52;
 const level = Math.max(0, Math.min(1, pct));
 
-ctx.clearRect(0, 0, canvas.width, canvas.height);
+ctx2.clearRect(0, 0, canvas.width, canvas.height);
 
 const numSegments = 20;
 const segmentHeight = canvas.height / numSegments;
@@ -30,26 +38,31 @@ for (let i = 0; i < numSegments; i = i + 1) {
 const segmentThreshold = 1 - (i / numSegments);
 const isActive = level >= segmentThreshold;
 
-let color = '#22c55e'; // green
-if (i < 3) color = '#ef4444'; // red (top)
-else if (i < 7) color = '#eab308'; // yellow
+let color = '#22c55e';
+if (i < 3) color = '#ef4444';
+else if (i < 7) color = '#eab308';
 
-ctx.fillStyle = isActive ? color : 'rgba(0,0,0,0.5)';
-ctx.fillRect(0, i * segmentHeight, canvas.width, segmentHeight - gap);
+ctx2.fillStyle = isActive ? color : 'rgba(0,0,0,0.5)';
+ctx2.fillRect(0, i * segmentHeight, canvas.width, segmentHeight - gap);
 }
-animationId = requestAnimationFrame(draw);
 };
 draw();
-return () => cancelAnimationFrame(animationId);
-}, [analyser]);
+return () => {
+if (animationId) cancelAnimationFrame(animationId);
+};
+}, [analyser, rev]);
 
 return <canvas ref={canvasRef} width={width} height={height} class="rounded-[1px] bg-black border border-neutral-900 shadow-inner" />;
 }
 
 export fn VerticalFader(props) { let label = props.label; let min = props.min; let max = props.max; let value = props.value; let onChange = props.onChange; let analyser = props.analyser; let variant = props.variant ?? "default"; let heightClass = props.heightClass ?? "h-24";
+let rackSlot = props.rackSlot === true;
+let meterSync = props.meterSync;
+let onFaderDragEnd = props.onFaderDragEnd;
 let [isDragging, setIsDragging] = useState(false);
 const startYRef = useRef(0);
 const startValRef = useRef(0);
+const fineDragRef = useRef(false);
 const dragCtxRef = useRef({ min: min, max: max, onChange: onChange });
 dragCtxRef.current = { min: min, max: max, onChange: onChange };
 
@@ -58,6 +71,7 @@ const pct = (safeVal - min) / (max - min);
 
 const handlePointerDown = (e) => {
 e.stopPropagation();
+fineDragRef.current = e.shiftKey === true;
 setIsDragging(true);
 startYRef.current = e.clientY;
 startValRef.current = safeVal;
@@ -70,7 +84,8 @@ const onMove = (e) => {
 const ctx = dragCtxRef.current;
 const dy = startYRef.current - e.clientY;
 const range = ctx.max - ctx.min;
-const deltaVal = (dy / 80) * range;
+const sens = fineDragRef.current ? 220 : 80;
+const deltaVal = (dy / sens) * range;
 let newVal = startValRef.current + deltaVal;
 newVal = Math.max(ctx.min, Math.min(ctx.max, newVal));
 ctx.onChange(newVal);
@@ -78,6 +93,7 @@ ctx.onChange(newVal);
 const onUp = () => {
 setIsDragging(false);
 document.body.style.cursor = '';
+if (onFaderDragEnd) onFaderDragEnd();
 };
 window.addEventListener('pointermove', onMove);
 window.addEventListener('pointerup', onUp);
@@ -93,11 +109,18 @@ const capBg = isMaster
 : 'bg-gradient-to-b from-zinc-300 to-zinc-500 border-zinc-600 shadow-[0_2px_4px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.6)]';
 const lineBg = isMaster ? 'bg-white/80' : 'bg-black/60';
 
+const ledH = heightClass === 'h-36' ? 144 : (rackSlot ? 92 : 96);
+const ledW = rackSlot ? 5 : 6;
+const colW = rackSlot ? "w-12" : "w-14";
+const troughClass = rackSlot
+? "relative w-2 h-full bg-gradient-to-b from-black via-zinc-950 to-black rounded-full shadow-[inset_0_2px_6px_rgba(0,0,0,1)] flex justify-center border border-zinc-950/80"
+: "relative w-2.5 h-full bg-black/90 rounded-full shadow-[inset_0_2px_5px_rgba(0,0,0,1)] flex justify-center border border-zinc-800/50";
+
 return (
-<div class="flex flex-col items-center shrink-0 select-none px-1 w-14">
-<div class={"flex gap-1.5 items-center " + heightClass}>
-{analyser && <LedMeter analyser={analyser} height={heightClass === 'h-36' ? 144 : 96} />}
-<div class="relative w-2.5 h-full bg-black/90 rounded-full shadow-[inset_0_2px_5px_rgba(0,0,0,1)] flex justify-center border border-zinc-800/50">
+<div class={"flex flex-col items-center shrink-0 select-none px-0.5 " + colW}>
+<div class={"flex gap-1 items-center " + heightClass}>
+{analyser && <LedMeter analyser={analyser} width={ledW} height={ledH} rev={meterSync} />}
+<div class={troughClass}>
 
 <div class="absolute w-8 h-full flex flex-col justify-between py-1 pointer-events-none opacity-30">
 <div class="w-full h-[2px] bg-white"></div>
@@ -118,7 +141,7 @@ style={{ bottom: String(pct * 100) + "%", transform: "translateY(50%)" }}
 </div>
 </div>
 </div>
-<span class={"text-[9px] font-black uppercase mt-3 tracking-widest whitespace-nowrap text-center " + (isMaster ? "text-red-400" : "text-white/80")}>{label}</span>
+<span class={"text-[9px] font-black uppercase mt-3 tracking-widest whitespace-nowrap text-center " + (isMaster ? "text-red-400" : (rackSlot ? "text-zinc-500" : "text-white/80"))}>{label}</span>
 </div>
 );
 }
@@ -133,12 +156,26 @@ dragCtxRef.current = { min: min, max: max, onChange: onChange };
 const safeVal = Number.isFinite(value) ? value : min;
 const angle = ((safeVal - min) / (max - min)) * 270 - 135;
 
+const fineDragRef = useRef(false);
+
 const handlePointerDown = (e) => {
 e.stopPropagation();
+fineDragRef.current = e.shiftKey === true;
 setIsDragging(true);
 startYRef.current = e.clientY;
 startValRef.current = safeVal;
 document.body.style.cursor = 'ns-resize';
+};
+
+let resetValue = props.resetValue;
+
+const handleDoubleClick = (e) => {
+e.stopPropagation();
+let rv = resetValue;
+if (rv === undefined || rv === null || !Number.isFinite(rv)) {
+rv = (min + max) / 2;
+}
+onChange(rv);
 };
 
 useEffect(() => {
@@ -147,7 +184,8 @@ const onMove = (e) => {
 const ctx = dragCtxRef.current;
 const dy = startYRef.current - e.clientY;
 const range = ctx.max - ctx.min;
-const deltaVal = (dy / 150) * range;
+const sens = fineDragRef.current ? 520 : 150;
+const deltaVal = (dy / sens) * range;
 let newVal = startValRef.current + deltaVal;
 newVal = Math.max(ctx.min, Math.min(ctx.max, newVal));
 ctx.onChange(newVal);
@@ -176,6 +214,8 @@ return (
 <div class={"flex flex-col items-center select-none shrink-0 " + (compact ? "m-0.5" : "m-1")}>
 <div 
 onPointerDown={handlePointerDown}
+onDoubleClick={handleDoubleClick}
+title={"Drag: adjust value · Shift+drag: fine · Double-click: reset"}
 class={outer + " rounded-full relative cursor-ns-resize shrink-0 " + (isDark
 ? "shadow-[0_6px_14px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-2px_6px_rgba(0,0,0,0.85)] bg-gradient-to-b from-zinc-500 via-zinc-800 to-zinc-950 border border-zinc-900"
 : "shadow-[0_4px_10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.9)] bg-gradient-to-b from-zinc-200 via-zinc-300 to-zinc-500 border border-zinc-400")}

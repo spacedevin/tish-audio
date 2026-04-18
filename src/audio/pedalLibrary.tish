@@ -31,6 +31,12 @@ MULTI_FX: [
 { type: 'bitcrush', label: '8-Bit Crush', color: 'from-pink-600 to-purple-900', theme: 'dark', defaultParams: { bits: 4, level: 0.5 } },
 { type: 'tape_echo', label: 'Space Echo', color: 'from-emerald-700 to-emerald-950', theme: 'dark', defaultParams: { time: 0.4, feedback: 0.6, age: 0.5, mix: 0.5 } }
 ],
+SIGNATURE: [
+{ type: 'sub_mosh', label: 'Sub Mosh', color: 'from-violet-900 via-purple-950 to-black', theme: 'dark', defaultParams: { mix: 0.45, cut: 1400, level: 0.75 } },
+{ type: 'chainsaw', label: 'Chainsaw', color: 'from-lime-700 via-emerald-900 to-black', theme: 'dark', defaultParams: { drive: 820, scoop: -18, level: 0.42 } },
+{ type: 'dub_layer', label: 'Dub Layer', color: 'from-amber-900 via-orange-950 to-black', theme: 'dark', defaultParams: { time: 0.55, feedback: 0.62, dark: 2800, mix: 0.48 } },
+{ type: 'shimmer_verb', label: 'Shimmer Cloud', color: 'from-sky-400 via-indigo-700 to-slate-950', theme: 'dark', defaultParams: { mix: 0.38, decay: 3.2, sheen: 0.65 } }
+],
 AMP_SIM: [
 { type: 'amp_tweed', label: 'Tweed Combo', color: 'from-amber-700 via-yellow-800 to-amber-950', theme: 'dark', defaultParams: { gain: 30, bass: 1.0, mid: 1.2, treble: 1.0, presence: 4000, master: 0.8 } },
 { type: 'amp_stack', label: 'Brit Stack', color: 'from-orange-600 via-amber-800 to-stone-950', theme: 'dark', defaultParams: { gain: 50, bass: 1.0, mid: 1.0, treble: 1.0, presence: 3000, master: 0.8 } },

@@ -18,6 +18,7 @@ let [devices, setDevices] = useState([]);
 let [showDeviceMenu, setShowDeviceMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
 let [showModuleDebug, setShowModuleDebug] = useState(false);
+let [audioGraphTick, setAudioGraphTick] = useState(0);
 
 // NODE GRAPH STATE
 let [nodes, setNodes] = useState([
@@ -108,6 +109,7 @@ const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, an
 rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
 }
 syncAudioNodeParams(audioCtxRef.current, nodeAudioMapRef, nodes);
+setAudioGraphTick(t => t + 1);
 }, [nodes, connections, audioReady]);
 
 useEffect(() => {
@@ -263,6 +265,8 @@ title="Preview all modules in a chain (layout only)"
 nodes={nodes} 
 connections={connections}
 nodeAudioMapRef={nodeAudioMapRef}
+audioGraphTick={audioGraphTick}
+onAudioUiBump={() => setAudioGraphTick(t => t + 1)}
 removeNode={removeNode} 
 updateNodeParam={updateNodeParam} 
 updateNodePos={updateNodePos}

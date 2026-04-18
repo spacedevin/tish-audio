@@ -14,8 +14,8 @@ if (node.type === 'SYS_IN') { w = 96; h = 140; }
 else if (node.type === 'SYS_OUT') { w = 80; h = 140; }
 else if (node.isSystem) { w = 80; h = 140; }
 else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
-else if (node.type === 'master_eq') { w = 640; h = 200; }
-else if (node.type === 'graphic_eq') { w = 760; h = 240; }
+else if (node.type === 'master_eq') { w = 640; h = 216; }
+else if (node.type === 'graphic_eq') { w = 760; h = 248; }
 else if (node.type === 'vu_meter') { w = 120; h = 200; }
 else if (node.type === 'console_mixer') {
 const numCh = node.params.channels || 4;
@@ -69,6 +69,8 @@ let toggleNodeBypass = props.toggleNodeBypass;
 let addConnection = props.addConnection;
 let removeConnection = props.removeConnection;
 let nodeAudioMapRef = props.nodeAudioMapRef;
+let audioGraphTick = props.audioGraphTick !== undefined && props.audioGraphTick !== null ? props.audioGraphTick : 0;
+let onAudioUiBump = props.onAudioUiBump;
 
 const boardRef = useRef(null);
 let [wiring, setWiring] = useState(null);
@@ -117,6 +119,7 @@ setWiring({ ...wiring, x: ex, y: ey });
 const handlePointerUp = () => {
 setWiring(null);
 setDraggingNode(null);
+if (onAudioUiBump) onAudioUiBump();
 };
 
 const startDragNode = (e, node) => {
@@ -172,7 +175,7 @@ return (
 <div class="flex-1 min-h-0 w-full min-w-0 flex flex-col relative">
 <div 
 ref={boardRef}
-class="flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none"
+class={"flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none ag-" + String(audioGraphTick)}
 onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
 onPointerLeave={handlePointerUp}
@@ -278,6 +281,8 @@ onChange={(param, val) => updateNodeParam(node.id, param, val)}
 onDragStart={(e) => startDragNode(e, node)}
 onToggleBypass={() => toggleNodeBypass(node.id)}
 audioDataMap={nodeAudioMapRef.current}
+meterSync={audioGraphTick}
+onFaderDragEnd={onAudioUiBump}
 />
 ) : node.type === 'graphic_eq' ? (
 <GraphicEqNode 
@@ -287,6 +292,8 @@ onChange={(param, val) => updateNodeParam(node.id, param, val)}
 onDragStart={(e) => startDragNode(e, node)}
 onToggleBypass={() => toggleNodeBypass(node.id)}
 audioDataMap={nodeAudioMapRef.current}
+meterSync={audioGraphTick}
+onFaderDragEnd={onAudioUiBump}
 />
 ) : node.type === 'vu_meter' ? (
 <VuMeterNode 
