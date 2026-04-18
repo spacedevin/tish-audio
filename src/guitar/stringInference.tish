@@ -4,8 +4,8 @@ const MAX_FRET = 24;
 
 const roughlyEqualCents = (a, b) => Math.abs(a - b) < 0.5;
 
-// rawHz: optional analyser-reported Hz before octave folding; used only to break ties when
-// two strings yield the same target MIDI (e.g. low E fret 24 vs high e open both E4).
+// rawHz: measured fundamental Hz; used to break ties when two strings yield the same target MIDI
+// (e.g. low E @ fret 24 vs high e open, both E4). Treble Hz → prefer thinner string; bass → thicker.
 export fn inferStringFretFromMidi(exactMidi, openMidis, rawHz) {
 if (!Number.isFinite(exactMidi) || !openMidis || openMidis.length === 0) return null;
 // Standard tuning is not uniform (G to B is a major third). Prefer a real open string when
@@ -46,8 +46,18 @@ best = cand;
 bestAbs = absC;
 } else if (roughlyEqualCents(absC, bestAbs)) {
 let pickCand = false;
-if (typeof rawHz === 'number' && Number.isFinite(rawHz) && rawHz >= 400 && cand.targetMidi === best.targetMidi) {
+if (typeof rawHz === 'number' && Number.isFinite(rawHz) && cand.targetMidi === best.targetMidi) {
+// Same target MIDI on two strings (e.g. low E @ fret 24 vs high e open, both E4). The old
+// `rawHz >= 400` gate never fired for ~330 Hz, so the thin string could lose. Use fundamental
+// Hz: bass range → prefer thicker string (lower index); treble → prefer thinner (higher index).
+if (rawHz < 135) {
 if (cand.stringIndex < best.stringIndex) pickCand = true;
+} else if (rawHz > 210) {
+if (cand.stringIndex > best.stringIndex) pickCand = true;
+} else {
+if (cand.fret < best.fret) pickCand = true;
+else if (cand.fret === best.fret && cand.stringIndex < best.stringIndex) pickCand = true;
+}
 } else {
 if (cand.fret < best.fret) pickCand = true;
 else if (cand.fret === best.fret && cand.stringIndex < best.stringIndex) pickCand = true;

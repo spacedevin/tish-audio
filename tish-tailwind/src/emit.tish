@@ -31,6 +31,8 @@ export async fn fullStylesheet() {
   try { content = content + await readFile("src/guitar/guitarPitchFrame.tish"); } catch (e) {}
   try { content = content + await readFile("src/guitar/tuningConfig.tish"); } catch (e) {}
   try { content = content + await readFile("src/guitar/stringInference.tish"); } catch (e) {}
+  try { content = content + await readFile("src/guitar/liveToneAndString.tish"); } catch (e) {}
+  try { content = content + await readFile("src/guitar/liveChordDetect.tish"); } catch (e) {}
   try { content = content + await readFile("src/guitar/polyphonicStrumAnalysis.tish"); } catch (e) {}
   try { content = content + await readFile("src/guitar/instrumentSpec.tish"); } catch (e) {}
   try { content = content + await readFile("src/guitar/spectralPeaks.tish"); } catch (e) {}

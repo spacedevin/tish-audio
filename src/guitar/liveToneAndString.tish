@@ -1,0 +1,40 @@
+// Monophonic live pitch + string/fret inference (pure). UI hooks call this; keep analyser/RAF in components.
+import { noteStrings } from "../audio/dsp.tish"
+import { stableGuitarFrequency, midiAndCentsFromHz } from "./guitarPitchFrame.tish"
+import { inferStringFretFromMidi } from "./stringInference.tish"
+import { STANDARD_6_EADGBE_OPEN_MIDI, STANDARD_6_STRING_LABELS } from "./tuningConfig.tish"
+
+export fn buildTunerSnapshot(freqHz, openMidis, strum) {
+const midis = openMidis && openMidis.length ? openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
+if (!Number.isFinite(freqHz) || freqHz <= 0) {
+return { hasPitch: false, freqHz: 0, noteName: '-', octave: 0, centsFromTarget: 0, tuningCents: 0, stringIndex: -1, fret: 0, stringLabel: '', strum };
+}
+const fStable = stableGuitarFrequency(freqHz);
+const { exactMidi, quantizedMidi, centsToNearest } = midiAndCentsFromHz(fStable);
+const q = quantizedMidi;
+const noteName = noteStrings[((q % 12) + 12) % 12];
+const octave = Math.floor(q / 12) - 1;
+const tuningCents = centsToNearest;
+const inf = inferStringFretFromMidi(exactMidi, midis, freqHz);
+if (!inf) {
+return { hasPitch: true, freqHz: Math.round(fStable), noteName, octave, centsFromTarget: 0, tuningCents, stringIndex: -1, fret: 0, stringLabel: '', strum };
+}
+const stringLabel = midis.length === 6 && STANDARD_6_STRING_LABELS[inf.stringIndex] ? STANDARD_6_STRING_LABELS[inf.stringIndex] : ('String idx ' + String(inf.stringIndex));
+return {
+hasPitch: true,
+freqHz: Math.round(fStable),
+noteName,
+octave,
+centsFromTarget: inf.centsFromTarget,
+tuningCents,
+stringIndex: inf.stringIndex,
+fret: inf.fret,
+stringLabel,
+strum
+};
+}
+
+export fn tunerSnapshotThrottleKey(snap) {
+if (!snap || typeof snap !== 'object') return '';
+return (snap.hasPitch ? '1' : '0') + '|' + String(snap.noteName) + '|' + String(Math.round(snap.tuningCents)) + '|' + String(snap.freqHz) + '|' + String(snap.stringIndex) + '|' + String(snap.fret) + '|' + (snap.strum ? '1' : '0');
+}

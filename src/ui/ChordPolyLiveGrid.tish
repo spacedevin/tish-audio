@@ -1,11 +1,6 @@
 import { h, useRef, useLayoutEffect, useEffect } from "lattish"
-import { analyzeChordFromAnalyser } from "../guitar/polyphonicStrumAnalysis.tish"
-import {
-primeChordPolyLiveDom,
-paintChordPolyLiveDom,
-defaultChordSnap,
-polyChordThrottleKey
-} from "./chordPolyLiveDom.tish"
+import { analyzeLiveChord, defaultChordSnap, polyChordThrottleKey } from "../guitar/liveChordDetect.tish"
+import { primeChordPolyLiveDom, paintChordPolyLiveDom } from "./chordPolyLiveDom.tish"
 
 // Poly chord decode: RAF reads analyser but paints imperative DOM (Jam/Guitarcade pattern — no root setState).
 export fn ChordPolyLiveGrid(props) {
@@ -39,7 +34,7 @@ if (!a) {
 raf = requestAnimationFrame(loop);
 return;
 }
-const next = analyzeChordFromAnalyser(a, specRef.current, optsRef.current);
+const next = analyzeLiveChord(a, specRef.current, optsRef.current);
 const k = polyChordThrottleKey(next);
 if (k !== lastKeyRef.current) {
 lastKeyRef.current = k;

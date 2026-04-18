@@ -1,33 +1,6 @@
 // Imperative DOM for the poly chord grid (Jam/Guitarcade pattern: no Lattish setState on analyser RAF).
 import { noteStrings } from "../audio/dsp.tish"
 
-export fn defaultChordSnap() {
-return {
-assignments: [],
-totalAbsCents: 0,
-confidence: 0,
-peakCount: 0,
-peaks: [],
-chroma: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-rmsHint: 0
-};
-}
-
-export fn polyChordThrottleKey(snap) {
-if (!snap || typeof snap !== 'object') return '';
-let s = String(snap.peaks != null ? snap.peaks.length : 0);
-let i = 0;
-while (snap.assignments && i < snap.assignments.length) {
-const a = snap.assignments[i];
-s = s + ':' + String(a.stringIndex) + '/' + String(a.fret) + '/' + String(Math.round(a.targetMidi));
-i = i + 1;
-}
-s = s + '@' + String(Math.round((snap.confidence != null ? snap.confidence : 0) * 30));
-const rms = snap.rmsHint != null && Number.isFinite(snap.rmsHint) ? snap.rmsHint : 0;
-s = s + '~rms' + String(Math.round(rms * 120));
-return s;
-}
-
 const cellClass = (on, isNut) => {
 let c = 'w-6 h-7 sm:w-7 sm:h-8 text-[10px] sm:text-xs font-mono border border-neutral-800 flex items-center justify-center shrink-0 ';
 if (on) {
