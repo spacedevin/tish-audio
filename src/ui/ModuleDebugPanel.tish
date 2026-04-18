@@ -20,6 +20,7 @@ while (di < defs.length) {
 const def = defs[di];
 chain.push({
 id: "dbg_" + def.type + "_" + String(ci) + "_" + String(di),
+category: category,
 type: def.type,
 label: def.label,
 color: def.color,
@@ -46,13 +47,13 @@ return (
 <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-3 border-b border-neutral-800 bg-neutral-900/80">
 <div>
 <span class="text-xs font-black tracking-widest text-orange-400">DEBUG</span>
-<p class="text-[11px] text-neutral-500 mt-0.5">Hardware previews for the full library (non-interactive). Drop modules on the patch board to wire audio and edit parameters.</p>
+<p class="text-[11px] text-neutral-500 mt-0.5">Hardware previews for the full library. Click a module to add it to your patch board.</p>
 </div>
 <button type="button" onClick={onClose} class="text-neutral-500 hover:text-white p-2 rounded-lg hover:bg-neutral-800 transition-colors" title="Close">
 <X class="w-5 h-5" />
 </button>
 </div>
-<div class="overflow-x-auto overflow-y-auto custom-scrollbar p-4 flex flex-row items-center gap-0 flex-1 min-h-0">
+<div class="overflow-x-auto overflow-y-auto custom-scrollbar p-4 flex flex-wrap items-center gap-4 flex-1 min-h-0 content-start">
 {chain.map((mod, idx) => {
 const isWide = mod.type === 'graphic_eq' || mod.type === 'master_eq' || mod.type === 'console_mixer';
 const isVu = mod.type === 'vu_meter';
@@ -120,15 +121,12 @@ const innerH = isWide ? 216 : 340;
 const sc = isWide ? rackScale : pedalScale;
 
 return (
-<div key={mod.id} class="flex flex-row items-center shrink-0">
-<div class="shrink-0 overflow-hidden rounded-lg border border-neutral-800/80 bg-black/50" style={{ width: String(slotW) + "px", height: String(slotH) + "px" }}>
-<div style={{ width: String(innerW) + "px", height: String(innerH) + "px", transform: "scale(" + String(sc) + ")", transformOrigin: "top left" }}>
+<div key={mod.id} class="shrink-0 cursor-pointer transition-transform hover:scale-105 hover:z-10 focus:outline-none" tabIndex="0" onClick={() => { if (props.addNode) props.addNode(mod.category, mod.type); onClose(); }}>
+<div class="shrink-0 overflow-hidden rounded-lg border border-neutral-800/80 bg-black/50 shadow-md hover:shadow-[0_0_20px_rgba(249,115,22,0.3)] transition-shadow" style={{ width: String(slotW) + "px", height: String(slotH) + "px" }}>
+<div style={{ width: String(innerW) + "px", height: String(innerH) + "px", transform: "scale(" + String(sc) + ")", transformOrigin: "top left", pointerEvents: "none" }}>
 {preview}
 </div>
 </div>
-{idx < chain.length - 1 ? (
-<div class="flex items-center justify-center self-stretch px-1 text-orange-500/90 font-black text-lg select-none">→</div>
-) : null}
 </div>
 );
 })}

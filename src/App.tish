@@ -362,7 +362,7 @@ title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 </div>
 ) : null}
 {showModuleDebug ? (
-<ModuleDebugPanel onClose={() => setShowModuleDebug(false)} />
+<ModuleDebugPanel onClose={() => setShowModuleDebug(false)} addNode={addNode} />
 ) : null}
 </div>
 );
