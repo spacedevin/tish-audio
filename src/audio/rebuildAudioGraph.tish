@@ -6,6 +6,7 @@ if (!ctx) return;
 const nodeAudioMapRef = deps.nodeAudioMapRef
 const sourcesRef = deps.sourcesRef
 const analyserRef = deps.analyserRef
+const pitchAnalyserRef = deps.pitchAnalyserRef
 const outGainRef = deps.outGainRef
 
 Object.values(nodeAudioMapRef.current).forEach(n => {
@@ -38,6 +39,9 @@ else if (node.type === 'SYS_IN') {
 inNode = sourcesRef.current[node.params?.deviceId];
 if (!inNode) inNode = ctx.createGain(); 
 outNode = inNode;
+if (pitchAnalyserRef && pitchAnalyserRef.current && inNode && typeof inNode.connect === 'function') {
+try { inNode.connect(pitchAnalyserRef.current); } catch (ePitchTap) {}
+}
 } 
 else if (node.type === 'SYS_OUT') {
 inNode = ctx.createGain();

@@ -1,25 +1,63 @@
-import { h } from "lattish"
-import { RocksmithStyleTuner } from "./RocksmithStyleTuner.tish"
-import { useLiveGuitarPitch } from "./TunerReadout.tish"
-import { STANDARD_6_EADGBE_OPEN_MIDI } from "../guitar/tuningConfig.tish"
+import { h, useState } from "lattish"
+import { ChordFretboardPanel } from "./ChordFretboardPanel.tish"
+import { TuningMonophonicStrip } from "./TuningMonophonicStrip.tish"
+import { INSTRUMENT_PRESETS } from "../guitar/instrumentSpec.tish"
+import { SPECTRAL_BASS_DEFAULT, SPECTRAL_GUITAR_DEFAULT } from "../guitar/spectralProfile.tish"
 
 export fn TuningMode(props) {
 let tabActive = props.tabActive === true;
 let analyzerRef = props.analyzerRef;
+let pitchAnalyzerRef = props.pitchAnalyzerRef;
 let audioReady = props.audioReady === true;
+const pitchRef = pitchAnalyzerRef != null ? pitchAnalyzerRef : analyzerRef;
 
-const { snapshot } = useLiveGuitarPitch(analyzerRef, audioReady, tabActive, STANDARD_6_EADGBE_OPEN_MIDI);
+const [polyPresetIdx, setPolyPresetIdx] = useState(0);
+
+const spec = INSTRUMENT_PRESETS[polyPresetIdx] != null ? INSTRUMENT_PRESETS[polyPresetIdx] : INSTRUMENT_PRESETS[0];
+const peakProf = spec.openMidis.length <= 4 ? SPECTRAL_BASS_DEFAULT : SPECTRAL_GUITAR_DEFAULT;
+const polyOpts = {
+mergeCents: 30,
+centsTol: 50,
+maxBranch: 10,
+peakExtract: peakProf
+};
 
 return (
 <div class="flex-1 min-h-0 flex flex-col bg-black relative overflow-hidden">
-<div class="relative z-10 flex flex-col gap-3 p-3 sm:p-5 w-full max-w-4xl mx-auto min-h-0 overflow-y-auto custom-scrollbar">
-<div class="flex flex-wrap items-baseline justify-between gap-2 shrink-0">
+<div class="shrink-0 relative z-20 w-full max-w-4xl mx-auto px-3 sm:px-5 pt-3 sm:pt-5 pb-3 border-b border-neutral-800/90 bg-black">
+<div class="flex flex-wrap items-baseline justify-between gap-2">
 <h2 class="text-xl sm:text-2xl font-black text-white tracking-tight">TUNING</h2>
 <p class="text-neutral-500 text-[11px] sm:text-xs max-w-md leading-snug">
-Same analyser as Patch / Arcade. Use the chromatic strip and cents readout for tuning (A440). Colored string rows are only a guess.
+Pitch follows the dry input (pre–pedalboard) so modulation on the master bus does not move the needle. Use the chromatic strip for A440; colored rows are only a guess.
 </p>
 </div>
-<RocksmithStyleTuner snapshot={snapshot} openMidis={STANDARD_6_EADGBE_OPEN_MIDI} tuningTitle="Standard tuning" refPitch="A440" />
+<div class="mt-3 flex flex-wrap items-end gap-4 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2.5">
+<label class="flex flex-col gap-1 min-w-[12rem] cursor-pointer">
+<span class="text-[10px] text-neutral-500 font-bold uppercase tracking-wider">Chord instrument</span>
+<select
+class="bg-neutral-950 border border-neutral-600 rounded-lg px-2 py-2 text-sm text-white max-w-md"
+value={String(polyPresetIdx)}
+onChange={(ev) => setPolyPresetIdx(parseInt(ev.target.value, 10) || 0)}
+>
+{INSTRUMENT_PRESETS.map((p, idx) => (
+<option key={'inst-' + String(idx)} value={String(idx)}>{p.label}</option>
+))}
+</select>
+</label>
+<p class="text-[10px] text-neutral-500 max-w-sm leading-snug pb-0.5">
+Live strip and poly grid update the DOM directly (same pattern as Jam / Arcade) so the instrument control is not caught in full-app refreshes from the analyser loop.
+</p>
+</div>
+</div>
+<div class="relative z-10 flex flex-col gap-4 flex-1 min-h-0 w-full max-w-4xl mx-auto px-3 sm:px-5 pb-5 pt-3 overflow-y-auto custom-scrollbar isolate">
+<TuningMonophonicStrip pitchRef={pitchRef} audioReady={audioReady} tabActive={tabActive} />
+<ChordFretboardPanel
+tabActive={tabActive}
+analyserRef={pitchRef}
+audioReady={audioReady}
+spec={spec}
+polyOpts={polyOpts}
+/>
 </div>
 </div>
 );

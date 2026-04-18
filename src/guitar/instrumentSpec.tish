@@ -1,0 +1,58 @@
+// Pluggable string instrument definition for fretboard / polyphonic inference.
+// stringIndex 0 is always the lowest-pitched open string (thickest on guitar, etc.).
+
+import { STANDARD_6_EADGBE_OPEN_MIDI } from "./tuningConfig.tish"
+
+export fn validateOpenMidis(openMidis) {
+if (!openMidis || openMidis.length < 1 || openMidis.length > 12) return false;
+let i = 0;
+while (i < openMidis.length) {
+if (!Number.isFinite(openMidis[i])) return false;
+i = i + 1;
+}
+return true;
+}
+
+// openMidis: low string → high string. maxFret inclusive (0 = open).
+export fn makeInstrumentSpec(openMidis, maxFret, label) {
+const mf = Number.isFinite(maxFret) && maxFret > 0 ? Math.min(36, Math.floor(maxFret)) : 24;
+const lab = typeof label === 'string' && label.length ? label : 'Custom';
+if (!validateOpenMidis(openMidis)) {
+return { openMidis: [40, 45, 50, 55, 59, 64], maxFret: mf, label: lab + ' (fallback)' };
+}
+const copy = [];
+let j = 0;
+while (j < openMidis.length) {
+copy.push(openMidis[j]);
+j = j + 1;
+}
+return { openMidis: copy, maxFret: mf, label: lab };
+}
+
+export const STANDARD_6_GUITAR_EADGBE = makeInstrumentSpec(STANDARD_6_EADGBE_OPEN_MIDI, 24, '6-string · E A D G B e');
+
+// Standard 4-string bass (low E A D G).
+export const STANDARD_4_BASS_EADG = makeInstrumentSpec([28, 33, 38, 43], 24, '4-string bass · E A D G');
+
+// Drop-D guitar (low D).
+export const DROP_D_6_GUITAR = makeInstrumentSpec([38, 45, 50, 55, 59, 64], 24, '6-string · Drop D');
+
+// Low B … high e (common extended-range tuning).
+export const STANDARD_7_GUITAR_BEADGBE = makeInstrumentSpec([35, 40, 45, 50, 55, 59, 64], 24, '7-string · B E A D G B e');
+
+export const INSTRUMENT_PRESETS = [
+STANDARD_6_GUITAR_EADGBE,
+STANDARD_4_BASS_EADG,
+DROP_D_6_GUITAR,
+STANDARD_7_GUITAR_BEADGBE
+];
+
+export fn midiAtFret(openMidi, fret) {
+if (!Number.isFinite(openMidi) || !Number.isFinite(fret)) return NaN;
+return openMidi + fret;
+}
+
+export fn hzFromMidi(midi) {
+if (!Number.isFinite(midi)) return NaN;
+return 440 * Math.pow(2, (midi - 69) / 12);
+}

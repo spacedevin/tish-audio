@@ -1,0 +1,217 @@
+// Imperative DOM for the poly chord grid (Jam/Guitarcade pattern: no Lattish setState on analyser RAF).
+import { noteStrings } from "../audio/dsp.tish"
+
+export fn defaultChordSnap() {
+return {
+assignments: [],
+totalAbsCents: 0,
+confidence: 0,
+peakCount: 0,
+peaks: [],
+chroma: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+rmsHint: 0
+};
+}
+
+export fn polyChordThrottleKey(snap) {
+if (!snap || typeof snap !== 'object') return '';
+let s = String(snap.peaks != null ? snap.peaks.length : 0);
+let i = 0;
+while (snap.assignments && i < snap.assignments.length) {
+const a = snap.assignments[i];
+s = s + ':' + String(a.stringIndex) + '/' + String(a.fret) + '/' + String(Math.round(a.targetMidi));
+i = i + 1;
+}
+s = s + '@' + String(Math.round((snap.confidence != null ? snap.confidence : 0) * 30));
+const rms = snap.rmsHint != null && Number.isFinite(snap.rmsHint) ? snap.rmsHint : 0;
+s = s + '~rms' + String(Math.round(rms * 120));
+return s;
+}
+
+const cellClass = (on, isNut) => {
+let c = 'w-6 h-7 sm:w-7 sm:h-8 text-[10px] sm:text-xs font-mono border border-neutral-800 flex items-center justify-center shrink-0 ';
+if (on) {
+c = c + 'bg-orange-500/90 text-black font-black border-orange-400';
+} else {
+c = c + 'bg-neutral-900/80 text-neutral-500';
+}
+return c;
+};
+
+const cellText = (on, isNut) => {
+if (on && isNut) return '●';
+if (isNut) return '·';
+return '';
+};
+
+export fn primeChordPolyLiveDom(rootEl, spec) {
+if (!rootEl) return;
+const doc = rootEl.ownerDocument || document;
+while (rootEl.firstChild) {
+rootEl.removeChild(rootEl.firstChild);
+}
+rootEl.className = 'space-y-4';
+
+const opens = spec.openMidis;
+const maxF = spec.maxFret != null ? spec.maxFret : 24;
+const maxCols = Math.min(16, maxF + 1);
+
+const top = doc.createElement('div');
+top.className = 'flex flex-wrap items-center gap-4';
+const confWrap = doc.createElement('div');
+confWrap.className = 'flex-1 min-w-[8rem]';
+const confLabel = doc.createElement('p');
+confLabel.className = 'text-[10px] text-neutral-500 uppercase tracking-wider mb-1';
+confLabel.textContent = 'Confidence';
+const track = doc.createElement('div');
+track.className = 'h-2 rounded-full bg-neutral-800 border border-neutral-700 overflow-hidden';
+const fill = doc.createElement('div');
+fill.className = 'h-full bg-emerald-500 transition-all duration-150';
+fill.setAttribute('data-cp-conf-fill', '1');
+fill.style.width = '0%';
+track.appendChild(fill);
+const confMeta = doc.createElement('p');
+confMeta.className = 'text-xs text-neutral-400 mt-1';
+confMeta.setAttribute('data-cp-conf-meta', '1');
+confMeta.textContent = '0% · Σ|0| cents';
+confWrap.appendChild(confLabel);
+confWrap.appendChild(track);
+confWrap.appendChild(confMeta);
+const peakEl = doc.createElement('p');
+peakEl.className = 'text-[11px] text-neutral-500 font-mono';
+peakEl.setAttribute('data-cp-peak', '1');
+peakEl.textContent = 'No strong peaks';
+top.appendChild(confWrap);
+top.appendChild(peakEl);
+rootEl.appendChild(top);
+
+const scroll = doc.createElement('div');
+scroll.className = 'overflow-x-auto pb-1';
+const inner = doc.createElement('div');
+inner.className = 'inline-flex flex-col gap-0.5 min-w-min';
+inner.setAttribute('data-cp-grid', '1');
+
+const headRow = doc.createElement('div');
+headRow.className = 'flex items-stretch';
+const h0 = doc.createElement('div');
+h0.className = 'w-14 sm:w-16 shrink-0 border border-transparent';
+headRow.appendChild(h0);
+let hi = 0;
+while (hi < maxCols) {
+const lab = hi === 0 ? '∅' : String(hi);
+const c = doc.createElement('div');
+c.className = 'w-6 h-6 sm:w-7 sm:h-6 text-[9px] text-neutral-500 font-mono flex items-center justify-center shrink-0 border border-neutral-800 bg-neutral-900/50';
+c.textContent = lab;
+c.setAttribute('data-cp-h', String(hi));
+headRow.appendChild(c);
+hi = hi + 1;
+}
+inner.appendChild(headRow);
+
+let si = 0;
+while (si < opens.length) {
+const openMidi = opens[si];
+const row = doc.createElement('div');
+row.className = 'flex items-stretch';
+row.setAttribute('data-cp-srow', String(si));
+const nm = noteStrings[((Math.round(openMidi) % 12) + 12) % 12];
+let peg = nm;
+if (si === 0 && Math.round(openMidi) === 40) peg = 'E';
+if (si === opens.length - 1 && Math.round(openMidi) === 64) peg = 'e';
+const label = doc.createElement('div');
+label.className = 'w-14 sm:w-16 shrink-0 flex items-center justify-center text-xs font-bold text-orange-400 border border-neutral-800 bg-neutral-900/80 rounded-l';
+label.textContent = peg;
+row.appendChild(label);
+let fj = 0;
+while (fj < maxCols) {
+const cell = doc.createElement('div');
+cell.className = cellClass(false, fj === 0);
+cell.textContent = cellText(false, fj === 0);
+cell.setAttribute('data-cp-i', String(si));
+cell.setAttribute('data-cp-j', String(fj));
+row.appendChild(cell);
+fj = fj + 1;
+}
+inner.appendChild(row);
+si = si + 1;
+}
+scroll.appendChild(inner);
+rootEl.appendChild(scroll);
+
+const assign = doc.createElement('div');
+assign.setAttribute('data-cp-assign', '1');
+assign.className = 'text-xs font-mono text-emerald-400/95 space-y-1';
+const assignHint = doc.createElement('p');
+assignHint.className = 'text-xs text-neutral-500';
+assignHint.textContent = 'Strum or hold a chord — inactive strings stay dim.';
+assign.appendChild(assignHint);
+rootEl.appendChild(assign);
+}
+
+export fn paintChordPolyLiveDom(rootEl, snap, spec) {
+if (!rootEl) return;
+const d = rootEl.ownerDocument || document;
+const fill = rootEl.querySelector('[data-cp-conf-fill]');
+const meta = rootEl.querySelector('[data-cp-conf-meta]');
+const peakEl = rootEl.querySelector('[data-cp-peak]');
+const assignRoot = rootEl.querySelector('[data-cp-assign]');
+if (!fill || !meta || !peakEl || !assignRoot) return;
+
+const confPct = Math.round((snap.confidence != null ? snap.confidence : 0) * 100);
+fill.style.width = String(confPct) + '%';
+meta.textContent = String(confPct) + '% · Σ|' + String(Math.round(snap.totalAbsCents != null ? snap.totalAbsCents : 0)) + '| cents';
+if (snap.peaks && snap.peaks.length) {
+peakEl.textContent = String(snap.peaks.length) + ' peaks · RMS≈' + (snap.rmsHint != null ? snap.rmsHint.toFixed(4) : '?');
+} else {
+peakEl.textContent = 'No strong peaks';
+}
+
+const opens = spec.openMidis;
+const byString = {};
+let ai = 0;
+while (snap.assignments && ai < snap.assignments.length) {
+const g = snap.assignments[ai];
+byString[g.stringIndex] = g;
+ai = ai + 1;
+}
+
+let si = 0;
+while (si < opens.length) {
+let fj = 0;
+const maxF = spec.maxFret != null ? spec.maxFret : 24;
+const maxCols = Math.min(16, maxF + 1);
+while (fj < maxCols) {
+const cell = rootEl.querySelector('[data-cp-i="' + String(si) + '"][data-cp-j="' + String(fj) + '"]');
+if (cell) {
+const ass = byString[si];
+const on = ass != null && ass.fret === fj;
+cell.className = cellClass(on, fj === 0);
+cell.textContent = cellText(on, fj === 0);
+}
+fj = fj + 1;
+}
+si = si + 1;
+}
+
+while (assignRoot.firstChild) {
+assignRoot.removeChild(assignRoot.firstChild);
+}
+if (snap.assignments && snap.assignments.length > 0) {
+assignRoot.className = 'text-xs font-mono text-emerald-400/95 space-y-1';
+let li = 0;
+while (li < snap.assignments.length) {
+const a = snap.assignments[li];
+const centsPart = (a.centsErr >= 0 ? '+' : '') + String(Math.round(a.centsErr)) + ' c';
+const p = d.createElement('p');
+p.className = 'text-xs font-mono text-emerald-400/95';
+p.textContent = 'String ' + String(a.stringIndex + 1) + ' · fret ' + String(a.fret) + ' · MIDI ' + String(Math.round(a.targetMidi)) + ' · Δ ' + centsPart;
+assignRoot.appendChild(p);
+li = li + 1;
+}
+} else {
+const p = d.createElement('p');
+p.className = 'text-xs text-neutral-500';
+p.textContent = 'Strum or hold a chord — inactive strings stay dim.';
+assignRoot.appendChild(p);
+}
+}

@@ -1,0 +1,7 @@
+// Optional spectral front-end presets (neck vs bridge, bass vs guitar) for polyphonic peak pick.
+// Passed as `opts.peakExtract` into analyzeChordFromAnalyser / analyzeChordFromFrequencyData.
+
+export const SPECTRAL_NECK_WARM = { minHz: 72, maxHz: 4200, relPeak: 0.028 };
+export const SPECTRAL_BRIDGE_BRIGHT = { minHz: 82, maxHz: 6200, relPeak: 0.042 };
+export const SPECTRAL_BASS_DEFAULT = { minHz: 40, maxHz: 3200, relPeak: 0.05 };
+export const SPECTRAL_GUITAR_DEFAULT = { minHz: 70, maxHz: 5000, relPeak: 0.035 };

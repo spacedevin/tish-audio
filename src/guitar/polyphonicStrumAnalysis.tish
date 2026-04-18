@@ -1,13 +1,78 @@
-// Phase 2 (not wired yet): polyphonic / full-strum analysis for tuner-style "reverse tuning".
-//
-// The live path in guitarPitchFrame.tish uses autocorrelation on a single time-domain buffer,
-// which resolves one dominant pitch. Chords and wide strums mix energy across partials, so
-// reliable per-string open-string calibration needs a different front-end, for example:
-// - getFloatFrequencyData + peak picking or harmonic product spectrum
-// - chromagram / template matching against expected string fundamentals
-// - optional second AnalyserNode with larger fftSize dedicated to tuning
-//
-// When implemented, export something like estimateOpenOffsetsFromStrum(fftMagnitudes, tuning)
-// and keep arcade + header on the cheap monophonic path unless the user opts into strum scan.
+// Polyphonic chord → string/fret inference: FFT peaks + joint assignment on an InstrumentSpec.
 
-export const POLYPHONIC_STRUM_ANALYSIS_PLANNED = true;
+import { extractSpectralPeaks, mergePeaksWithinCents, collapseHarmonicPeaks, buildChromagram } from "./spectralPeaks.tish"
+import { assignChordFromTargets } from "./fretboardAssignment.tish"
+
+export fn analyzeChordFromFrequencyData(freqData, sampleRate, fftSize, spec, opts) {
+const empty = {
+assignments: [],
+totalAbsCents: 0,
+confidence: 0,
+peakCount: 0,
+peaks: [],
+chroma: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+rmsHint: 0
+};
+if (!freqData || !spec || !spec.openMidis) return empty;
+const mergeCents = opts && typeof opts.mergeCents === 'number' ? opts.mergeCents : 32;
+const centsTol = opts && typeof opts.centsTol === 'number' ? opts.centsTol : 48;
+const maxBranch = opts && typeof opts.maxBranch === 'number' ? opts.maxBranch : 8;
+const raw = extractSpectralPeaks(freqData, sampleRate, fftSize, opts && opts.peakExtract ? opts.peakExtract : null);
+const merged = mergePeaksWithinCents(raw, mergeCents);
+const peaks = collapseHarmonicPeaks(merged, 2.0);
+const chroma = buildChromagram(freqData, sampleRate, fftSize);
+let chromaMax = 0;
+let ci = 0;
+while (ci < 12) {
+if (chroma[ci] > chromaMax) chromaMax = chroma[ci];
+ci = ci + 1;
+}
+let rmsHint = 0;
+let ri = 0;
+while (ri < freqData.length) {
+const v = freqData[ri];
+if (Number.isFinite(v)) rmsHint = rmsHint + v * v;
+ri = ri + 1;
+}
+rmsHint = Math.sqrt(rmsHint / Math.max(1, freqData.length));
+const targets = [];
+let pi = 0;
+while (pi < peaks.length) {
+const p = peaks[pi];
+let pc = Math.round(p.midi) % 12;
+if (pc < 0) pc = pc + 12;
+const chromaRatio = chromaMax > 0.0000001 ? chroma[pc] / chromaMax : 0.5;
+const w = 0.15 + 0.85 * chromaRatio;
+targets.push({ midi: p.midi, strength: p.mag * w });
+pi = pi + 1;
+}
+const assign = assignChordFromTargets(targets, spec, centsTol, maxBranch);
+return {
+assignments: assign.assignments,
+totalAbsCents: assign.totalAbsCents,
+confidence: assign.confidence,
+peakCount: assign.peakCount,
+peaks,
+chroma,
+rmsHint
+};
+}
+
+export fn analyzeChordFromAnalyser(analyser, spec, opts) {
+const empty = {
+assignments: [],
+totalAbsCents: 0,
+confidence: 0,
+peakCount: 0,
+peaks: [],
+chroma: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+rmsHint: 0
+};
+if (!analyser || !spec) return empty;
+const fftSize = analyser.fftSize;
+const bins = Math.floor(fftSize / 2);
+const buf = new Float32Array(bins);
+try { analyser.getFloatFrequencyData(buf); } catch (eF) { return empty; }
+const sr = analyser.context ? analyser.context.sampleRate : 44100;
+return analyzeChordFromFrequencyData(buf, sr, fftSize, spec, opts || null);
+}

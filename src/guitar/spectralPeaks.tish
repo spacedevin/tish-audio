@@ -1,0 +1,180 @@
+// FFT magnitude → salient peaks (Hz + strength) for polyphonic chord analysis.
+
+export fn sortPeaksByMidiAsc(arr) {
+let i = 0;
+while (i < arr.length) {
+let j = i + 1;
+while (j < arr.length) {
+if (arr[j].midi < arr[i].midi) {
+const t = arr[i];
+arr[i] = arr[j];
+arr[j] = t;
+}
+j = j + 1;
+}
+i = i + 1;
+}
+return arr;
+}
+
+export fn sortPeaksByHzAsc(arr) {
+let i = 0;
+while (i < arr.length) {
+let j = i + 1;
+while (j < arr.length) {
+if (arr[j].hz < arr[i].hz) {
+const t = arr[i];
+arr[i] = arr[j];
+arr[j] = t;
+}
+j = j + 1;
+}
+i = i + 1;
+}
+return arr;
+}
+
+export fn hzFromBin(binIdx, sampleRate, fftSize) {
+if (!Number.isFinite(binIdx) || binIdx < 0) return 0;
+return (binIdx * sampleRate) / fftSize;
+}
+
+export fn midiFromHz(hz) {
+if (!Number.isFinite(hz) || hz <= 0) return NaN;
+return 12 * (Math.log(hz / 440) / Math.log(2)) + 69;
+}
+
+export fn centsBetweenMidi(a, b) {
+if (!Number.isFinite(a) || !Number.isFinite(b)) return 999999;
+return (a - b) * 100;
+}
+
+// Local maxima in linear magnitude spectrum; ignores bins outside [minHz, maxHz].
+export fn extractSpectralPeaks(mags, sampleRate, fftSize, opts) {
+const minHz = opts && typeof opts.minHz === 'number' ? opts.minHz : 65;
+const maxHz = opts && typeof opts.maxHz === 'number' ? opts.maxHz : 5200;
+const minMag = opts && typeof opts.minMag === 'number' ? opts.minMag : 0.0000001;
+const half = Math.floor(fftSize / 2);
+if (!mags || mags.length < half) return [];
+let maxM = 0;
+let bi = 0;
+while (bi < half) {
+const v = mags[bi];
+if (Number.isFinite(v) && v > maxM) maxM = v;
+bi = bi + 1;
+}
+if (maxM < minMag) return [];
+const thresh = maxM * (opts && typeof opts.relPeak === 'number' ? opts.relPeak : 0.04);
+const peaks = [];
+let k = 2;
+while (k < half - 2) {
+const hz = hzFromBin(k, sampleRate, fftSize);
+if (hz < minHz || hz > maxHz) {
+k = k + 1;
+continue;
+}
+const m0 = mags[k];
+if (!Number.isFinite(m0) || m0 < thresh) {
+k = k + 1;
+continue;
+}
+if (m0 <= mags[k - 1] || m0 <= mags[k - 2] || m0 < mags[k + 1] || m0 < mags[k + 2]) {
+k = k + 1;
+continue;
+}
+const midi = midiFromHz(hz);
+if (!Number.isFinite(midi)) {
+k = k + 1;
+continue;
+}
+peaks.push({ hz, midi, mag: m0 });
+k = k + 1;
+}
+return peaks;
+}
+
+// Merge peaks whose MIDI differs by less than mergeCents (weighted by mag).
+export fn mergePeaksWithinCents(peaks, mergeCents) {
+if (!peaks || peaks.length === 0) return [];
+const mc = Number.isFinite(mergeCents) && mergeCents > 5 ? mergeCents : 28;
+const sorted = sortPeaksByMidiAsc(peaks.slice());
+const out = [];
+let i = 0;
+while (i < sorted.length) {
+let sumHzW = 0;
+let sumW = 0;
+let sumMidiW = 0;
+let maxMag = 0;
+let j = i;
+while (j < sorted.length && Math.abs(sorted[j].midi - sorted[i].midi) * 100 < mc) {
+const w = sorted[j].mag;
+sumW = sumW + w;
+sumHzW = sumHzW + sorted[j].hz * w;
+sumMidiW = sumMidiW + sorted[j].midi * w;
+if (sorted[j].mag > maxMag) maxMag = sorted[j].mag;
+j = j + 1;
+}
+const hz = sumW > 0 ? sumHzW / sumW : sorted[i].hz;
+const midi = sumW > 0 ? sumMidiW / sumW : sorted[i].midi;
+out.push({ hz, midi, mag: maxMag });
+i = j;
+}
+return out;
+}
+
+// Prefer lower member when a pair is within harmonicRatio of 2:1 and lower has comparable energy.
+export fn collapseHarmonicPeaks(peaks, harmonicRatio) {
+if (!peaks || peaks.length < 2) return peaks || [];
+const hr = Number.isFinite(harmonicRatio) && harmonicRatio > 1 ? harmonicRatio : 2.02;
+const arr = sortPeaksByHzAsc(peaks.slice());
+const kill = {};
+let a = 0;
+while (a < arr.length) {
+let b = a + 1;
+while (b < arr.length) {
+const ratio = arr[b].hz / arr[a].hz;
+if (ratio > hr - 0.08 && ratio < hr + 0.12) {
+if (arr[b].mag <= arr[a].mag * 1.35) kill[b] = true;
+}
+b = b + 1;
+}
+a = a + 1;
+}
+const kept = [];
+let t = 0;
+while (t < arr.length) {
+if (!kill[t]) kept.push(arr[t]);
+t = t + 1;
+}
+return kept;
+}
+
+// 12-bin chroma from magnitude spectrum (rough; good for voicing hints).
+export fn buildChromagram(mags, sampleRate, fftSize) {
+const chroma = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const half = Math.floor(fftSize / 2);
+if (!mags || mags.length < half) return chroma;
+let k = 2;
+while (k < half - 1) {
+const hz = hzFromBin(k, sampleRate, fftSize);
+if (hz < 80 || hz > 6000) {
+k = k + 1;
+continue;
+}
+const m = mags[k];
+if (!Number.isFinite(m) || m <= 0) {
+k = k + 1;
+continue;
+}
+const midi = midiFromHz(hz);
+if (!Number.isFinite(midi)) {
+k = k + 1;
+continue;
+}
+let pc = Math.round(midi) % 12;
+if (pc < 0) pc = pc + 12;
+chroma[pc] = chroma[pc] + m;
+k = k + 1;
+}
+return chroma;
+}

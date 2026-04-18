@@ -49,16 +49,22 @@ strum
 };
 }
 
+export fn tunerSnapshotThrottleKey(snap) {
+if (!snap || typeof snap !== 'object') return '';
+return (snap.hasPitch ? '1' : '0') + '|' + String(snap.noteName) + '|' + String(Math.round(snap.tuningCents)) + '|' + String(snap.freqHz) + '|' + String(snap.stringIndex) + '|' + String(snap.fret) + '|' + (snap.strum ? '1' : '0');
+}
+
 export fn useLiveGuitarPitch(analyserRef, audioReady, active, openMidis) {
 const midis = openMidis && openMidis.length ? openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
-// Lattish useState does not invoke function initializers (unlike React); pass a value, not () => ...
 const [snapshot, setSnapshot] = useState(buildTunerSnapshot(0, midis, false));
 const safeSnapshot = snapshot != null ? snapshot : buildTunerSnapshot(0, midis, false);
 const strumGateRef = useRef(null);
 if (!strumGateRef.current) strumGateRef.current = createStrumGate();
+const lastKeyRef = useRef('');
 
 useEffect(() => {
 if (!active || !audioReady) return;
+lastKeyRef.current = '';
 let cancelled = false;
 let raf = 0;
 let dataArray = null;
@@ -76,7 +82,11 @@ analyser.getFloatTimeDomainData(dataArray);
 const frame = analyzeTimeDomainFrame(dataArray, sampleRate, { maxHz: 2200 });
 const strum = strumGateRef.current.update(frame.rms, time);
 const snap = buildTunerSnapshot(frame.freqHz, midis, strum);
+const k = tunerSnapshotThrottleKey(snap);
+if (k !== lastKeyRef.current) {
+lastKeyRef.current = k;
 setSnapshot(snap);
+}
 raf = requestAnimationFrame(loop);
 };
 raf = requestAnimationFrame(loop);

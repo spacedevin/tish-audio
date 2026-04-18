@@ -16,7 +16,9 @@ playMissThud
 export fn Guitarcade(props) {
 let tabActive = props.tabActive;
 let analyzerRef = props.analyzerRef;
+let pitchAnalyzerRef = props.pitchAnalyzerRef;
 let audioReady = props.audioReady;
+const pitchRef = pitchAnalyzerRef != null ? pitchAnalyzerRef : analyzerRef;
 
 let [profileId, setProfileId] = useState('guitarHero');
 
@@ -76,7 +78,7 @@ let animationId = 0;
 
 const startEngine = () => {
 if (cancelled) return;
-if (!canvasRef.current || !analyzerRef.current) {
+if (!canvasRef.current || !pitchRef.current) {
 waitId = requestAnimationFrame(startEngine);
 return;
 }
@@ -86,7 +88,7 @@ if (!ctx2d) {
 waitId = requestAnimationFrame(startEngine);
 return;
 }
-const analyser = analyzerRef.current;
+const analyser = pitchRef.current;
 const ac = analyser.context;
 const sampleRate = analyser.context.sampleRate;
 const dataArray = new Float32Array(analyser.fftSize);
@@ -226,7 +228,7 @@ ctx2d.textAlign = 'left';
 
 ctx2d.fillStyle = '#737373';
 ctx2d.font = '12px ui-monospace, monospace';
-ctx2d.fillText('Signal = post-patch Master Out', lanePad, h - 18);
+ctx2d.fillText('Signal = dry input (pre-effects)', lanePad, h - 18);
 ctx2d.textAlign = 'right';
 ctx2d.fillText((freq > 0 ? String(Math.round(freq)) + ' Hz' : '-') + '   lane ' + (playerLane >= 0 ? String(playerLane) : '-'), w - lanePad, h - 18);
 ctx2d.textAlign = 'left';
@@ -243,7 +245,7 @@ cancelled = true;
 if (waitId) cancelAnimationFrame(waitId);
 if (animationId) cancelAnimationFrame(animationId);
 };
-}, [tabActive, audioReady, analyzerRef, profileId]);
+}, [tabActive, audioReady, pitchRef, profileId]);
 
 const handleReplay = () => {
 resetForProfile(profileId);

@@ -23,6 +23,7 @@ if (els.hz) els.hz.textContent = String(pitchHz) + "Hz";
 export fn AudioMeterProvider(props) {
 let children = props.children;
 let analyserRef = props.analyserRef;
+let pitchAnalyserRef = props.pitchAnalyserRef;
 let audioCtxRef = props.audioCtxRef;
 let audioReady = props.audioReady;
 
@@ -30,8 +31,10 @@ const lastInputLevelBucketRef = useRef(-1);
 const animationRef = useRef(null);
 
 useEffect(() => {
-if (!audioReady || !analyserRef.current || !audioCtxRef.current) return;
-const analyser = analyserRef.current;
+if (!audioReady || !audioCtxRef.current) return;
+const pitchA = pitchAnalyserRef && pitchAnalyserRef.current ? pitchAnalyserRef.current : null;
+const analyser = pitchA != null ? pitchA : analyserRef.current;
+if (!analyser) return;
 const bufferLength = analyser.fftSize;
 const dataArray = new Float32Array(bufferLength);
 let lastUiMs = 0;
@@ -80,7 +83,7 @@ cancelled = true;
 if (animationRef.current) cancelAnimationFrame(animationRef.current);
 animationRef.current = null;
 };
-}, [audioReady, analyserRef, audioCtxRef]);
+}, [audioReady, analyserRef, pitchAnalyserRef, audioCtxRef]);
 
 return children;
 }

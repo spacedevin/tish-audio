@@ -31,6 +31,7 @@ let [connections, setConnections] = useState([]);
 const audioCtxRef = useRef(null);
 const sourcesRef = useRef({}); 
 const analyserRef = useRef(null);
+const pitchAnalyserRef = useRef(null);
 const outGainRef = useRef(null);
 const nodeAudioMapRef = useRef({}); 
 const audioRebuildSigRef = useRef("");
@@ -91,6 +92,12 @@ outGainRef.current = outGain;
 analyser.connect(outGain);
 outGain.connect(ctx.destination);
 }
+if (!pitchAnalyserRef.current) {
+const pitchA = ctx.createAnalyser();
+pitchA.fftSize = 4096;
+pitchA.smoothingTimeConstant = 0.25;
+pitchAnalyserRef.current = pitchA;
+}
 
 const newInId = "sys_in_" + deviceId.slice(0, 6);
 setNodes(prev => [...prev, {
@@ -123,7 +130,7 @@ return;
 const sig = audioGraphTopologySignature(nodes, connections);
 if (sig !== audioRebuildSigRef.current) {
 audioRebuildSigRef.current = sig;
-const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, analyserRef: analyserRef, outGainRef: outGainRef };
+const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, analyserRef: analyserRef, pitchAnalyserRef: pitchAnalyserRef, outGainRef: outGainRef };
 rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
 }
 syncAudioNodeParams(audioCtxRef.current, nodeAudioMapRef, nodes);
@@ -226,24 +233,12 @@ const removeConnection = (id) => {
 setConnections(prev => prev.filter(c => c.id !== id));
 };
 
+// Lattish uses one global hook stack per App() flush; NodeGraphView runs O(nodes) FC hooks.
+// Keep Patch (NodeGraphView) after Jam / Arcade / Tuning in <main> so adding SYS_IN never shifts their useState slots.
+
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans">
-<style dangerouslySetInnerHTML={{__html: "
-.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); border-radius: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
-
-@keyframes dash-flow {
-to { stroke-dashoffset: -24; }
-}
-.animate-dash-flow {
-animation: dash-flow 0.5s linear infinite;
-}
-
-"}} />
-
-<AudioMeterProvider analyserRef={analyserRef} audioCtxRef={audioCtxRef} audioReady={audioReady}>
+<AudioMeterProvider analyserRef={analyserRef} pitchAnalyserRef={pitchAnalyserRef} audioCtxRef={audioCtxRef} audioReady={audioReady}>
 <header class="bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
 <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
 <div class="flex flex-wrap items-center gap-3 min-w-0">
@@ -299,6 +294,15 @@ title="Preview all modules in a chain (layout only)"
 </header>
 
 <main class="flex-1 min-h-0 flex flex-col relative overflow-hidden">
+<div class={activeTab === 'jam' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
+<JamMode tabActive={activeTab === 'jam'} audioCtx={audioCtxRef.current} />
+</div>
+<div class={activeTab === 'game' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
+<Guitarcade tabActive={activeTab === 'game'} analyzerRef={analyserRef} pitchAnalyzerRef={pitchAnalyserRef} audioReady={audioReady} />
+</div>
+<div class={activeTab === 'tuning' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
+<TuningMode tabActive={activeTab === 'tuning'} analyzerRef={analyserRef} pitchAnalyzerRef={pitchAnalyserRef} audioReady={audioReady} />
+</div>
 <div class={activeTab === 'pedalboard' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
 <NodeGraphView 
 nodes={nodes} 
@@ -313,15 +317,6 @@ toggleNodeBypass={toggleNodeBypass}
 addConnection={addConnection}
 removeConnection={removeConnection}
 />
-</div>
-<div class={activeTab === 'jam' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
-<JamMode tabActive={activeTab === 'jam'} audioCtx={audioCtxRef.current} />
-</div>
-<div class={activeTab === 'game' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
-<Guitarcade tabActive={activeTab === 'game'} analyzerRef={analyserRef} audioReady={audioReady} />
-</div>
-<div class={activeTab === 'tuning' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
-<TuningMode tabActive={activeTab === 'tuning'} analyzerRef={analyserRef} audioReady={audioReady} />
 </div>
 </main>
 </AudioMeterProvider>

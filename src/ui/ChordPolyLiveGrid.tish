@@ -1,0 +1,58 @@
+import { h, useRef, useLayoutEffect, useEffect } from "lattish"
+import { analyzeChordFromAnalyser } from "../guitar/polyphonicStrumAnalysis.tish"
+import {
+primeChordPolyLiveDom,
+paintChordPolyLiveDom,
+defaultChordSnap,
+polyChordThrottleKey
+} from "./chordPolyLiveDom.tish"
+
+// Poly chord decode: RAF reads analyser but paints imperative DOM (Jam/Guitarcade pattern — no root setState).
+export fn ChordPolyLiveGrid(props) {
+let tabActive = props.tabActive === true;
+let analyserRef = props.analyserRef;
+let audioReady = props.audioReady === true;
+let spec = props.spec;
+let polyOpts = props.polyOpts;
+
+const rootRef = useRef(null);
+const specRef = useRef(spec);
+const optsRef = useRef(polyOpts);
+specRef.current = spec;
+optsRef.current = polyOpts;
+const lastKeyRef = useRef('');
+
+useLayoutEffect(() => {
+primeChordPolyLiveDom(rootRef.current, spec);
+paintChordPolyLiveDom(rootRef.current, defaultChordSnap(), spec);
+}, [spec]);
+
+useEffect(() => {
+if (!tabActive || !audioReady) return;
+lastKeyRef.current = '';
+let cancelled = false;
+let raf = 0;
+const loop = () => {
+if (cancelled) return;
+const a = analyserRef.current;
+if (!a) {
+raf = requestAnimationFrame(loop);
+return;
+}
+const next = analyzeChordFromAnalyser(a, specRef.current, optsRef.current);
+const k = polyChordThrottleKey(next);
+if (k !== lastKeyRef.current) {
+lastKeyRef.current = k;
+paintChordPolyLiveDom(rootRef.current, next, specRef.current);
+}
+raf = requestAnimationFrame(loop);
+};
+raf = requestAnimationFrame(loop);
+return () => {
+cancelled = true;
+cancelAnimationFrame(raf);
+};
+}, [tabActive, audioReady, analyserRef]);
+
+return h('div', { ref: rootRef, class: 'relative z-0 w-full shrink-0 isolate' }, []);
+}

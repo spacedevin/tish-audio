@@ -2,7 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-/* SVG cable dash animation (also duplicated in App inline style for safety) */
+/* App chrome (was inline <style> in App.tish — static CSS avoids re-patching a broken vnode every flush) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* SVG cable dash animation */
 @keyframes dash-flow {
   to {
     stroke-dashoffset: -24;
