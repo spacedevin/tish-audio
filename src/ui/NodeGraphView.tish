@@ -5,6 +5,62 @@ import { WebGLBackground } from "./WebGLBackground.tish"
 import { RotaryKnob } from "./controls.tish"
 import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode } from "./nodes.tish"
 
+const SNAP_PEER_PX = 14;
+const SNAP_X_EDGE_GAP_PX = 20;
+
+const getNodeSize = (node) => {
+let w = 200; let h = 340;
+if (node.type === 'SYS_IN') { w = 96; h = 140; }
+else if (node.type === 'SYS_OUT') { w = 80; h = 140; }
+else if (node.isSystem) { w = 80; h = 140; }
+else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
+else if (node.type === 'master_eq') { w = 640; h = 200; }
+else if (node.type === 'graphic_eq') { w = 760; h = 240; }
+else if (node.type === 'vu_meter') { w = 120; h = 200; }
+else if (node.type === 'console_mixer') {
+const numCh = node.params.channels || 4;
+w = 160 + (numCh * 64);
+h = 300;
+} else if (node.type && String(node.type).indexOf('amp_') === 0) {
+w = 224; h = 384;
+}
+return { w, h };
+};
+
+const snapPosToPeers = (rx, ry, dragId, dragW, dragH, allNodes) => {
+let nx = rx; let ny = ry;
+let bestDx = SNAP_PEER_PX + 1; let bestDy = SNAP_PEER_PX + 1;
+let i = 0;
+while (i < allNodes.length) {
+const n = allNodes[i];
+i = i + 1;
+if (n.id === dragId) continue;
+const sz = getNodeSize(n);
+const ox = n.x; const oy = n.y; const ow = sz.w; const oh = sz.h;
+
+const xTargets = [ox, ox + ow + SNAP_X_EDGE_GAP_PX, ox - dragW - SNAP_X_EDGE_GAP_PX, ox + ow - dragW, ox + ow / 2 - dragW / 2];
+let ti = 0;
+while (ti < xTargets.length) {
+const tx = xTargets[ti];
+ti = ti + 1;
+const d = tx - rx;
+const ad = Math.abs(d);
+if (ad <= SNAP_PEER_PX && ad < bestDx) { bestDx = ad; nx = rx + d; }
+}
+
+const yTargets = [oy, oy + oh, oy - dragH, oy + oh - dragH, oy + oh / 2 - dragH / 2];
+let tj = 0;
+while (tj < yTargets.length) {
+const ty = yTargets[tj];
+tj = tj + 1;
+const d = ty - ry;
+const ad = Math.abs(d);
+if (ad <= SNAP_PEER_PX && ad < bestDy) { bestDy = ad; ny = ry + d; }
+}
+}
+return { x: Math.round(nx), y: Math.round(ny) };
+};
+
 export fn NodeGraphView(props) {
 let nodes = props.nodes;
 let connections = props.connections;
@@ -21,17 +77,8 @@ let [wiring, setWiring] = useState(null);
 let [draggingNode, setDraggingNode] = useState(null);
 
 const getJackCoords = (node, isOutput, portId = 'main') => {
-let w = 200; let h = 340; 
-if (node.isSystem) { w = 80; h = 140; }
-else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
-else if (node.type === 'master_eq') { w = 640; h = 200; }
-else if (node.type === 'graphic_eq') { w = 760; h = 240; }
-else if (node.type === 'vu_meter') { w = 120; h = 200; }
-else if (node.type === 'console_mixer') {
-const numCh = node.params.channels || 4;
-w = 160 + (numCh * 64);
-h = 300;
-}
+const sz = getNodeSize(node);
+let w = sz.w; let h = sz.h;
 
 const ports = getNodePorts(node)[isOutput ? 'out' : 'in'];
 const portIdx = Math.max(0, ports.indexOf(portId));
@@ -54,7 +101,16 @@ const ey = e.clientY - rect.top;
 if (draggingNode) {
 const dx = ex - draggingNode.startMouseX;
 const dy = ey - draggingNode.startMouseY;
-updateNodePos(draggingNode.id, draggingNode.startNodeX + dx, draggingNode.startNodeY + dy);
+const rawX = draggingNode.startNodeX + dx;
+const rawY = draggingNode.startNodeY + dy;
+const dragNode = nodes.find(n => n.id === draggingNode.id);
+if (dragNode) {
+const dsz = getNodeSize(dragNode);
+const snapped = snapPosToPeers(rawX, rawY, draggingNode.id, dsz.w, dsz.h, nodes);
+updateNodePos(draggingNode.id, snapped.x, snapped.y);
+} else {
+updateNodePos(draggingNode.id, Math.round(rawX), Math.round(rawY));
+}
 } else if (wiring) {
 setWiring({ ...wiring, x: ex, y: ey });
 }
