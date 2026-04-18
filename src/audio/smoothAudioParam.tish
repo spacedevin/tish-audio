@@ -1,0 +1,12 @@
+export const PARAM_RAMP_SEC = 0.04;
+
+export fn smoothAudioParam(param, value, ctx, rampSec) {
+if (!param || !ctx) return;
+const v = Number(value);
+if (!Number.isFinite(v)) return;
+const t = ctx.currentTime;
+const r = rampSec !== undefined && rampSec !== null && Number.isFinite(rampSec) ? rampSec : PARAM_RAMP_SEC;
+param.cancelScheduledValues(t);
+param.setValueAtTime(param.value, t);
+param.linearRampToValueAtTime(v, t + r);
+}

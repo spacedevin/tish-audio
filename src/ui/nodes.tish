@@ -207,13 +207,15 @@ class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-color
 
 
 export fn PedalNode(props) { let pedal = props.pedal; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let onToggleBypass = props.onToggleBypass;
+let previewOnly = props.previewOnly === true;
 const isDark = pedal.theme === 'dark';
 const isAmpSim = pedal.type && String(pedal.type).indexOf('amp_') === 0;
 const isCompact = !isAmpSim && Object.keys(pedal.params).length > 4;
+const knobCompact = isAmpSim || isCompact;
 const isBypassed = pedal.bypassed;
 const panelW = isAmpSim ? 224 : 200;
-const panelH = isAmpSim ? 352 : 340;
-const screwBr = isAmpSim ? "bottom-28" : "bottom-24";
+const panelH = isAmpSim ? 384 : 340;
+const screwBr = isAmpSim ? "bottom-32" : "bottom-24";
 
 const formatKnobLabel = (key) => {
 const map = {
@@ -248,13 +250,13 @@ style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
 ))}
 
 <div 
-onPointerDown={onDragStart}
-class={"text-center font-black " + (isCompact ? "mb-2 mt-0" : "mb-5 mt-3") + " tracking-widest text-base uppercase cursor-grab active:cursor-grabbing select-none " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
+onPointerDown={previewOnly ? undefined : onDragStart}
+class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-sm" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
 >
 {pedal.label}
 </div>
 
-<div class={"flex-1 flex flex-wrap justify-center content-start " + (isCompact ? "gap-1.5" : "gap-3")}>
+<div class={"flex-1 min-h-0 flex flex-wrap justify-center content-start " + (isAmpSim ? "gap-x-3 gap-y-1.5 content-start" : isCompact ? "gap-1.5" : "gap-3") + (previewOnly ? " pointer-events-none" : "")}>
 {Object.entries(pedal.params).map(([key, val]) => {
 let min = 0; let max = 1;
 if (['sub', 'low', 'mid', 'high', 'air'].includes(key)) { min = -1; max = 1; }
@@ -272,20 +274,20 @@ else if (['sweep', 'spread'].includes(key)) { min = 100; max = 3000; }
 else if (key === 'bits') { min = 2; max = 16; }
 
 return (
-<RotaryKnob key={key} label={formatKnobLabel(key)} min={min} max={max} value={val} theme={pedal.theme} compact={isCompact} onChange={(v) => onChange(key, v)} />
+<RotaryKnob key={key} label={formatKnobLabel(key)} min={min} max={max} value={val} theme={pedal.theme} compact={knobCompact} onChange={(v) => onChange(key, v)} />
 );
 })}
 </div>
 
+<div class={"shrink-0 flex flex-col items-center gap-1.5 pt-1 " + (previewOnly ? "pointer-events-none opacity-80" : "")}>
 <div 
-class={"absolute bottom-20 left-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full border border-black transition-colors duration-300 " + (!isBypassed ? "bg-red-600 border-red-950" : "bg-zinc-800")}
+class={"w-2.5 h-2.5 rounded-full border border-black transition-colors duration-300 " + (!isBypassed ? "bg-red-600 border-red-950" : "bg-zinc-800")}
 style={!isBypassed ? { boxShadow: '0 0 14px 4px rgba(239,68,68,0.95), 0 0 28px 8px rgba(239,68,68,0.35), inset 0 0 6px rgba(255,255,255,0.35)' } : { boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.9)' }}
 />
-
-<div class="absolute bottom-5 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-gradient-to-b from-zinc-700 via-zinc-900 to-black shadow-[0_8px_18px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.12)] border border-black flex items-center justify-center">
+<div class="w-16 h-16 rounded-full bg-gradient-to-b from-zinc-700 via-zinc-900 to-black shadow-[0_8px_18px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.12)] border border-black flex items-center justify-center">
 <div class="w-14 h-14 rounded-full bg-gradient-to-b from-zinc-900 to-black shadow-inner border border-zinc-950 flex items-center justify-center">
 <div 
-onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
+onPointerDown={(e) => { e.stopPropagation(); if (!previewOnly) onToggleBypass(); }}
 class={"w-12 h-12 rounded-full cursor-pointer active:scale-95 transition-transform select-none border border-zinc-400 shadow-[0_4px_10px_rgba(0,0,0,0.9),inset_0_2px_3px_rgba(255,255,255,0.45),inset_0_-4px_8px_rgba(0,0,0,0.65)] bg-gradient-to-br from-zinc-100 via-zinc-300 to-zinc-600 flex items-center justify-center relative overflow-hidden " + (isBypassed ? "brightness-75 saturate-75" : "")}
 >
 <div class="absolute inset-1 rounded-full border border-white pointer-events-none opacity-25 shadow-[inset_0_1px_2px_rgba(0,0,0,0.35)]"></div>
@@ -294,9 +296,13 @@ class={"w-12 h-12 rounded-full cursor-pointer active:scale-95 transition-transfo
 </div>
 </div>
 </div>
+</div>
+
+{!previewOnly ? (
 <button onClick={onRemove} class={"absolute top-3 right-3 transition-all opacity-0 group-hover:opacity-100 " + (isDark ? "text-white hover:text-red-400" : "text-neutral-800 hover:text-red-600")} title="Remove Pedal">
 <X class="w-5 h-5 drop-shadow-md bg-zinc-950 rounded-full" />
 </button>
+) : null}
 </div>
 );
 }

@@ -1,0 +1,79 @@
+import { h } from "lattish"
+import { X } from "../icons.tish"
+import { PEDAL_LIBRARY } from "../audio/pedalLibrary.tish"
+import { PedalNode } from "./nodes.tish"
+
+export fn ModuleDebugPanel(props) {
+let onClose = props.onClose;
+
+let chain = [];
+const cats = Object.keys(PEDAL_LIBRARY);
+let ci = 0;
+while (ci < cats.length) {
+const category = cats[ci];
+const defs = PEDAL_LIBRARY[category];
+let di = 0;
+while (di < defs.length) {
+const def = defs[di];
+chain.push({
+id: "dbg_" + def.type + "_" + String(ci) + "_" + String(di),
+type: def.type,
+label: def.label,
+color: def.color,
+theme: def.theme,
+params: { ...def.defaultParams },
+bypassed: false
+});
+di = di + 1;
+}
+ci = ci + 1;
+}
+
+const noop = () => {};
+const noopChange = (a, b) => {};
+
+return (
+<div class="fixed inset-0 z-[20000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
+<div class="bg-neutral-950 border border-neutral-700 rounded-xl shadow-2xl max-w-[calc(100vw-2rem)] max-h-[calc(100vh-4rem)] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()} style={{ width: "min(1200px, 100%)" }}>
+<div class="shrink-0 flex items-center justify-between gap-3 px-4 py-3 border-b border-neutral-800 bg-neutral-900/80">
+<div>
+<span class="text-xs font-black tracking-widest text-orange-400">DEBUG</span>
+<p class="text-[11px] text-neutral-500 mt-0.5">All modules in library order (not connected to audio). Scroll horizontally.</p>
+</div>
+<button type="button" onClick={onClose} class="text-neutral-500 hover:text-white p-2 rounded-lg hover:bg-neutral-800 transition-colors" title="Close">
+<X class="w-5 h-5" />
+</button>
+</div>
+<div class="overflow-x-auto overflow-y-auto custom-scrollbar p-4 flex flex-row items-end gap-0 flex-1 min-h-0">
+{chain.map((pedal, idx) => {
+const isAmp = pedal.type && String(pedal.type).indexOf('amp_') === 0;
+const innerW = isAmp ? 224 : 200;
+const innerH = isAmp ? 384 : 340;
+const scale = 0.52;
+const slotW = Math.ceil(innerW * scale) + 8;
+const slotH = Math.ceil(innerH * scale) + 8;
+return (
+<div key={pedal.id} class="flex flex-row items-end shrink-0">
+<div class="shrink-0 overflow-hidden rounded-lg" style={{ width: String(slotW) + "px", height: String(slotH) + "px" }}>
+<div style={{ width: String(innerW) + "px", height: String(innerH) + "px", transform: "scale(" + String(scale) + ")", transformOrigin: "top left" }}>
+<PedalNode 
+pedal={pedal} 
+previewOnly={true}
+onRemove={noop} 
+onChange={noopChange} 
+onDragStart={noop}
+onToggleBypass={noop}
+/>
+</div>
+</div>
+{idx < chain.length - 1 ? (
+<div class="flex items-center justify-center self-stretch px-1 pb-8 text-orange-500/90 font-black text-lg select-none">→</div>
+) : null}
+</div>
+);
+})}
+</div>
+</div>
+</div>
+);
+}

@@ -1,0 +1,10 @@
+export fn syncAudioNodeParams(ctx, mapRef, nodes) {
+if (!ctx || !mapRef || !nodes) return;
+let i = 0;
+while (i < nodes.length) {
+const node = nodes[i];
+const box = mapRef.current[node.id];
+if (box && box._syncLiveParams) box._syncLiveParams(ctx, node);
+i = i + 1;
+}
+}

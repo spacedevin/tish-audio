@@ -1,10 +1,12 @@
 import { useState, useEffect, useLayoutEffect, useRef, h } from "lattish"
-import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2 } from "./icons.tish"
+import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug } from "./icons.tish"
 import { PEDAL_LIBRARY } from "./audio/pedalLibrary.tish"
-import { audioGraphRebuildSignature } from "./audio/graphSignature.tish"
+import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
+import { syncAudioNodeParams } from "./audio/syncAudioNodeParams.tish"
 import { NodeGraphView } from "./ui/NodeGraphView.tish"
 import { ModuleLibraryPanel } from "./ui/ModuleLibraryPanel.tish"
+import { ModuleDebugPanel } from "./ui/ModuleDebugPanel.tish"
 import { JamMode } from "./ui/JamMode.tish"
 import { Guitarcade } from "./ui/Guitarcade.tish"
 import { AudioMeterProvider, HeaderMeterReadout } from "./ui/AudioMeterContext.tish"
@@ -15,6 +17,7 @@ let [audioReady, setAudioReady] = useState(false);
 let [devices, setDevices] = useState([]);
 let [showDeviceMenu, setShowDeviceMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
+let [showModuleDebug, setShowModuleDebug] = useState(false);
 
 // NODE GRAPH STATE
 let [nodes, setNodes] = useState([
@@ -98,11 +101,13 @@ if (!audioReady) {
 audioRebuildSigRef.current = "";
 return;
 }
-const sig = audioGraphRebuildSignature(nodes, connections);
-if (sig === audioRebuildSigRef.current) return;
+const sig = audioGraphTopologySignature(nodes, connections);
+if (sig !== audioRebuildSigRef.current) {
 audioRebuildSigRef.current = sig;
 const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, analyserRef: analyserRef, outGainRef: outGainRef };
 rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
+}
+syncAudioNodeParams(audioCtxRef.current, nodeAudioMapRef, nodes);
 }, [nodes, connections, audioReady]);
 
 useEffect(() => {
@@ -224,6 +229,14 @@ class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-orange-500
 <button type="button" onClick={clearBoard} class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-900/80 bg-red-950/30 hover:bg-red-900/50 text-red-400 text-xs font-bold">
 <Trash2 class="w-3.5 h-3.5" /> <span class="hidden sm:inline">CLEAR</span>
 </button>
+<button 
+type="button"
+onClick={() => { setShowModuleLibrary(false); setShowModuleDebug(prev => !prev); }} 
+class={"flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-bold transition-colors " + (showModuleDebug ? "border-amber-500 bg-amber-950/50 text-amber-300" : "border-neutral-600 bg-neutral-900/80 text-neutral-400 hover:text-amber-200 hover:border-amber-600/50")}
+title="Preview all modules in a chain (layout only)"
+>
+<Bug class="w-3.5 h-3.5" /> <span class="hidden sm:inline">DEBUG</span>
+</button>
 </div>
 ) : null}
 </div>
@@ -293,6 +306,9 @@ title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 <div class="bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden z-[20000] fixed" style={{ left: "1rem", top: "4.75rem", width: "min(800px, calc(100vw - 2rem))", maxHeight: "calc(100vh - 5.5rem)" }}>
 <ModuleLibraryPanel onClose={() => setShowModuleLibrary(false)} addNode={addNode} />
 </div>
+) : null}
+{showModuleDebug ? (
+<ModuleDebugPanel onClose={() => setShowModuleDebug(false)} />
 ) : null}
 </div>
 );
