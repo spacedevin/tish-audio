@@ -46,9 +46,8 @@ return (
 </div>
 <div class="overflow-x-auto overflow-y-auto custom-scrollbar p-4 flex flex-row items-end gap-0 flex-1 min-h-0">
 {chain.map((pedal, idx) => {
-const isAmp = pedal.type && String(pedal.type).indexOf('amp_') === 0;
-const innerW = isAmp ? 224 : 200;
-const innerH = isAmp ? 384 : 340;
+const innerW = 200;
+const innerH = 340;
 const scale = 0.52;
 const slotW = Math.ceil(innerW * scale) + 8;
 const slotH = Math.ceil(innerH * scale) + 8;

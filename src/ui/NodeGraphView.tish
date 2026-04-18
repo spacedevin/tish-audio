@@ -21,8 +21,6 @@ else if (node.type === 'console_mixer') {
 const numCh = node.params.channels || 4;
 w = 160 + (numCh * 64);
 h = 300;
-} else if (node.type && String(node.type).indexOf('amp_') === 0) {
-w = 224; h = 384;
 }
 return { w, h };
 };

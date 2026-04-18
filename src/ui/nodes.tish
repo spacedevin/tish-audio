@@ -213,9 +213,9 @@ const isAmpSim = pedal.type && String(pedal.type).indexOf('amp_') === 0;
 const isCompact = !isAmpSim && Object.keys(pedal.params).length > 4;
 const knobCompact = isAmpSim || isCompact;
 const isBypassed = pedal.bypassed;
-const panelW = isAmpSim ? 224 : 200;
-const panelH = isAmpSim ? 384 : 340;
-const screwBr = isAmpSim ? "bottom-32" : "bottom-24";
+const panelW = 200;
+const panelH = 340;
+const screwBr = "bottom-24";
 
 const formatKnobLabel = (key) => {
 const map = {
