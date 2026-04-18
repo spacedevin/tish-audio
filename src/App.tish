@@ -4,6 +4,7 @@ import { PEDAL_LIBRARY } from "./audio/pedalLibrary.tish"
 import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
 import { syncAudioNodeParams } from "./audio/syncAudioNodeParams.tish"
+import { tickSmartGates } from "./audio/smartGateTick.tish"
 import { NodeGraphView } from "./ui/NodeGraphView.tish"
 import { ModuleLibraryPanel } from "./ui/ModuleLibraryPanel.tish"
 import { ModuleDebugPanel } from "./ui/ModuleDebugPanel.tish"
@@ -32,6 +33,8 @@ const analyserRef = useRef(null);
 const outGainRef = useRef(null);
 const nodeAudioMapRef = useRef({}); 
 const audioRebuildSigRef = useRef("");
+const nodesRef = useRef(nodes);
+nodesRef.current = nodes;
 
 async fn getDevices() {
 if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -45,6 +48,7 @@ if (!audioCtxRef.current) {
 audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
 }
 await navigator.mediaDevices.getUserMedia({ audio: true });
+try { await audioCtxRef.current.resume(); } catch (e0) {}
 const devs = await navigator.mediaDevices.enumerateDevices();
 const audioDevs = devs.filter(d => d.kind === 'audioinput');
 setDevices(audioDevs);
@@ -67,6 +71,8 @@ audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl
 
 const source = ctx.createMediaStreamSource(stream);
 sourcesRef.current[deviceId] = source;
+
+try { await ctx.resume(); } catch (eResume) {}
 
 if (!analyserRef.current) {
 const analyser = ctx.createAnalyser();
@@ -109,6 +115,8 @@ const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, an
 rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
 }
 syncAudioNodeParams(audioCtxRef.current, nodeAudioMapRef, nodes);
+const ac = audioCtxRef.current;
+if (ac && ac.state === 'suspended') { void ac.resume(); }
 setAudioGraphTick(t => t + 1);
 }, [nodes, connections, audioReady]);
 
@@ -117,6 +125,17 @@ return () => {
 if (audioCtxRef.current) audioCtxRef.current.close();
 };
 }, []);
+
+useEffect(() => {
+if (!audioReady) return;
+let frame = 0;
+const loop = () => {
+try { tickSmartGates(nodeAudioMapRef, nodesRef.current); } catch (eTick) { console.error(eTick); }
+frame = requestAnimationFrame(loop);
+};
+frame = requestAnimationFrame(loop);
+return () => { if (frame) cancelAnimationFrame(frame); };
+}, [audioReady]);
 
 const addNode = (category, type) => {
 const template = PEDAL_LIBRARY[category].find(p => p.type === type);

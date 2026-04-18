@@ -154,23 +154,26 @@ class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-color
 }
 
 export fn VuMeterNode(props) { let node = props.node; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let audioDataMap = props.audioDataMap;
+let previewOnly = props.previewOnly === true;
 const analyser = audioDataMap[node.id]?.analyser;
 
 return (
 <div class={"relative w-[120px] h-[200px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col transition-all duration-300"}>
 <div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
 
-<div onPointerDown={onDragStart} class="text-center font-black mt-2 tracking-widest text-xs uppercase cursor-grab active:cursor-grabbing select-none text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+<div onPointerDown={previewOnly ? undefined : onDragStart} class={"text-center font-black mt-2 tracking-widest text-xs uppercase select-none text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] " + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing")}>
 VU
 </div>
 
-<div class="flex-1 flex flex-col items-center justify-center gap-4 mt-2">
+<div class={"flex-1 flex flex-col items-center justify-center gap-4 mt-2 " + (previewOnly ? "pointer-events-none opacity-80" : "")}>
 <LedMeter analyser={analyser} width={12} height={80} />
 <RotaryKnob label="TRIM" min={0} max={2} value={node.params.level ?? 1.0} theme={node.theme} onChange={(v) => onChange('level', v)} />
 </div>
+{!previewOnly ? (
 <button type="button" title="Remove meter" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-2 right-2 " + hardwareRemoveClass}>
 <X class="w-4 h-4" />
 </button>
+) : null}
 </div>
 );
 }
@@ -315,7 +318,7 @@ const formatKnobLabel = (key) => {
 const map = {
 gain: 'GAIN', bass: 'BASS', mid: 'MID', treble: 'TREBLE', presence: 'PRESENCE', master: 'MASTER',
 drive: 'DRIVE', tone: 'TONE', level: 'LEVEL', mix: 'MIX', threshold: 'THRESH', ratio: 'RATIO',
-makeup: 'MAKEUP', highs: 'HIGHS', output: 'OUTPUT', depth: 'DEPTH', rate: 'RATE', speed: 'SPEED',
+makeup: 'MAKEUP', highs: 'HIGHS', output: 'OUTPUT', depth: 'DEPTH', rate: 'RATE', speed: 'SPEED', attack: 'ATK', release: 'REL',
 feedback: 'FDBK', time: 'TIME', decay: 'DECAY', spread: 'SPREAD', filter: 'FILTER', bits: 'BITS',
 age: 'AGE', midFreq: 'MID F', midCut: 'MID CUT', baseFreq: 'BASE', sweep: 'SWEEP',
 cut: 'CUT', scoop: 'SCOOP', dark: 'DARK', sheen: 'SHEEN'
@@ -346,12 +349,12 @@ style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
 
 <div 
 onPointerDown={previewOnly ? undefined : onDragStart}
-class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-sm" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
+class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
 >
 {pedal.label}
 </div>
 
-<div class={"flex-1 min-h-0 flex flex-wrap justify-center content-start " + (isAmpSim ? "gap-x-3 gap-y-1.5 content-start" : isCompact ? "gap-1.5" : "gap-3") + (previewOnly ? " pointer-events-none" : "")}>
+<div class={"flex-1 min-h-0 flex flex-wrap justify-center content-start " + (isAmpSim ? "gap-x-2 gap-y-1 pb-1 content-start" : isCompact ? "gap-1.5" : "gap-3") + (previewOnly ? " pointer-events-none" : "")}>
 {Object.entries(pedal.params).map(([key, val]) => {
 let min = 0; let max = 1;
 if (['sub', 'low', 'mid', 'high', 'air'].includes(key)) { min = -1; max = 1; }
@@ -359,6 +362,8 @@ else if (['tone', 'midFreq', 'presence', 'baseFreq', 'filter'].includes(key)) { 
 else if (['drive', 'fuzz'].includes(key)) { min = 0; max = 1000; }
 else if (['speed', 'rate'].includes(key)) { min = 0.1; max = 15; }
 else if (key === 'threshold') { min = -60; max = 0; }
+else if (pedal.type === 'smart_gate' && key === 'attack') { min = 0.001; max = 0.12; }
+else if (pedal.type === 'smart_gate' && key === 'release') { min = 0.02; max = 0.85; }
 else if (key === 'ratio') { min = 1; max = 20; }
 else if (key === 'highs') { min = 0; max = 10; }
 else if (isAmpSim && key === 'gain') { min = 0; max = 100; }
@@ -400,7 +405,7 @@ class={"w-12 h-12 rounded-full cursor-pointer active:scale-95 transition-transfo
 </div>
 
 {!previewOnly ? (
-<button type="button" title="Remove pedal" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-3 left-3 pointer-events-auto " + hardwareRemoveClass}>
+<button type="button" title="Remove pedal" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-3 right-3 pointer-events-auto " + hardwareRemoveClass}>
 <X class="w-4 h-4" />
 </button>
 ) : null}

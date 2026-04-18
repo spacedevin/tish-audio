@@ -27,6 +27,7 @@ let inNode; let outNode; let lfo; let nodeAnalyser;
 let inPorts = null; let outPorts = null;
 let analysers = {}; 
 let nodeParamSync = null;
+let smartGateRuntime = null;
 
 // BYPASS LOGIC
 if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter'].includes(node.type)) {
@@ -106,6 +107,22 @@ smoothAudioParam(dyn.ratio, n.type === 'noise_gate' ? 20 : (p.ratio ?? 4), ctx);
 smoothAudioParam(dyn.release, p.decay ?? 0.1, ctx);
 smoothAudioParam(outNode.gain, p.makeup ?? 1.0, ctx);
 };
+}
+else if (node.type === 'smart_gate') {
+const pass = ctx.createGain(); pass.gain.value = 1.0;
+const follower = ctx.createAnalyser();
+follower.fftSize = 2048;
+follower.smoothingTimeConstant = 0.55;
+const gateGain = ctx.createGain();
+gateGain.gain.value = 1.0;
+pass.connect(follower);
+follower.connect(gateGain);
+inNode = pass;
+outNode = gateGain;
+const buf = new Float32Array(follower.fftSize);
+const st = { gainSmoo: 1, lastNow: 0 };
+smartGateRuntime = { analyser: follower, gateGain: gateGain, buf: buf, st: st };
+nodeParamSync = null;
 }
 else if (node.type === 'eq7') {
 const freqs = [100, 200, 400, 800, 1600, 3200, 6400];
@@ -621,7 +638,8 @@ outPorts: outPorts || { main: outNode },
 lfo: lfo,
 analyser: nodeAnalyser,
 analysers: analysers,
-_syncLiveParams: nodeParamSync
+_syncLiveParams: nodeParamSync,
+smartGateRuntime: smartGateRuntime
 };
 });
 

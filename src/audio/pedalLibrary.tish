@@ -9,7 +9,8 @@ DYNAMICS: [
 { type: 'compressor', label: 'Studio Comp', color: 'from-slate-500 to-slate-700', theme: 'dark', defaultParams: { threshold: -24, ratio: 4, makeup: 2 } },
 { type: 'eq7', label: '7-Band EQ', color: 'from-stone-300 to-stone-500', theme: 'light', defaultParams: { b100: 0, b200: 0, b400: 0, b800: 0, b1k6: 0, b3k2: 0, b6k4: 0, level: 1 } },
 { type: 'boost', label: 'Clean Boost', color: 'from-gray-200 to-gray-400', theme: 'light', defaultParams: { gain: 2.0 } },
-{ type: 'noise_gate', label: 'Silencer', color: 'from-zinc-400 to-zinc-600', theme: 'dark', defaultParams: { threshold: -50, decay: 0.1 } }
+{ type: 'noise_gate', label: 'Silencer', color: 'from-zinc-400 to-zinc-600', theme: 'dark', defaultParams: { threshold: -50, decay: 0.1 } },
+{ type: 'smart_gate', label: 'Smart Gate', color: 'from-emerald-950 via-zinc-900 to-black', theme: 'dark', defaultParams: { threshold: -42, attack: 0.006, release: 0.22 } }
 ],
 FILTER: [
 { type: 'auto_wah', label: 'Auto Wah', color: 'from-violet-600 to-fuchsia-800', theme: 'dark', defaultParams: { rate: 2.0, sweep: 1500, baseFreq: 400 } },

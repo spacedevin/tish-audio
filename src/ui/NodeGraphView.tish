@@ -337,7 +337,7 @@ if (key === 'freq') { min = 100; max = 5000; }
 return <RotaryKnob key={key} label={key} min={min} max={max} value={val} theme={node.theme} onChange={(v) => updateNodeParam(node.id, key, v)} />
 })}
 </div>
-<button type="button" title="Remove node" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class={"absolute top-2 left-2 " + hardwareRemoveClass}>
+<button type="button" title="Remove node" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class={"absolute top-2 right-2 " + hardwareRemoveClass}>
 <X class="w-4 h-4" />
 </button>
 </div>
