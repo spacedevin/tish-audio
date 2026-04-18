@@ -1,4 +1,4 @@
-import { h, useState } from "lattish"
+import { h, useState, useMemo } from "lattish"
 import { ChordFretboardPanel } from "./ChordFretboardPanel.tish"
 import { TuningMonophonicStrip } from "./TuningMonophonicStrip.tish"
 import { INSTRUMENT_PRESETS } from "../guitar/instrumentSpec.tish"
@@ -13,14 +13,18 @@ const pitchRef = pitchAnalyzerRef != null ? pitchAnalyzerRef : analyzerRef;
 
 const [polyPresetIdx, setPolyPresetIdx] = useState(0);
 
-const spec = INSTRUMENT_PRESETS[polyPresetIdx] != null ? INSTRUMENT_PRESETS[polyPresetIdx] : INSTRUMENT_PRESETS[0];
-const peakProf = spec.openMidis.length <= 4 ? SPECTRAL_BASS_DEFAULT : SPECTRAL_GUITAR_DEFAULT;
-const polyOpts = {
+const spec = useMemo(() => {
+return INSTRUMENT_PRESETS[polyPresetIdx] != null ? INSTRUMENT_PRESETS[polyPresetIdx] : INSTRUMENT_PRESETS[0];
+}, [polyPresetIdx]);
+const peakProf = useMemo(() => {
+return spec.openMidis.length <= 4 ? SPECTRAL_BASS_DEFAULT : SPECTRAL_GUITAR_DEFAULT;
+}, [spec]);
+const polyOpts = useMemo(() => ({
 mergeCents: 30,
 centsTol: 50,
 maxBranch: 10,
 peakExtract: peakProf
-};
+}), [peakProf]);
 
 return (
 <div class="flex-1 min-h-0 flex flex-col bg-black relative overflow-hidden">
@@ -45,7 +49,7 @@ onChange={(ev) => setPolyPresetIdx(parseInt(ev.target.value, 10) || 0)}
 </select>
 </label>
 <p class="text-[10px] text-neutral-500 max-w-sm leading-snug pb-0.5">
-Live strip and poly grid update the DOM directly (same pattern as Jam / Arcade) so the instrument control is not caught in full-app refreshes from the analyser loop.
+Poly grid paints imperative DOM; monophonic strip only flushes Lattish when pitch identity changes (not raw strum edges). Instrument preset and poly options are useMemo-stable so the chord instrument select is not churned.
 </p>
 </div>
 </div>

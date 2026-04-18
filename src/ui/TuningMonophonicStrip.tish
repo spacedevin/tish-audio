@@ -1,15 +1,18 @@
 import { h } from "lattish"
 import { RocksmithStyleTuner } from "./RocksmithStyleTuner.tish"
-import { useLiveGuitarPitch } from "./TunerReadout.tish"
+import { TunerReadout, useLiveGuitarPitch } from "./TunerReadout.tish"
 import { STANDARD_6_EADGBE_OPEN_MIDI } from "../guitar/tuningConfig.tish"
 
-// Full Rocksmith-style strip (restored from git); pitch hook only setState when snapshot key changes.
+// Rocksmith-style strip plus the detailed chromatic readout card below (same snapshot, no extra analyser work).
 export fn TuningMonophonicStrip(props) {
 let pitchRef = props.pitchRef;
 let audioReady = props.audioReady === true;
 let tabActive = props.tabActive === true;
 const { snapshot } = useLiveGuitarPitch(pitchRef, audioReady, tabActive, STANDARD_6_EADGBE_OPEN_MIDI);
 return (
+<div class="shrink-0 space-y-4 w-full">
 <RocksmithStyleTuner snapshot={snapshot} openMidis={STANDARD_6_EADGBE_OPEN_MIDI} tuningTitle="Standard tuning" refPitch="A440" />
+<TunerReadout snapshot={snapshot} />
+</div>
 );
 }

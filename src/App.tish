@@ -132,11 +132,14 @@ if (sig !== audioRebuildSigRef.current) {
 audioRebuildSigRef.current = sig;
 const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, analyserRef: analyserRef, pitchAnalyserRef: pitchAnalyserRef, outGainRef: outGainRef };
 rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
+// Bump meterSync only when topology/rebuild runs — not on every param tweak. Otherwise each knob
+// move schedules a second full flush right after layout, which races pointer capture + Lattish patch
+// and breaks the first control on pedals/racks (global hook order + DOM churn).
+setAudioGraphTick(t => t + 1);
 }
 syncAudioNodeParams(audioCtxRef.current, nodeAudioMapRef, nodes);
 const ac = audioCtxRef.current;
 if (ac && ac.state === 'suspended') { void ac.resume(); }
-setAudioGraphTick(t => t + 1);
 }, [nodes, connections, audioReady]);
 
 useEffect(() => {

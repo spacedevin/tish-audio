@@ -36,5 +36,8 @@ strum
 
 export fn tunerSnapshotThrottleKey(snap) {
 if (!snap || typeof snap !== 'object') return '';
-return (snap.hasPitch ? '1' : '0') + '|' + String(snap.noteName) + '|' + String(Math.round(snap.tuningCents)) + '|' + String(snap.freqHz) + '|' + String(snap.stringIndex) + '|' + String(snap.fret) + '|' + (snap.strum ? '1' : '0');
+// Intentionally omit `strum`: it flips on every pick attack under Lattish's single-root flush, which
+// re-patches unrelated UI (e.g. controlled <select>) and breaks the open menu. Strum is for gameplay;
+// pitch/string identity is what the tuner readout should reconcile on.
+return (snap.hasPitch ? '1' : '0') + '|' + String(snap.noteName) + '|' + String(Math.round(snap.tuningCents)) + '|' + String(snap.freqHz) + '|' + String(snap.stringIndex) + '|' + String(snap.fret);
 }
