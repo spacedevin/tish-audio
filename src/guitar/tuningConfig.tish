@@ -1,2 +1,3 @@
 // stringIndex 0 = low E (thickest) … 5 = high E. Values are MIDI note numbers for open strings.
+// Intervals between opens are not uniform: E–A–D–G are fourths; G–B is a major third; B–e a fourth.
 export const STANDARD_6_EADGBE_OPEN_MIDI = [40, 45, 50, 55, 59, 64];

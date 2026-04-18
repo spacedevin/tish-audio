@@ -1,6 +1,6 @@
 import { h } from "lattish"
-import { WebGLBackground } from "./WebGLBackground.tish"
-import { TunerReadout, useLiveGuitarPitch } from "./TunerReadout.tish"
+import { RocksmithStyleTuner } from "./RocksmithStyleTuner.tish"
+import { useLiveGuitarPitch } from "./TunerReadout.tish"
 import { STANDARD_6_EADGBE_OPEN_MIDI } from "../guitar/tuningConfig.tish"
 
 export fn TuningMode(props) {
@@ -12,17 +12,14 @@ const { snapshot } = useLiveGuitarPitch(analyzerRef, audioReady, tabActive, STAN
 
 return (
 <div class="flex-1 min-h-0 flex flex-col bg-black relative overflow-hidden">
-<div class="absolute inset-0 pointer-events-none overflow-hidden isolate [contain:strict]">
-<WebGLBackground />
-</div>
-<div class="relative z-10 flex flex-col gap-4 p-4 sm:p-6 max-w-2xl mx-auto w-full">
-<h2 class="text-2xl sm:text-3xl font-black text-white tracking-tight">TUNING</h2>
-<p class="text-neutral-400 text-sm leading-relaxed">
-Monophonic pitch from the same master analyser as Patch and Arcade. String and fret are the closest fit to standard 6-string EADGBE (open MIDI 40–64, index 0 = low E). Full-chord or strum-wide calibration would need an FFT-based pass; see{' '}
-<code class="text-orange-400/90 text-xs">src/guitar/polyphonicStrumAnalysis.tish</code>
-{' '}for the planned extension.
+<div class="relative z-10 flex flex-col gap-3 p-3 sm:p-5 w-full max-w-4xl mx-auto min-h-0 overflow-y-auto custom-scrollbar">
+<div class="flex flex-wrap items-baseline justify-between gap-2 shrink-0">
+<h2 class="text-xl sm:text-2xl font-black text-white tracking-tight">TUNING</h2>
+<p class="text-neutral-500 text-[11px] sm:text-xs max-w-md leading-snug">
+Same analyser as Patch / Arcade. Use the chromatic strip and cents readout for tuning (A440). Colored string rows are only a guess.
 </p>
-<TunerReadout snapshot={snapshot} />
+</div>
+<RocksmithStyleTuner snapshot={snapshot} openMidis={STANDARD_6_EADGBE_OPEN_MIDI} tuningTitle="Standard tuning" refPitch="A440" />
 </div>
 </div>
 );

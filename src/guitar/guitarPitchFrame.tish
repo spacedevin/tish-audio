@@ -45,6 +45,40 @@ if (freqRaw !== -1 && freqRaw > minHz && freqRaw < maxHz) freqHz = freqRaw;
 return { rms, freqRaw, freqHz };
 }
 
+// When autocorrelation locks onto a strong harmonic (common on wound strings, especially G),
+// the reported Hz can sit one or more octaves high while still matching the same pitch class.
+// Repeat halving while the folded frequency stays in a plausible guitar range. (Previously
+// half was capped at 300 Hz, so e.g. 660 Hz could not fold and stayed at E4 — the same MIDI
+// as the high e open — which made low-E harmonics tie-break to the wrong string.)
+export fn stableGuitarFrequency(freqHz) {
+if (!Number.isFinite(freqHz) || freqHz < 80) return freqHz;
+const orig = freqHz;
+let f = freqHz;
+let guard = 0;
+while (guard < 6) {
+guard = guard + 1;
+// In the ~250–345 Hz band, a slightly wrong autocorr peak can sit between D and E; folding
+// by octave (same letter class) can turn a mis-tracked high e (~300 Hz) into ~150 Hz (D).
+// When the *original* detection is already in this band (not a very high harmonic), keep
+// the reported Hz so chromatic spelling stays near what the player hears. Harmonics that
+// start clearly high (orig > 400 Hz) may still fold through this region (e.g. 660→330→165).
+if (f > 248 && f < 348 && orig <= 400) break;
+const half = f / 2;
+if (half < 72 || half > 380) break;
+if (f < 255) break;
+const midiHi = 12 * (Math.log(f / 440) / Math.log(2)) + 69;
+const midiLo = 12 * (Math.log(half / 440) / Math.log(2)) + 69;
+const qHi = Math.round(midiHi);
+const qLo = Math.round(midiLo);
+const chHi = ((qHi % 12) + 12) % 12;
+const chLo = ((qLo % 12) + 12) % 12;
+if (chHi !== chLo) break;
+if ((qHi - qLo) < 9) break;
+f = half;
+}
+return f;
+}
+
 export fn midiAndCentsFromHz(freqHz) {
 if (!Number.isFinite(freqHz) || freqHz <= 0) {
 return { exactMidi: NaN, quantizedMidi: NaN, centsToNearest: 0 };

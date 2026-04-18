@@ -4,8 +4,28 @@ const MAX_FRET = 24;
 
 const roughlyEqualCents = (a, b) => Math.abs(a - b) < 0.5;
 
-export fn inferStringFretFromMidi(exactMidi, openMidis) {
+// rawHz: optional analyser-reported Hz before octave folding; used only to break ties when
+// two strings yield the same target MIDI (e.g. low E fret 24 vs high e open both E4).
+export fn inferStringFretFromMidi(exactMidi, openMidis, rawHz) {
 if (!Number.isFinite(exactMidi) || !openMidis || openMidis.length === 0) return null;
+// Standard tuning is not uniform (G to B is a major third). Prefer a real open string when
+// the pitch sits close to any open note so wound G and unison duplicates do not hop strings.
+let openSnapS = -1;
+let openSnapDist = 999999;
+let so = 0;
+while (so < openMidis.length) {
+const open = openMidis[so];
+const dCents = Math.abs(exactMidi - open) * 100;
+if (dCents < 22 && dCents < openSnapDist) {
+openSnapDist = dCents;
+openSnapS = so;
+}
+so = so + 1;
+}
+if (openSnapS >= 0) {
+const open = openMidis[openSnapS];
+return { stringIndex: openSnapS, fret: 0, targetMidi: open, centsFromTarget: (exactMidi - open) * 100 };
+}
 let best = null;
 let bestAbs = Math.pow(10, 12);
 let s = 0;
@@ -25,8 +45,14 @@ bestAbs = absC;
 best = cand;
 bestAbs = absC;
 } else if (roughlyEqualCents(absC, bestAbs)) {
-if (cand.fret < best.fret) { best = cand; bestAbs = absC; }
-else if (cand.fret === best.fret && cand.stringIndex < best.stringIndex) { best = cand; bestAbs = absC; }
+let pickCand = false;
+if (typeof rawHz === 'number' && Number.isFinite(rawHz) && rawHz >= 400 && cand.targetMidi === best.targetMidi) {
+if (cand.stringIndex < best.stringIndex) pickCand = true;
+} else {
+if (cand.fret < best.fret) pickCand = true;
+else if (cand.fret === best.fret && cand.stringIndex < best.stringIndex) pickCand = true;
+}
+if (pickCand) { best = cand; bestAbs = absC; }
 }
 s = s + 1;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, h } from "lattish"
-import { noteFromPitch, noteStrings } from "../audio/dsp.tish"
-import { createStrumGate, analyzeTimeDomainFrame, midiAndCentsFromHz } from "../guitar/guitarPitchFrame.tish"
+import { noteStrings } from "../audio/dsp.tish"
+import { createStrumGate, analyzeTimeDomainFrame, midiAndCentsFromHz, stableGuitarFrequency } from "../guitar/guitarPitchFrame.tish"
 import { inferStringFretFromMidi } from "../guitar/stringInference.tish"
 import { STANDARD_6_EADGBE_OPEN_MIDI } from "../guitar/tuningConfig.tish"
 
@@ -12,6 +12,7 @@ freqHz: 0,
 noteName: '-',
 octave: 0,
 centsFromTarget: 0,
+tuningCents: 0,
 stringIndex: -1,
 fret: 0,
 stringLabel: '',
@@ -21,23 +22,26 @@ strum: false
 export fn buildTunerSnapshot(freqHz, openMidis, strum) {
 const midis = openMidis && openMidis.length ? openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
 if (!Number.isFinite(freqHz) || freqHz <= 0) {
-return { hasPitch: false, freqHz: 0, noteName: '-', octave: 0, centsFromTarget: 0, stringIndex: -1, fret: 0, stringLabel: '', strum };
+return { hasPitch: false, freqHz: 0, noteName: '-', octave: 0, centsFromTarget: 0, tuningCents: 0, stringIndex: -1, fret: 0, stringLabel: '', strum };
 }
-const { exactMidi } = midiAndCentsFromHz(freqHz);
-const q = noteFromPitch(freqHz);
-const noteName = noteStrings[q % 12];
+const fStable = stableGuitarFrequency(freqHz);
+const { exactMidi, quantizedMidi, centsToNearest } = midiAndCentsFromHz(fStable);
+const q = quantizedMidi;
+const noteName = noteStrings[((q % 12) + 12) % 12];
 const octave = Math.floor(q / 12) - 1;
-const inf = inferStringFretFromMidi(exactMidi, midis);
+const tuningCents = centsToNearest;
+const inf = inferStringFretFromMidi(exactMidi, midis, freqHz);
 if (!inf) {
-return { hasPitch: true, freqHz: Math.round(freqHz), noteName, octave, centsFromTarget: 0, stringIndex: -1, fret: 0, stringLabel: '', strum };
+return { hasPitch: true, freqHz: Math.round(fStable), noteName, octave, centsFromTarget: 0, tuningCents, stringIndex: -1, fret: 0, stringLabel: '', strum };
 }
 const stringLabel = midis.length === 6 && STRING_LABELS_6[inf.stringIndex] ? STRING_LABELS_6[inf.stringIndex] : ('String idx ' + String(inf.stringIndex));
 return {
 hasPitch: true,
-freqHz: Math.round(freqHz),
+freqHz: Math.round(fStable),
 noteName,
 octave,
 centsFromTarget: inf.centsFromTarget,
+tuningCents,
 stringIndex: inf.stringIndex,
 fret: inf.fret,
 stringLabel,
@@ -92,7 +96,7 @@ export fn TunerReadout(props) {
 const raw = props.snapshot;
 const snap = raw != null && typeof raw === 'object' && raw.hasPitch !== undefined ? raw : defaultTunerSnapshot();
 const compact = props.compact === true;
-const cents = snap.hasPitch ? snap.centsFromTarget : 0;
+const cents = snap.hasPitch && typeof snap.tuningCents === 'number' ? snap.tuningCents : (snap.hasPitch ? snap.centsFromTarget : 0);
 const centsClamped = Math.max(-50, Math.min(50, cents));
 const centsNorm = (centsClamped + 50) / 100;
 if (compact) {
@@ -130,7 +134,7 @@ return (
 <p class="text-sm text-neutral-500">Play a note. String and fret are a best guess (monophonic detector).</p>
 )}
 <div>
-<p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mb-2">Cents vs fretted target</p>
+<p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mb-2">Cents vs nearest note (A440 equal temperament)</p>
 <div class="relative h-3 rounded-full bg-neutral-800 border border-neutral-700 overflow-hidden">
 <div class="absolute left-1/2 top-0 bottom-0 w-px bg-neutral-500 z-10" />
 <div class="absolute top-0 bottom-0 w-1.5 rounded-sm bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.6)] transition-[left] duration-75" style={{ left: String(centsNorm * 100) + '%', transform: 'translateX(-50%)' }} />
