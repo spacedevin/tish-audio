@@ -1,0 +1,36 @@
+import { noteFromPitch } from "../audio/dsp.tish"
+
+// Map live pitch to a lane index for the active profile, or -1 if out of range / invalid.
+
+export fn createLaneSmoother() {
+return { centerMidi: 64 };
+};
+
+const clampLane = (lane, laneCount) => {
+if (lane < 0) return 0;
+if (lane >= laneCount) return laneCount - 1;
+return lane;
+};
+
+const highwayLane = (midi, profile) => {
+const n = profile.laneCount;
+const rel = ((midi - profile.rootMidi) % 12 + 12) % 12;
+return clampLane(Math.floor((rel * n) / 12), n);
+};
+
+const fretWindowLane = (midi, profile, smoother) => {
+const n = profile.laneCount;
+let c = smoother.centerMidi;
+c = c + (midi - c) * 0.18;
+smoother.centerMidi = c;
+const base = Math.round(c - (n - 1) / 2);
+let lane = midi - base;
+return clampLane(lane, n);
+};
+
+export fn freqToLane(freq, profile, smoother) {
+if (!Number.isFinite(freq) || freq < profile.minHz || freq > profile.maxHz) return -1;
+const midi = noteFromPitch(freq);
+if (profile.pitchMode === 'fretWindow') return fretWindowLane(midi, profile, smoother);
+return highwayLane(midi, profile);
+}

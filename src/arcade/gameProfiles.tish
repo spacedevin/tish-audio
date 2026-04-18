@@ -1,0 +1,69 @@
+// Declarative rhythm-game presets (Guitar Hero / Rock Band / Rocksmith–inspired).
+
+export const ARCADE_PROFILE_IDS = ['guitarHero', 'rockBand', 'rocksmith'];
+
+export const ARCADE_PROFILES = {
+guitarHero: {
+id: 'guitarHero',
+label: 'Highway Hero',
+subtitle: 'Strum + pitch, 5 columns',
+playerHint: 'Orange box = your pitch. Put it in the same colored column as the gem when the gem hits the yellow line. Also give a quick louder strum on the hit.',
+laneCount: 5,
+laneColors: ['#22c55e', '#ef4444', '#eab308', '#3b82f6', '#a855f7'],
+scrollPxPerMs: 0.42,
+hitWindowPx: 26,
+missPastPx: 55,
+spawnIntervalMs: 820,
+spawnJitterMs: 220,
+strumRequired: true,
+minHz: 70,
+maxHz: 1200,
+pitchMode: 'highway',
+rootMidi: 60,
+holdTailMs: 0
+},
+rockBand: {
+id: 'rockBand',
+label: 'Band Party',
+subtitle: 'Easier timing, 4 columns',
+playerHint: 'Same as columns + yellow line, but you do not need an extra strum. Gems are a bit taller so timing is more forgiving.',
+laneCount: 4,
+laneColors: ['#f97316', '#06b6d4', '#eab308', '#ec4899'],
+scrollPxPerMs: 0.34,
+hitWindowPx: 36,
+missPastPx: 62,
+spawnIntervalMs: 950,
+spawnJitterMs: 280,
+strumRequired: false,
+minHz: 70,
+maxHz: 1200,
+pitchMode: 'highway',
+rootMidi: 57,
+holdTailMs: 380
+},
+rocksmith: {
+id: 'rocksmith',
+label: 'Practice Track',
+subtitle: '6 columns, pitch follows you',
+playerHint: 'Six narrow columns; the set of notes shifts gently with your playing so frets feel wider. Still match gem column to orange box at the yellow line.',
+laneCount: 6,
+laneColors: ['#78716c', '#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#2563eb'],
+scrollPxPerMs: 0.26,
+hitWindowPx: 44,
+missPastPx: 72,
+spawnIntervalMs: 1100,
+spawnJitterMs: 320,
+strumRequired: false,
+minHz: 65,
+maxHz: 1400,
+pitchMode: 'fretWindow',
+rootMidi: 52,
+holdTailMs: 0
+}
+};
+
+export fn getProfile(id) {
+const p = ARCADE_PROFILES[id];
+if (p) return p;
+return ARCADE_PROFILES.guitarHero;
+}

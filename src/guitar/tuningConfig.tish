@@ -1,0 +1,2 @@
+// stringIndex 0 = low E (thickest) … 5 = high E. Values are MIDI note numbers for open strings.
+export const STANDARD_6_EADGBE_OPEN_MIDI = [40, 45, 50, 55, 59, 64];

@@ -1,0 +1,56 @@
+import { autoCorrelate } from "../audio/dsp.tish"
+
+// Shared monophonic pitch + strum edge detection (time-domain analyser buffer).
+
+export fn computeRms(buf) {
+let sumSquares = 0;
+let i = 0;
+while (i < buf.length) {
+sumSquares = sumSquares + buf[i] * buf[i];
+i = i + 1;
+}
+return Math.sqrt(sumSquares / buf.length);
+}
+
+// Strum gate thresholds match legacy Guitarcade defaults.
+export fn createStrumGate(opts) {
+const riseThresh = opts && typeof opts.riseThresh === 'number' ? opts.riseThresh : 0.055;
+const minIntervalMs = opts && typeof opts.minIntervalMs === 'number' ? opts.minIntervalMs : 140;
+let prevRms = 0;
+let lastStrumMs = 0;
+const gate = {};
+gate.reset = () => {
+prevRms = 0;
+lastStrumMs = 0;
+};
+gate.update = (rms, timeMs) => {
+const deltaRms = rms - prevRms;
+prevRms = rms;
+if (deltaRms > riseThresh && timeMs - lastStrumMs > minIntervalMs) {
+lastStrumMs = timeMs;
+return true;
+}
+return false;
+};
+return gate;
+}
+
+export fn analyzeTimeDomainFrame(buf, sampleRate, opts) {
+const minHz = opts && typeof opts.minHz === 'number' ? opts.minHz : 40;
+const maxHz = opts && typeof opts.maxHz === 'number' ? opts.maxHz : 2200;
+const rms = computeRms(buf);
+const freqRaw = autoCorrelate(buf, sampleRate);
+let freqHz = 0;
+if (freqRaw !== -1 && freqRaw > minHz && freqRaw < maxHz) freqHz = freqRaw;
+return { rms, freqRaw, freqHz };
+}
+
+export fn midiAndCentsFromHz(freqHz) {
+if (!Number.isFinite(freqHz) || freqHz <= 0) {
+return { exactMidi: NaN, quantizedMidi: NaN, centsToNearest: 0 };
+}
+const exactMidi = 12 * (Math.log(freqHz / 440) / Math.log(2)) + 69;
+const q = Math.round(exactMidi);
+const centsToNearest = (exactMidi - q) * 100;
+return { exactMidi, quantizedMidi: q, centsToNearest };
+}

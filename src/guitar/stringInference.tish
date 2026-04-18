@@ -1,0 +1,38 @@
+import { STANDARD_6_EADGBE_OPEN_MIDI } from "./tuningConfig.tish"
+
+const MAX_FRET = 24;
+
+const roughlyEqualCents = (a, b) => Math.abs(a - b) < 0.5;
+
+export fn inferStringFretFromMidi(exactMidi, openMidis) {
+if (!Number.isFinite(exactMidi) || !openMidis || openMidis.length === 0) return null;
+let best = null;
+let bestAbs = Math.pow(10, 12);
+let s = 0;
+while (s < openMidis.length) {
+const open = openMidis[s];
+let fret = Math.round(exactMidi - open);
+if (fret < 0) fret = 0;
+if (fret > MAX_FRET) fret = MAX_FRET;
+const targetMidi = open + fret;
+const centsFromTarget = (exactMidi - targetMidi) * 100;
+const absC = Math.abs(centsFromTarget);
+const cand = { stringIndex: s, fret, targetMidi, centsFromTarget };
+if (best === null) {
+best = cand;
+bestAbs = absC;
+} else if (absC < bestAbs - 0.01) {
+best = cand;
+bestAbs = absC;
+} else if (roughlyEqualCents(absC, bestAbs)) {
+if (cand.fret < best.fret) { best = cand; bestAbs = absC; }
+else if (cand.fret === best.fret && cand.stringIndex < best.stringIndex) { best = cand; bestAbs = absC; }
+}
+s = s + 1;
+}
+return best;
+}
+
+export fn inferStringFretStandard6(exactMidi) {
+return inferStringFretFromMidi(exactMidi, STANDARD_6_EADGBE_OPEN_MIDI);
+}

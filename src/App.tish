@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, h } from "lattish"
-import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug } from "./icons.tish"
+import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork } from "./icons.tish"
 import { PEDAL_LIBRARY } from "./audio/pedalLibrary.tish"
 import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
@@ -10,6 +10,7 @@ import { ModuleLibraryPanel } from "./ui/ModuleLibraryPanel.tish"
 import { ModuleDebugPanel } from "./ui/ModuleDebugPanel.tish"
 import { JamMode } from "./ui/JamMode.tish"
 import { Guitarcade } from "./ui/Guitarcade.tish"
+import { TuningMode } from "./ui/TuningMode.tish"
 import { AudioMeterProvider, HeaderMeterReadout } from "./ui/AudioMeterContext.tish"
 
 export fn App() {
@@ -35,6 +36,11 @@ const nodeAudioMapRef = useRef({});
 const audioRebuildSigRef = useRef("");
 const nodesRef = useRef(nodes);
 nodesRef.current = nodes;
+const patchBoardMeterTickRef = useRef(0);
+if (activeTab === 'pedalboard') {
+patchBoardMeterTickRef.current = audioGraphTick;
+}
+const nodeGraphMeterTick = activeTab === 'pedalboard' ? audioGraphTick : patchBoardMeterTickRef.current;
 
 async fn getDevices() {
 if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -86,8 +92,9 @@ analyser.connect(outGain);
 outGain.connect(ctx.destination);
 }
 
+const newInId = "sys_in_" + deviceId.slice(0, 6);
 setNodes(prev => [...prev, {
-id: "sys_in_" + deviceId.slice(0, 6),
+id: newInId,
 type: 'SYS_IN',
 x: 50, 
 y: 200 + (Object.keys(sourcesRef.current).length * 150),
@@ -95,6 +102,11 @@ label: (label || 'INPUT').substring(0, 15),
 isSystem: true,
 params: { deviceId }
 }]);
+
+setConnections(prev => {
+if (prev.some(c => c.from === newInId && (c.fromPort || 'main') === 'main' && c.to === 'sys_out' && (c.toPort || 'main') === 'main')) return prev;
+return [...prev, { id: Math.random().toString(36).substr(2, 9), from: newInId, fromPort: 'main', to: 'sys_out', toPort: 'main' }];
+});
 
 setAudioReady(true);
 setShowDeviceMenu(false);
@@ -273,7 +285,8 @@ title="Preview all modules in a chain (layout only)"
 {[
 { id: 'pedalboard', icon: Sliders, label: 'Patch' },
 { id: 'jam', icon: Play, label: 'Jam' },
-{ id: 'game', icon: Gamepad2, label: 'Arcade' }
+{ id: 'game', icon: Gamepad2, label: 'Arcade' },
+{ id: 'tuning', icon: TuningFork, label: 'Tuning' }
 ].map(tab => (
 <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-950")}>
 {tab.icon({ class: "w-4 h-4 sm:w-5 sm:h-5" })} {tab.label}
@@ -291,7 +304,7 @@ title="Preview all modules in a chain (layout only)"
 nodes={nodes} 
 connections={connections}
 nodeAudioMapRef={nodeAudioMapRef}
-audioGraphTick={audioGraphTick}
+audioGraphTick={nodeGraphMeterTick}
 onAudioUiBump={() => setAudioGraphTick(t => t + 1)}
 removeNode={removeNode} 
 updateNodeParam={updateNodeParam} 
@@ -306,6 +319,9 @@ removeConnection={removeConnection}
 </div>
 <div class={activeTab === 'game' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
 <Guitarcade tabActive={activeTab === 'game'} analyzerRef={analyserRef} audioReady={audioReady} />
+</div>
+<div class={activeTab === 'tuning' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
+<TuningMode tabActive={activeTab === 'tuning'} analyzerRef={analyserRef} audioReady={audioReady} />
 </div>
 </main>
 </AudioMeterProvider>

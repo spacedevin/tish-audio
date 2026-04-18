@@ -1,0 +1,102 @@
+// Short reward melody: each successful hit plays the next note (wraps).
+
+export const PHRASE_NOTE_COUNT = 8;
+export const PHRASES_TO_WIN_SESSION = 4;
+
+export const PHRASE_MELODY = [
+{ midi: 64, dur: 0.11 },
+{ midi: 67, dur: 0.11 },
+{ midi: 71, dur: 0.11 },
+{ midi: 76, dur: 0.14 },
+{ midi: 71, dur: 0.1 },
+{ midi: 67, dur: 0.1 },
+{ midi: 64, dur: 0.1 },
+{ midi: 71, dur: 0.16 }
+];
+
+const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+export fn playPhraseHit(ctx, phraseNoteIndex, kind) {
+if (!ctx) return;
+const idx = phraseNoteIndex % PHRASE_MELODY.length;
+const note = PHRASE_MELODY[idx];
+const t0 = ctx.currentTime + 0.002;
+const dur = note.dur * (kind === 'perfect' ? 1.05 : 0.92);
+const freq = midiToHz(note.midi);
+const osc = ctx.createOscillator();
+const g = ctx.createGain();
+osc.type = 'triangle';
+osc.frequency.setValueAtTime(freq, t0);
+g.gain.setValueAtTime(0.0001, t0);
+g.gain.exponentialRampToValueAtTime(kind === 'perfect' ? 0.14 : 0.1, t0 + 0.012);
+g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+osc.connect(g);
+g.connect(ctx.destination);
+osc.start(t0);
+osc.stop(t0 + dur + 0.02);
+}
+
+export fn playPhraseClearFanfare(ctx) {
+if (!ctx) return;
+const t0 = ctx.currentTime + 0.02;
+const notes = [76, 79, 83, 88];
+let i = 0;
+while (i < notes.length) {
+const midi = notes[i];
+const freq = midiToHz(midi);
+const start = t0 + i * 0.07;
+const osc = ctx.createOscillator();
+const g = ctx.createGain();
+osc.type = 'sine';
+osc.frequency.setValueAtTime(freq, start);
+g.gain.setValueAtTime(0.0001, start);
+g.gain.exponentialRampToValueAtTime(0.11, start + 0.015);
+g.gain.exponentialRampToValueAtTime(0.0001, start + 0.2);
+osc.connect(g);
+g.connect(ctx.destination);
+osc.start(start);
+osc.stop(start + 0.25);
+i = i + 1;
+}
+}
+
+export fn playWinFanfare(ctx) {
+if (!ctx) return;
+const t0 = ctx.currentTime + 0.03;
+const seq = [60, 64, 67, 72, 76, 79, 84];
+let i = 0;
+while (i < seq.length) {
+const midi = seq[i];
+const freq = midiToHz(midi);
+const start = t0 + i * 0.055;
+const osc = ctx.createOscillator();
+const g = ctx.createGain();
+osc.type = 'triangle';
+osc.frequency.setValueAtTime(freq, start);
+g.gain.setValueAtTime(0.0001, start);
+g.gain.exponentialRampToValueAtTime(0.1, start + 0.02);
+g.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+osc.connect(g);
+g.connect(ctx.destination);
+osc.start(start);
+osc.stop(start + 0.32);
+i = i + 1;
+}
+}
+
+export fn playMissThud(ctx) {
+if (!ctx) return;
+const t0 = ctx.currentTime + 0.002;
+const osc = ctx.createOscillator();
+const g = ctx.createGain();
+osc.type = 'sawtooth';
+osc.frequency.setValueAtTime(90, t0);
+osc.frequency.exponentialRampToValueAtTime(55, t0 + 0.08);
+g.gain.setValueAtTime(0.0001, t0);
+g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.02);
+g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+osc.connect(g);
+g.connect(ctx.destination);
+osc.start(t0);
+osc.stop(t0 + 0.15);
+}

@@ -3,91 +3,121 @@ import { Play, Square } from "../icons.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
 import { audioMeterPitchRef } from "./AudioMeterContext.tish"
 
-const pitchFallback = { freq: 0, note: '-' };
 const normPitch = (p) => {
-if (!p || typeof p !== 'object') return pitchFallback;
+if (!p || typeof p !== 'object') return { freq: 0, note: '-' };
 const f = p.freq;
 const n = p.note;
 return { freq: Number.isFinite(f) ? f : 0, note: typeof n === 'string' ? n : '-' };
 };
 
-export fn JamMode(props) { let tabActive = props.tabActive; let audioCtx = props.audioCtx;
-let [pitch, setPitch] = useState({ freq: 0, note: '-' });
+export fn JamMode(props) {
+let tabActive = props.tabActive;
+let audioCtx = props.audioCtx;
+
 let [isPlaying, setIsPlaying] = useState(false);
 let [tempo, setTempo] = useState(120);
 const sequenceRef = useRef(null);
 const nextNoteTimeRef = useRef(0);
 const current16thNoteRef = useRef(0);
+const tempoRef = useRef(tempo);
+const audioCtxRef = useRef(audioCtx);
+const tabActiveRef = useRef(tabActive);
+const glowRef = useRef(null);
+
+tempoRef.current = Number(tempo) || 120;
+audioCtxRef.current = audioCtx;
+tabActiveRef.current = tabActive;
 
 const scheduleNote = (beatNumber, time) => {
-if (!audioCtx) return;
+const ac = audioCtxRef.current;
+if (!ac) return;
 if (beatNumber % 8 === 0) {
-const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-osc.connect(gain); gain.connect(audioCtx.destination);
+const osc = ac.createOscillator(); const gain = ac.createGain();
+osc.connect(gain); gain.connect(ac.destination);
 osc.frequency.setValueAtTime(150, time); osc.frequency.exponentialRampToValueAtTime(0.001, time + 0.5);
 gain.gain.setValueAtTime(0.8, time); gain.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
 osc.start(time); osc.stop(time + 0.5);
 }
 if (beatNumber % 8 === 4) {
-const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-osc.type = 'triangle'; osc.connect(gain); gain.connect(audioCtx.destination);
+const osc = ac.createOscillator(); const gain = ac.createGain();
+osc.type = 'triangle'; osc.connect(gain); gain.connect(ac.destination);
 osc.frequency.setValueAtTime(250, time); gain.gain.setValueAtTime(0.5, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
 osc.start(time); osc.stop(time + 0.2);
 }
 if (beatNumber % 2 === 0) {
-const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-osc.type = 'square'; osc.connect(gain); gain.connect(audioCtx.destination);
+const osc = ac.createOscillator(); const gain = ac.createGain();
+osc.type = 'square'; osc.connect(gain); gain.connect(ac.destination);
 osc.frequency.setValueAtTime(8000, time); gain.gain.setValueAtTime(0.1, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
 osc.start(time); osc.stop(time + 0.05);
 }
 };
 
+useEffect(() => {
+if (!tabActive) {
+clearTimeout(sequenceRef.current);
+sequenceRef.current = null;
+return;
+}
+if (!isPlaying || !audioCtxRef.current) {
+clearTimeout(sequenceRef.current);
+sequenceRef.current = null;
+return;
+}
+const ac = audioCtxRef.current;
+if (ac.state === 'suspended') void ac.resume();
+current16thNoteRef.current = 0;
+nextNoteTimeRef.current = ac.currentTime + 0.05;
+
 const scheduler = () => {
-if (!audioCtx) return;
-while (nextNoteTimeRef.current < audioCtx.currentTime + 0.1) {
+const ctx = audioCtxRef.current;
+if (!ctx || !tabActiveRef.current) return;
+while (nextNoteTimeRef.current < ctx.currentTime + 0.1) {
 scheduleNote(current16thNoteRef.current, nextNoteTimeRef.current);
-const secondsPerBeat = 60.0 / tempo;
+const secondsPerBeat = 60.0 / tempoRef.current;
 nextNoteTimeRef.current = nextNoteTimeRef.current + (0.25 * secondsPerBeat);
 current16thNoteRef.current = current16thNoteRef.current + 1;
 if (current16thNoteRef.current === 16) current16thNoteRef.current = 0;
 }
 sequenceRef.current = setTimeout(scheduler, 25.0);
 };
-
-useEffect(() => {
-if (!tabActive) {
-clearTimeout(sequenceRef.current);
-return;
-}
-if (isPlaying && audioCtx) {
-if (audioCtx.state === 'suspended') audioCtx.resume();
-current16thNoteRef.current = 0;
-nextNoteTimeRef.current = audioCtx.currentTime + 0.05;
 scheduler();
-} else {
+return () => {
 clearTimeout(sequenceRef.current);
-}
-return () => clearTimeout(sequenceRef.current);
-}, [tabActive, isPlaying, scheduler, audioCtx]);
+sequenceRef.current = null;
+};
+}, [tabActive, isPlaying]);
 
 useEffect(() => {
 if (!tabActive) return;
-let id = setInterval(() => {
+let raf = 0;
+let cancelled = false;
+const loop = () => {
+if (cancelled) return;
 const p = normPitch(audioMeterPitchRef.current);
-setPitch(prev => {
-const sp = normPitch(prev);
-if (sp.freq === p.freq && sp.note === p.note) return sp;
-return p;
-});
-}, 100);
-return () => clearInterval(id);
+const el = glowRef.current;
+if (el) {
+const px = p.freq > 0 ? Math.min(1200, p.freq) : 0;
+if (px > 0) {
+const s = String(px) + 'px';
+el.style.width = s;
+el.style.height = s;
+el.style.opacity = '0.3';
+} else {
+el.style.opacity = '0';
+}
+}
+raf = requestAnimationFrame(loop);
+};
+raf = requestAnimationFrame(loop);
+return () => {
+cancelled = true;
+cancelAnimationFrame(raf);
+};
 }, [tabActive]);
-
-const pitchV = normPitch(pitch);
 
 return (
 <div class="flex-1 min-h-0 flex flex-col items-center justify-center p-8 bg-black overflow-hidden relative">
-<div class="absolute inset-0 overflow-hidden pointer-events-none">
+<div class="absolute inset-0 overflow-hidden pointer-events-none isolate [contain:strict]">
 <WebGLBackground />
 </div>
 <div class="bg-neutral-900/90 border border-neutral-700 p-8 rounded-2xl w-full max-w-2xl text-center shadow-2xl backdrop-blur-md relative">
@@ -99,15 +129,13 @@ return (
 </button>
 <div class="w-full max-w-xs">
 <div class="flex justify-between text-sm text-neutral-400 mb-2"><span>Tempo</span><span class="font-mono text-white">{tempo} BPM</span></div>
-<input type="range" min="60" max="200" value={tempo} onChange={(e) => setTempo(e.target.value)} class="w-full accent-orange-500" />
+<input type="range" min="60" max="200" value={tempo} onChange={(e) => setTempo(Number(e.target.value))} class="w-full accent-orange-500" />
 </div>
 </div>
 </div>
-{pitchV.freq > 0 ? (
 <div class="absolute inset-0 overflow-hidden pointer-events-none opacity-30">
-<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 mix-blend-screen transition-all duration-100 blur-[100px]" style={{ width: String(Math.min(1200, pitchV.freq)) + "px", height: String(Math.min(1200, pitchV.freq)) + "px" }} />
+<div ref={glowRef} class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 mix-blend-screen blur-[100px] will-change-[width,height,opacity]" style={{ width: "0px", height: "0px", opacity: 0 }} />
 </div>
-) : null}
 </div>
 );
 }

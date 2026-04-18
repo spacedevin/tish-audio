@@ -1,6 +1,7 @@
 import { useLayoutEffect, useEffect, useRef, h } from "lattish"
 import { Volume2 } from "../icons.tish"
-import { autoCorrelate, noteFromPitch, noteStrings } from "../audio/dsp.tish"
+import { noteFromPitch, noteStrings } from "../audio/dsp.tish"
+import { analyzeTimeDomainFrame } from "../guitar/guitarPitchFrame.tish"
 
 const defaultPitch = { freq: 0, note: '-', cents: 0 };
 
@@ -41,11 +42,8 @@ let cancelled = false;
 const updateLoop = () => {
 if (cancelled) return;
 analyser.getFloatTimeDomainData(dataArray);
-let sumSquares = 0;
-for (let i = 0; i < bufferLength; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
-const level = Math.sqrt(sumSquares / bufferLength) * 10;
-
-const freq = autoCorrelate(dataArray, audioCtxRef.current.sampleRate);
+const frame = analyzeTimeDomainFrame(dataArray, audioCtxRef.current.sampleRate, { maxHz: 2000 });
+const level = frame.rms * 10;
 const now = performance.now();
 if (now - lastUiMs >= 80) {
 lastUiMs = now;
@@ -54,7 +52,8 @@ if (levelBucket !== lastInputLevelBucketRef.current) {
 lastInputLevelBucketRef.current = levelBucket;
 writeHeaderMeterDom(level, audioMeterPitchRef.current.note, audioMeterPitchRef.current.freq);
 }
-if (freq !== -1 && freq > 40 && freq < 2000) {
+if (frame.freqHz > 0) {
+const freq = frame.freqHz;
 const note = noteFromPitch(freq);
 const noteName = noteStrings[note % 12];
 const rounded = Math.round(freq);
@@ -65,7 +64,7 @@ const next = { freq: rounded, note: noteName, octave: Math.floor(note / 12) - 1 
 audioMeterPitchRef.current = next;
 writeHeaderMeterDom(level, next.note, next.freq);
 }
-} else if (freq === -1 && lastPitchNote !== '-') {
+} else if (frame.freqRaw === -1 && lastPitchNote !== '-') {
 lastPitchNote = '-';
 lastPitchFreq = 0;
 const next = { freq: 0, note: '-', cents: 0 };

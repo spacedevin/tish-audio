@@ -1,0 +1,169 @@
+// Scrolling targets, spawn timing, hit / miss adjudication (profile-driven).
+import { PHRASE_NOTE_COUNT, PHRASES_TO_WIN_SESSION } from "./songPhrase.tish"
+
+export fn createGameState(profile) {
+return {
+notes: [],
+score: 0,
+combo: 0,
+maxCombo: 0,
+lastJudgment: '',
+judgmentUntil: 0,
+nextSpawnIn: profile.spawnIntervalMs,
+noteSeq: 0,
+songStep: 0,
+phraseClears: 0,
+lastPhraseClearUntil: 0,
+won: false
+};
+};
+
+const judgmentText = (kind) => {
+if (kind === 'perfect') return 'PERFECT';
+if (kind === 'good') return 'GOOD';
+if (kind === 'miss') return 'MISS';
+return '';
+};
+
+export fn arcadeTick(state, profile, dtMs, input) {
+const judgmentY = input.judgmentY;
+const spawnY = input.spawnY;
+const strum = input.strum === true;
+const playerLane = input.playerLane;
+const now = input.nowMs;
+
+if (state.won === true) {
+let notesW = [];
+let wi = 0;
+while (wi < state.notes.length) {
+notesW.push({ ...state.notes[wi], y: state.notes[wi].y + profile.scrollPxPerMs * dtMs });
+wi = wi + 1;
+}
+notesW = notesW.filter(n => n.y < judgmentY + 140);
+return { state: { ...state, notes: notesW }, events: [] };
+}
+
+const hitLo = judgmentY - profile.hitWindowPx;
+const hitHi = judgmentY + profile.hitWindowPx;
+const missY = judgmentY + profile.missPastPx;
+
+let notes = [];
+let ni = 0;
+while (ni < state.notes.length) {
+notes.push({ ...state.notes[ni], y: state.notes[ni].y + profile.scrollPxPerMs * dtMs });
+ni = ni + 1;
+}
+
+let score = state.score;
+let combo = state.combo;
+let maxCombo = state.maxCombo;
+let lastJudgment = state.lastJudgment;
+let judgmentUntil = state.judgmentUntil;
+let nextSpawnIn = state.nextSpawnIn - dtMs;
+let noteSeq = state.noteSeq;
+let songStep = state.songStep;
+let phraseClears = state.phraseClears;
+let lastPhraseClearUntil = state.lastPhraseClearUntil;
+let won = state.won === true;
+
+const events = [];
+
+if (!won && nextSpawnIn <= 0) {
+const lane = Math.floor(Math.random() * profile.laneCount);
+notes.push({
+id: 'n' + String(noteSeq),
+lane,
+y: spawnY,
+hit: false,
+missed: false
+});
+noteSeq = noteSeq + 1;
+nextSpawnIn = profile.spawnIntervalMs + Math.random() * profile.spawnJitterMs;
+}
+
+const needStrum = profile.strumRequired === true;
+const strumOk = !needStrum || strum;
+
+if (strumOk && playerLane >= 0) {
+let hi = 0;
+while (hi < notes.length) {
+const n = notes[hi];
+if (!n.hit && !n.missed && n.lane === playerLane && n.y >= hitLo && n.y <= hitHi) {
+const dist = Math.abs(n.y - judgmentY);
+const kind = dist < profile.hitWindowPx * 0.35 ? 'perfect' : 'good';
+const add = kind === 'perfect' ? 100 : 65;
+notes[hi] = { ...n, hit: true };
+score = score + add;
+combo = combo + 1;
+if (combo > maxCombo) maxCombo = combo;
+lastJudgment = judgmentText(kind);
+judgmentUntil = now + 450;
+if (profile.holdTailMs > 0) score = score + 20;
+
+const phraseIndex = songStep;
+events.push({ type: 'hit', kind, lane: n.lane, phraseIndex });
+songStep = songStep + 1;
+if (songStep >= PHRASE_NOTE_COUNT) {
+songStep = 0;
+phraseClears = phraseClears + 1;
+lastPhraseClearUntil = now + 2200;
+lastJudgment = 'PHRASE CLEAR!';
+judgmentUntil = now + 1800;
+events.push({ type: 'phraseClear', phraseClears });
+if (phraseClears >= PHRASES_TO_WIN_SESSION) {
+won = true;
+lastJudgment = 'YOU WIN!';
+judgmentUntil = now + 5000;
+events.push({ type: 'win', score, phraseClears });
+}
+}
+break;
+}
+hi = hi + 1;
+}
+}
+
+const kept = [];
+let mi = 0;
+while (mi < notes.length) {
+const n = notes[mi];
+if (n.hit) {
+kept.push(n);
+} else if (!n.missed && n.y > missY) {
+combo = 0;
+songStep = 0;
+lastJudgment = judgmentText('miss');
+judgmentUntil = now + 400;
+kept.push({ ...n, missed: true });
+events.push({ type: 'miss' });
+} else if (!n.missed) {
+kept.push(n);
+}
+mi = mi + 1;
+}
+
+notes = kept.filter(n => {
+if (n.missed) return n.y < missY + 120;
+if (n.hit) return n.y < judgmentY + 100;
+return true;
+});
+
+return {
+state: {
+notes,
+score,
+combo,
+maxCombo,
+lastJudgment,
+judgmentUntil,
+nextSpawnIn,
+noteSeq,
+songStep,
+phraseClears,
+lastPhraseClearUntil,
+won
+},
+events
+};
+}
+

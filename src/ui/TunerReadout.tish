@@ -1,0 +1,143 @@
+import { useEffect, useRef, useState, h } from "lattish"
+import { noteFromPitch, noteStrings } from "../audio/dsp.tish"
+import { createStrumGate, analyzeTimeDomainFrame, midiAndCentsFromHz } from "../guitar/guitarPitchFrame.tish"
+import { inferStringFretFromMidi } from "../guitar/stringInference.tish"
+import { STANDARD_6_EADGBE_OPEN_MIDI } from "../guitar/tuningConfig.tish"
+
+const STRING_LABELS_6 = ['E (low)', 'A', 'D', 'G', 'B', 'e (high)'];
+
+const defaultTunerSnapshot = () => ({
+hasPitch: false,
+freqHz: 0,
+noteName: '-',
+octave: 0,
+centsFromTarget: 0,
+stringIndex: -1,
+fret: 0,
+stringLabel: '',
+strum: false
+});
+
+export fn buildTunerSnapshot(freqHz, openMidis, strum) {
+const midis = openMidis && openMidis.length ? openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
+if (!Number.isFinite(freqHz) || freqHz <= 0) {
+return { hasPitch: false, freqHz: 0, noteName: '-', octave: 0, centsFromTarget: 0, stringIndex: -1, fret: 0, stringLabel: '', strum };
+}
+const { exactMidi } = midiAndCentsFromHz(freqHz);
+const q = noteFromPitch(freqHz);
+const noteName = noteStrings[q % 12];
+const octave = Math.floor(q / 12) - 1;
+const inf = inferStringFretFromMidi(exactMidi, midis);
+if (!inf) {
+return { hasPitch: true, freqHz: Math.round(freqHz), noteName, octave, centsFromTarget: 0, stringIndex: -1, fret: 0, stringLabel: '', strum };
+}
+const stringLabel = midis.length === 6 && STRING_LABELS_6[inf.stringIndex] ? STRING_LABELS_6[inf.stringIndex] : ('String idx ' + String(inf.stringIndex));
+return {
+hasPitch: true,
+freqHz: Math.round(freqHz),
+noteName,
+octave,
+centsFromTarget: inf.centsFromTarget,
+stringIndex: inf.stringIndex,
+fret: inf.fret,
+stringLabel,
+strum
+};
+}
+
+export fn useLiveGuitarPitch(analyserRef, audioReady, active, openMidis) {
+const midis = openMidis && openMidis.length ? openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
+// Lattish useState does not invoke function initializers (unlike React); pass a value, not () => ...
+const [snapshot, setSnapshot] = useState(buildTunerSnapshot(0, midis, false));
+const safeSnapshot = snapshot != null ? snapshot : buildTunerSnapshot(0, midis, false);
+const strumGateRef = useRef(null);
+if (!strumGateRef.current) strumGateRef.current = createStrumGate();
+
+useEffect(() => {
+if (!active || !audioReady) return;
+let cancelled = false;
+let raf = 0;
+let dataArray = null;
+const loop = (time) => {
+if (cancelled) return;
+const analyser = analyserRef.current;
+if (!analyser) {
+raf = requestAnimationFrame(loop);
+return;
+}
+if (!dataArray || dataArray.length !== analyser.fftSize) dataArray = new Float32Array(analyser.fftSize);
+const sampleRate = analyser.context.sampleRate;
+try { if (analyser.context.state === 'suspended') void analyser.context.resume(); } catch (eR) {}
+analyser.getFloatTimeDomainData(dataArray);
+const frame = analyzeTimeDomainFrame(dataArray, sampleRate, { maxHz: 2200 });
+const strum = strumGateRef.current.update(frame.rms, time);
+const snap = buildTunerSnapshot(frame.freqHz, midis, strum);
+setSnapshot(snap);
+raf = requestAnimationFrame(loop);
+};
+raf = requestAnimationFrame(loop);
+return () => {
+cancelled = true;
+cancelAnimationFrame(raf);
+};
+}, [active, audioReady, analyserRef, midis]);
+
+const resetGate = () => {
+strumGateRef.current.reset();
+};
+return { snapshot: safeSnapshot, resetStrumGate: resetGate };
+}
+
+export fn TunerReadout(props) {
+const raw = props.snapshot;
+const snap = raw != null && typeof raw === 'object' && raw.hasPitch !== undefined ? raw : defaultTunerSnapshot();
+const compact = props.compact === true;
+const cents = snap.hasPitch ? snap.centsFromTarget : 0;
+const centsClamped = Math.max(-50, Math.min(50, cents));
+const centsNorm = (centsClamped + 50) / 100;
+if (compact) {
+return (
+<div class="flex flex-wrap items-center gap-3 text-xs font-mono text-neutral-300">
+<span class="text-orange-400 font-bold text-lg w-12 text-center">{snap.noteName}</span>
+<span class="text-neutral-500">{snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—'}</span>
+{snap.hasPitch && snap.stringIndex >= 0 ? (
+<span class="text-emerald-400/90">{snap.stringLabel + ' · ' + String(snap.fret)}</span>
+) : null}
+<span class="text-neutral-500">{snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' c' : ''}</span>
+</div>
+);
+}
+return (
+<div class="rounded-xl border border-neutral-700 bg-neutral-950/90 p-6 space-y-5 max-w-lg">
+<div class="flex items-end justify-between gap-4">
+<div>
+<p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest">Pitch</p>
+<p class="text-5xl font-black text-orange-400 tabular-nums">{snap.noteName}<span class="text-2xl text-neutral-500 font-bold ml-1">{snap.hasPitch ? String(snap.octave) : ''}</span></p>
+</div>
+<div class="text-right">
+<p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest">Frequency</p>
+<p class="text-2xl font-mono text-white">{snap.hasPitch ? String(snap.freqHz) + ' Hz' : '—'}</p>
+</div>
+</div>
+{snap.hasPitch && snap.stringIndex >= 0 ? (
+<div class="text-sm text-neutral-300">
+<span class="text-neutral-500">String / fret</span>{' '}
+<span class="font-mono text-emerald-300">{snap.stringLabel}</span>
+<span class="text-neutral-600"> · </span>
+<span class="font-mono text-white">fret {String(snap.fret)}</span>
+</div>
+) : (
+<p class="text-sm text-neutral-500">Play a note. String and fret are a best guess (monophonic detector).</p>
+)}
+<div>
+<p class="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mb-2">Cents vs fretted target</p>
+<div class="relative h-3 rounded-full bg-neutral-800 border border-neutral-700 overflow-hidden">
+<div class="absolute left-1/2 top-0 bottom-0 w-px bg-neutral-500 z-10" />
+<div class="absolute top-0 bottom-0 w-1.5 rounded-sm bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.6)] transition-[left] duration-75" style={{ left: String(centsNorm * 100) + '%', transform: 'translateX(-50%)' }} />
+</div>
+<p class="text-center text-xs font-mono text-neutral-400 mt-2">{snap.hasPitch ? (cents >= 0 ? '+' : '') + String(Math.round(cents)) + ' cents' : '—'}</p>
+</div>
+{snap.strum ? <p class="text-[10px] text-amber-500/90 font-mono">Strum edge detected (used by Arcade; chord-wide auto-tune is not available yet)</p> : null}
+</div>
+);
+}

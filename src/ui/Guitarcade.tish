@@ -1,94 +1,320 @@
-import { useEffect, useRef, h } from "lattish"
+import { useEffect, useRef, useState, h } from "lattish"
 import { WebGLBackground } from "./WebGLBackground.tish"
-import { audioMeterPitchRef } from "./AudioMeterContext.tish"
+import { createStrumGate, analyzeTimeDomainFrame } from "../guitar/guitarPitchFrame.tish"
+import { ARCADE_PROFILE_IDS, getProfile } from "../arcade/gameProfiles.tish"
+import { createGameState, arcadeTick } from "../arcade/rhythmEngine.tish"
+import { createLaneSmoother, freqToLane } from "../arcade/pitchLanes.tish"
+import {
+PHRASE_NOTE_COUNT,
+PHRASES_TO_WIN_SESSION,
+playPhraseHit,
+playPhraseClearFanfare,
+playWinFanfare,
+playMissThud
+} from "../arcade/songPhrase.tish"
 
-const normPitchRef = () => {
-const p = audioMeterPitchRef.current;
-if (!p || typeof p !== 'object') return { freq: 0, note: '-' };
-const f = p.freq;
-const n = p.note;
-return { freq: Number.isFinite(f) ? f : 0, note: typeof n === 'string' ? n : '-' };
+export fn Guitarcade(props) {
+let tabActive = props.tabActive;
+let analyzerRef = props.analyzerRef;
+let audioReady = props.audioReady;
+
+let [profileId, setProfileId] = useState('guitarHero');
+
+const canvasRef = useRef(null);
+const gameStateRef = useRef(null);
+const smootherRef = useRef(null);
+const strumGateRef = useRef(null);
+if (!strumGateRef.current) strumGateRef.current = createStrumGate();
+const profileIdRef = useRef(profileId);
+const hudScoreRef = useRef(null);
+const hudComboRef = useRef(null);
+const hudLaneRef = useRef(null);
+const hudPhraseRef = useRef(null);
+const hudWinRef = useRef(null);
+const victoryOverlayRef = useRef(null);
+const hudSnapRef = useRef({ score: -1, combo: -1, lane: -999, phrase: -1 });
+
+profileIdRef.current = profileId;
+
+const writeHudRow = (score, combo, lane, roundsWon) => {
+const snap = hudSnapRef.current;
+if (snap.score === score && snap.combo === combo && snap.lane === lane && snap.phrase === roundsWon) return;
+snap.score = score;
+snap.combo = combo;
+snap.lane = lane;
+snap.phrase = roundsWon;
+if (hudScoreRef.current) hudScoreRef.current.textContent = String(score);
+if (hudComboRef.current) hudComboRef.current.textContent = String(combo);
+if (hudLaneRef.current) hudLaneRef.current.textContent = lane >= 0 ? String(lane) : '-';
+if (hudPhraseRef.current) hudPhraseRef.current.textContent = String(roundsWon) + ' / ' + String(PHRASES_TO_WIN_SESSION);
+const left = Math.max(0, PHRASES_TO_WIN_SESSION - roundsWon);
+if (hudWinRef.current) {
+hudWinRef.current.textContent = roundsWon >= PHRASES_TO_WIN_SESSION ? 'You won! Tap Play again.' : String(left) + ' round win' + (left === 1 ? '' : 's') + ' left (each round = 8 hits, no miss)';
+}
 };
 
-export fn Guitarcade(props) { let tabActive = props.tabActive; let analyzerRef = props.analyzerRef; let audioReady = props.audioReady;
-const canvasRef = useRef(null);
-const gameRef = useRef({ playerY: 200, lasers: [], enemies: [], score: 0, lastFire: 0, gameOver: false });
+const resetForProfile = (pid) => {
+const p = getProfile(pid);
+gameStateRef.current = createGameState(p);
+smootherRef.current = createLaneSmoother();
+strumGateRef.current.reset();
+hudSnapRef.current = { score: -1, combo: -1, lane: -999, phrase: -1 };
+writeHudRow(0, 0, -1, 0);
+const vo = victoryOverlayRef.current;
+if (vo) vo.classList.add('hidden');
+};
 
 useEffect(() => {
-if (!tabActive || !audioReady || !canvasRef.current || !analyzerRef.current) return;
-const canvas = canvasRef.current; const ctx = canvas.getContext('2d');
-let animationId;
+resetForProfile(profileId);
+}, [profileId]);
+
+useEffect(() => {
+if (!tabActive || !audioReady) return;
+let cancelled = false;
+let waitId = 0;
+let animationId = 0;
+
+const startEngine = () => {
+if (cancelled) return;
+if (!canvasRef.current || !analyzerRef.current) {
+waitId = requestAnimationFrame(startEngine);
+return;
+}
+const canvas = canvasRef.current;
+const ctx2d = canvas.getContext('2d');
+if (!ctx2d) {
+waitId = requestAnimationFrame(startEngine);
+return;
+}
 const analyser = analyzerRef.current;
+const ac = analyser.context;
+const sampleRate = analyser.context.sampleRate;
 const dataArray = new Float32Array(analyser.fftSize);
-let previousRms = 0;
+let lastTime = performance.now();
+
+const playEvents = (events) => {
+let ei = 0;
+while (ei < events.length) {
+const e = events[ei];
+if (e.type === 'hit') playPhraseHit(ac, e.phraseIndex, e.kind);
+else if (e.type === 'phraseClear') playPhraseClearFanfare(ac);
+else if (e.type === 'miss') playMissThud(ac);
+else if (e.type === 'win') {
+playWinFanfare(ac);
+const vo = victoryOverlayRef.current;
+if (vo) vo.classList.remove('hidden');
+}
+ei = ei + 1;
+}
+};
 
 const gameLoop = (time) => {
+const profile = getProfile(profileIdRef.current);
+if (!gameStateRef.current) gameStateRef.current = createGameState(profile);
+if (!smootherRef.current) smootherRef.current = createLaneSmoother();
+
+const dtMs = Math.min(48, Math.max(0, time - lastTime));
+lastTime = time;
+
+try { if (ac.state === 'suspended') void ac.resume(); } catch (eR) {}
+
 analyser.getFloatTimeDomainData(dataArray);
-let sumSquares = 0;
-for (let i = 0; i < dataArray.length; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
-const rms = Math.sqrt(sumSquares / dataArray.length);
-const state = gameRef.current;
+const frame = analyzeTimeDomainFrame(dataArray, sampleRate, { maxHz: 2200 });
+const strum = strumGateRef.current.update(frame.rms, time);
+const freq = frame.freqHz;
 
-const cp = normPitchRef();
-if (cp.freq > 0 && cp.freq > 60 && cp.freq < 1000) {
-const minLog = Math.log2(82); const maxLog = Math.log2(880); const currentLog = Math.log2(cp.freq);
-let normalized = (currentLog - minLog) / (maxLog - minLog); normalized = Math.max(0, Math.min(1, normalized));
-const targetY = canvas.height - (normalized * canvas.height);
-state.playerY = state.playerY + ((targetY - state.playerY) * 0.2);
-}
+const playerLane = freqToLane(freq, profile, smootherRef.current);
 
-const deltaRms = rms - previousRms;
-if (deltaRms > 0.05 && time - state.lastFire > 200 && !state.gameOver) {
-state.lasers.push({ x: 100, y: state.playerY }); state.lastFire = time;
-}
-previousRms = rms;
+const w = canvas.width;
+const h = canvas.height;
+const judgmentY = h - 88;
+const spawnY = 72;
+const lanePad = 8;
+const laneTotalW = w - lanePad * 2;
+const laneW = laneTotalW / profile.laneCount;
 
-if (!state.gameOver) {
-state.lasers.forEach(l => l.x = l.x + (15)); state.lasers = state.lasers.filter(l => l.x < canvas.width);
-if (Math.random() < 0.03) state.enemies.push({ x: canvas.width, y: Math.random() * (canvas.height - 40) + 20, speed: Math.random() * 3 + 2 });
-state.enemies.forEach(e => e.x = e.x - (e.speed));
-
-state.lasers.forEach(l => {
-state.enemies.forEach(e => {
-if (!e.dead && !l.dead && Math.abs(l.x - e.x) < 30 && Math.abs(l.y - e.y) < 30) { e.dead = true; l.dead = true; state.score = state.score + (10); }
+const tickOut = arcadeTick(gameStateRef.current, profile, dtMs, {
+judgmentY,
+spawnY,
+strum,
+playerLane,
+nowMs: time
 });
-});
-state.lasers = state.lasers.filter(l => !l.dead); state.enemies = state.enemies.filter(e => !e.dead);
-state.enemies.forEach(e => { if (e.x < 120 && Math.abs(state.playerY - e.y) < 30) state.gameOver = true; });
-state.enemies = state.enemies.filter(e => e.x > -50);
+gameStateRef.current = tickOut.state;
+if (tickOut.events.length > 0) playEvents(tickOut.events);
+
+const st = gameStateRef.current;
+writeHudRow(st.score, st.combo, playerLane, st.phraseClears);
+
+// Draw
+ctx2d.fillStyle = '#050508';
+ctx2d.fillRect(0, 0, w, h);
+
+const progY = 56;
+const progH = 8;
+ctx2d.fillStyle = 'rgba(30,30,35,0.95)';
+ctx2d.fillRect(lanePad, progY - 4, laneTotalW, progH + 8);
+const progFill = (st.songStep / PHRASE_NOTE_COUNT) * laneTotalW;
+ctx2d.fillStyle = 'rgba(249,115,22,0.85)';
+ctx2d.fillRect(lanePad, progY, progFill, progH);
+ctx2d.fillStyle = '#737373';
+ctx2d.font = '11px ui-monospace, monospace';
+ctx2d.textAlign = 'left';
+ctx2d.fillText('Hits this streak: ' + String(st.songStep) + '/8  ·  Round wins: ' + String(st.phraseClears) + '/' + String(PHRASES_TO_WIN_SESSION), lanePad, progY - 8);
+
+let lx = 0;
+while (lx < profile.laneCount) {
+const x0 = lanePad + lx * laneW;
+ctx2d.fillStyle = 'rgba(30,30,35,0.95)';
+ctx2d.fillRect(x0, progY + 20, laneW - 2, h - progY - 20);
+ctx2d.strokeStyle = 'rgba(55,55,65,0.9)';
+ctx2d.lineWidth = 1;
+ctx2d.beginPath();
+ctx2d.moveTo(x0 + laneW - 2, progY + 20);
+ctx2d.lineTo(x0 + laneW - 2, h);
+ctx2d.stroke();
+lx = lx + 1;
 }
 
-ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-ctx.strokeStyle = '#262626'; ctx.lineWidth = 1;
-for (let i = 0; i < canvas.width; i = i + (50) ){ ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke(); }
+ctx2d.strokeStyle = 'rgba(250,204,21,0.95)';
+ctx2d.lineWidth = 4;
+ctx2d.beginPath();
+ctx2d.moveTo(lanePad, judgmentY);
+ctx2d.lineTo(w - lanePad, judgmentY);
+ctx2d.stroke();
 
-ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.moveTo(100, state.playerY); ctx.lineTo(60, state.playerY - 20); ctx.lineTo(60, state.playerY + 20); ctx.fill();
-ctx.fillStyle = '#22d3ee'; state.lasers.forEach(l => ctx.fillRect(l.x, l.y - 2, 20, 4));
-ctx.fillStyle = '#ef4444'; state.enemies.forEach(e => { ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI * 2); ctx.fill(); });
-
-ctx.fillStyle = 'white'; ctx.font = '24px monospace'; ctx.fillText("SCORE: " + String(state.score), 20, 40);
-const cpHud = normPitchRef();
-ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText("INPUT PITCH: " + cpHud.note + " (" + String(cpHud.freq) + "Hz)", 20, canvas.height - 20);
-
-if (state.gameOver) {
-ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-ctx.fillStyle = 'white'; ctx.font = '48px monospace'; ctx.textAlign = 'center'; ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
-ctx.font = '24px monospace'; ctx.fillText('Strum loudly to restart', canvas.width/2, canvas.height/2 + 50); ctx.textAlign = 'left';
-if (deltaRms > 0.1) { state.gameOver = false; state.score = 0; state.enemies = []; state.lasers = []; state.playerY = canvas.height/2; }
+let nj = 0;
+while (nj < st.notes.length) {
+const n = st.notes[nj];
+const col = profile.laneColors[n.lane] || '#fff';
+const x0 = lanePad + n.lane * laneW + 6;
+const nw = laneW - 14;
+const nh = profile.holdTailMs > 0 ? 28 + Math.min(44, profile.holdTailMs / 25) : 22;
+ctx2d.fillStyle = n.missed ? 'rgba(80,80,90,0.5)' : (n.hit ? 'rgba(160,255,180,0.45)' : col);
+ctx2d.fillRect(x0, n.y - nh / 2, nw, nh);
+if (!n.hit && !n.missed) {
+ctx2d.strokeStyle = 'rgba(255,255,255,0.35)';
+ctx2d.lineWidth = 2;
+ctx2d.stroke();
 }
+nj = nj + 1;
+}
+
+if (playerLane >= 0 && playerLane < profile.laneCount) {
+const hx = lanePad + playerLane * laneW + 4;
+ctx2d.strokeStyle = 'rgba(251,146,60,0.85)';
+ctx2d.lineWidth = 3;
+ctx2d.strokeRect(hx, judgmentY - 36, laneW - 8, 72);
+}
+
+ctx2d.fillStyle = 'rgba(0,0,0,0.25)';
+ctx2d.fillRect(lanePad, progY + 24, laneTotalW, 52);
+ctx2d.fillStyle = '#fafafa';
+ctx2d.font = 'bold 22px ui-monospace, monospace';
+ctx2d.textAlign = 'left';
+ctx2d.fillText('SCORE ' + String(st.score), lanePad + 10, progY + 52);
+ctx2d.fillStyle = '#a3a3a3';
+ctx2d.font = '14px ui-monospace, monospace';
+ctx2d.fillText('COMBO ' + String(st.combo) + '   MAX ' + String(st.maxCombo), lanePad + 200, progY + 50);
+if (st.lastJudgment && time < st.judgmentUntil) {
+ctx2d.fillStyle = '#fde047';
+ctx2d.font = 'bold 28px ui-monospace, monospace';
+ctx2d.textAlign = 'center';
+ctx2d.fillText(st.lastJudgment, w / 2, judgmentY - 52);
+ctx2d.textAlign = 'left';
+}
+
+ctx2d.fillStyle = '#737373';
+ctx2d.font = '12px ui-monospace, monospace';
+ctx2d.fillText('Signal = post-patch Master Out', lanePad, h - 18);
+ctx2d.textAlign = 'right';
+ctx2d.fillText((freq > 0 ? String(Math.round(freq)) + ' Hz' : '-') + '   lane ' + (playerLane >= 0 ? String(playerLane) : '-'), w - lanePad, h - 18);
+ctx2d.textAlign = 'left';
+
 animationId = requestAnimationFrame(gameLoop);
 };
+
 animationId = requestAnimationFrame(gameLoop);
-return () => cancelAnimationFrame(animationId);
-}, [tabActive, audioReady, analyzerRef]);
+};
+
+waitId = requestAnimationFrame(startEngine);
+return () => {
+cancelled = true;
+if (waitId) cancelAnimationFrame(waitId);
+if (animationId) cancelAnimationFrame(animationId);
+};
+}, [tabActive, audioReady, analyzerRef, profileId]);
+
+const handleReplay = () => {
+resetForProfile(profileId);
+};
+
+const modeHint = getProfile(profileId).playerHint;
+const step5Win = 'Win the game after ' + String(PHRASES_TO_WIN_SESSION) + ' round wins (each round is ' + String(PHRASE_NOTE_COUNT) + ' good hits in a row with no miss).';
 
 return (
-<div class="flex-1 min-h-0 flex flex-col items-center justify-center p-8 bg-black relative">
-<div class="absolute inset-0 pointer-events-none overflow-hidden">
+<div class="flex-1 min-h-0 flex flex-col bg-black relative overflow-hidden">
+<div class="absolute inset-0 pointer-events-none overflow-hidden isolate [contain:strict]">
 <WebGLBackground />
 </div>
-<div class="text-center mb-4 relative"><h2 class="text-3xl font-black text-white tracking-widest drop-shadow-lg">PITCH INVADERS</h2><p class="text-neutral-400 text-sm drop-shadow-md">Play High/Low notes to move. Strum aggressively to shoot.</p></div>
-<div class="relative border-4 border-neutral-800 rounded-xl overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.5)]"><canvas ref={canvasRef} width={800} height={500} class="bg-black/90" /></div>
+<div class="relative z-10 flex flex-col gap-3 p-4 shrink-0 border-b border-neutral-800/80 bg-neutral-950/90 max-h-[50vh] overflow-y-auto custom-scrollbar">
+<div class="flex flex-wrap items-center justify-between gap-3">
+<h2 class="text-xl sm:text-2xl font-black text-white tracking-tight">ARCADE</h2>
+<p class="text-neutral-400 text-xs sm:text-sm max-w-sm">{'Match falling gems to your pitch. Nothing here is random: gem color = column number = lane number on the HUD.'}</p>
+</div>
+
+<div class="rounded-lg border border-orange-500/40 bg-orange-950/25 p-3 text-left text-xs text-neutral-200 leading-relaxed space-y-2">
+<p class="text-orange-200 font-black text-[11px] uppercase tracking-widest">Start here</p>
+<div class="space-y-1.5">
+<p><span class="text-orange-400 font-mono font-bold">1.</span>{' Each falling block sits in one vertical column. Columns are numbered 0, 1, 2, ... from left to right (see Column key).'}</p>
+<p><span class="text-orange-400 font-mono font-bold">2.</span>{' The orange rectangle on the board is you: it moves with your pitch. Change notes until that rectangle lines up with the column of the falling block.'}</p>
+<p><span class="text-orange-400 font-mono font-bold">3.</span>{' When the block touches the yellow line, that is the hit moment: your HUD lane number must equal the block column number.'}</p>
+<p><span class="text-orange-400 font-mono font-bold">4.</span>{' Each good hit plays one short reward beep in order (8 beeps = one round win). Miss a block and the beep order resets.'}</p>
+<p><span class="text-orange-400 font-mono font-bold">5.</span>{step5Win}</p>
+</div>
+</div>
+
+<div class="flex flex-wrap items-center gap-2 text-[11px]">
+<span class="text-neutral-500 font-bold uppercase tracking-wider shrink-0">Column key</span>
+<p class="text-neutral-400 font-mono text-[10px] leading-snug max-w-xl">{'Lane # = gem column, left to right: 0, 1, 2, ... Match the HUD Lane number to that column when the gem hits the yellow line.'}</p>
+<p class="text-neutral-400 text-[11px] leading-snug border-l-2 border-neutral-600 pl-2">{modeHint}</p>
+</div>
+
+<div class="flex flex-wrap gap-2">
+{ARCADE_PROFILE_IDS.map(pid => {
+const p = getProfile(pid);
+const on = profileId === pid;
+return (
+<button
+key={pid}
+type="button"
+onClick={() => setProfileId(pid)}
+class={"rounded-lg px-3 py-2 text-xs font-bold border transition-colors " + (on ? "border-orange-500 bg-orange-950/60 text-orange-200" : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-500 hover:text-white")}
+>
+<span class="block">{p.label}</span>
+<span class="block text-[10px] font-normal opacity-80">{p.subtitle}</span>
+</button>
+);
+})}
+</div>
+<div class="flex flex-wrap gap-4 text-xs font-mono text-neutral-400">
+<span>Score <span ref={hudScoreRef} class="text-white">0</span></span>
+<span>Combo <span ref={hudComboRef} class="text-white">0</span></span>
+<span>Lane <span ref={hudLaneRef} class="text-orange-400">-</span></span>
+<span>Rounds <span ref={hudPhraseRef} class="text-emerald-300">0 / {PHRASES_TO_WIN_SESSION}</span></span>
+<span class="text-neutral-500"><span ref={hudWinRef} class="text-yellow-200">{String(PHRASES_TO_WIN_SESSION) + ' round wins to finish'}</span></span>
+</div>
+</div>
+<div class="flex-1 min-h-0 flex items-stretch justify-center p-2 sm:p-4 relative z-10 min-h-0">
+<div class="relative w-full max-w-4xl h-full min-h-[280px]">
+<canvas ref={canvasRef} class="w-full h-full rounded-xl border-4 border-neutral-800 bg-black shadow-[0_0_40px_rgba(249,115,22,0.25)]" style={{ aspectRatio: "16 / 9" }} width={960} height={540} />
+<div ref={victoryOverlayRef} class="hidden absolute inset-0 flex flex-col items-center justify-center gap-4 rounded-xl bg-black/80 border-4 border-emerald-600/60 pointer-events-auto">
+<p class="text-2xl sm:text-3xl font-black text-emerald-300 tracking-tight text-center px-4">You finished!</p>
+<p class="text-neutral-300 text-sm text-center max-w-sm px-4">{'You won ' + String(PHRASES_TO_WIN_SESSION) + ' streak-rounds (' + String(PHRASE_NOTE_COUNT) + ' hits each, no miss). Play again to beat your score.'}</p>
+<button type="button" onClick={handleReplay} class="rounded-full bg-orange-500 hover:bg-orange-400 text-black font-bold px-8 py-3 text-sm">Play again</button>
+</div>
+</div>
+</div>
 </div>
 );
 }

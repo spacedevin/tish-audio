@@ -1,0 +1,13 @@
+// Phase 2 (not wired yet): polyphonic / full-strum analysis for tuner-style "reverse tuning".
+//
+// The live path in guitarPitchFrame.tish uses autocorrelation on a single time-domain buffer,
+// which resolves one dominant pitch. Chords and wide strums mix energy across partials, so
+// reliable per-string open-string calibration needs a different front-end, for example:
+// - getFloatFrequencyData + peak picking or harmonic product spectrum
+// - chromagram / template matching against expected string fundamentals
+// - optional second AnalyserNode with larger fftSize dedicated to tuning
+//
+// When implemented, export something like estimateOpenOffsetsFromStrum(fftMagnitudes, tuning)
+// and keep arcade + header on the cheap monophonic path unless the user opts into strum scan.
+
+export const POLYPHONIC_STRUM_ANALYSIS_PLANNED = true;

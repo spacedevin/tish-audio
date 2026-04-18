@@ -1,0 +1,29 @@
+import { h } from "lattish"
+import { WebGLBackground } from "./WebGLBackground.tish"
+import { TunerReadout, useLiveGuitarPitch } from "./TunerReadout.tish"
+import { STANDARD_6_EADGBE_OPEN_MIDI } from "../guitar/tuningConfig.tish"
+
+export fn TuningMode(props) {
+let tabActive = props.tabActive === true;
+let analyzerRef = props.analyzerRef;
+let audioReady = props.audioReady === true;
+
+const { snapshot } = useLiveGuitarPitch(analyzerRef, audioReady, tabActive, STANDARD_6_EADGBE_OPEN_MIDI);
+
+return (
+<div class="flex-1 min-h-0 flex flex-col bg-black relative overflow-hidden">
+<div class="absolute inset-0 pointer-events-none overflow-hidden isolate [contain:strict]">
+<WebGLBackground />
+</div>
+<div class="relative z-10 flex flex-col gap-4 p-4 sm:p-6 max-w-2xl mx-auto w-full">
+<h2 class="text-2xl sm:text-3xl font-black text-white tracking-tight">TUNING</h2>
+<p class="text-neutral-400 text-sm leading-relaxed">
+Monophonic pitch from the same master analyser as Patch and Arcade. String and fret are the closest fit to standard 6-string EADGBE (open MIDI 40–64, index 0 = low E). Full-chord or strum-wide calibration would need an FFT-based pass; see{' '}
+<code class="text-orange-400/90 text-xs">src/guitar/polyphonicStrumAnalysis.tish</code>
+{' '}for the planned extension.
+</p>
+<TunerReadout snapshot={snapshot} />
+</div>
+</div>
+);
+}
