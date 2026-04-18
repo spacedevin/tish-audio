@@ -5,16 +5,21 @@ import { process } from "process"
 
 export async fn fullStylesheet() {
   let content = "";
-  
-  try {
-    let mainTish = await readFile("src/main.tish");
-    content = content + mainTish;
-  } catch (e) {}
-  
-  try {
-    let iconsTish = await readFile("src/icons.tish");
-    content = content + iconsTish;
-  } catch (e) {}
+  // Scan every app .tish so Tailwind JIT sees class names (main.tish alone is only the bootstrap after modular split).
+  try { content = content + await readFile("src/main.tish"); } catch (e) {}
+  try { content = content + await readFile("src/App.tish"); } catch (e) {}
+  try { content = content + await readFile("src/icons.tish"); } catch (e) {}
+  try { content = content + await readFile("src/audio/dsp.tish"); } catch (e) {}
+  try { content = content + await readFile("src/audio/pedalLibrary.tish"); } catch (e) {}
+  try { content = content + await readFile("src/audio/graphSignature.tish"); } catch (e) {}
+  try { content = content + await readFile("src/audio/rebuildAudioGraph.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/WebGLBackground.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/controls.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/nodes.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/NodeGraphView.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/ModuleLibraryPanel.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/JamMode.tish"); } catch (e) {}
+  try { content = content + await readFile("src/ui/Guitarcade.tish"); } catch (e) {}
 
   let css = await getPreflight();
   css = css + "\n";

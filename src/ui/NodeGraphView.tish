@@ -1,0 +1,288 @@
+import { h, useState, useRef } from "lattish"
+import { X } from "../icons.tish"
+import { getNodePorts } from "../audio/pedalLibrary.tish"
+import { WebGLBackground } from "./WebGLBackground.tish"
+import { RotaryKnob } from "./controls.tish"
+import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode } from "./nodes.tish"
+
+export fn NodeGraphView(props) {
+let nodes = props.nodes;
+let connections = props.connections;
+let removeNode = props.removeNode;
+let updateNodeParam = props.updateNodeParam;
+let updateNodePos = props.updateNodePos;
+let toggleNodeBypass = props.toggleNodeBypass;
+let addConnection = props.addConnection;
+let removeConnection = props.removeConnection;
+let nodeAudioMapRef = props.nodeAudioMapRef;
+
+const boardRef = useRef(null);
+let [wiring, setWiring] = useState(null);
+let [draggingNode, setDraggingNode] = useState(null);
+
+const getJackCoords = (node, isOutput, portId = 'main') => {
+let w = 200; let h = 340; 
+if (node.isSystem) { w = 80; h = 140; }
+else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
+else if (node.type === 'master_eq') { w = 640; h = 200; }
+else if (node.type === 'graphic_eq') { w = 760; h = 240; }
+else if (node.type === 'vu_meter') { w = 120; h = 200; }
+else if (node.type === 'console_mixer') {
+const numCh = node.params.channels || 4;
+w = 160 + (numCh * 64);
+h = 300;
+}
+
+const ports = getNodePorts(node)[isOutput ? 'out' : 'in'];
+const portIdx = Math.max(0, ports.indexOf(portId));
+const totalPorts = ports.length;
+
+const yOffset = ((portIdx + 1) * h) / (totalPorts + 1);
+
+return {
+x: node.x + (isOutput ? w : 0),
+y: node.y + yOffset
+};
+};
+
+const handlePointerMove = (e) => {
+if (!boardRef.current) return;
+const rect = boardRef.current.getBoundingClientRect();
+const ex = e.clientX - rect.left;
+const ey = e.clientY - rect.top;
+
+if (draggingNode) {
+const dx = ex - draggingNode.startMouseX;
+const dy = ey - draggingNode.startMouseY;
+updateNodePos(draggingNode.id, draggingNode.startNodeX + dx, draggingNode.startNodeY + dy);
+} else {
+setWiring(prev => (prev ? { ...prev, x: ex, y: ey } : prev));
+}
+};
+
+const handlePointerUp = () => {
+setWiring(null);
+setDraggingNode(null);
+};
+
+const startDragNode = (e, node) => {
+e.stopPropagation();
+if (!boardRef.current) return;
+const rect = boardRef.current.getBoundingClientRect();
+setDraggingNode({ id: node.id, startMouseX: e.clientX - rect.left, startMouseY: e.clientY - rect.top, startNodeX: node.x, startNodeY: node.y });
+};
+
+const startWire = (e, nodeId, portId) => {
+e.stopPropagation();
+if (!boardRef.current) return;
+const rect = boardRef.current.getBoundingClientRect();
+setWiring({ fromId: nodeId, fromPort: portId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+};
+
+const dropWire = (e, toNodeId, toPortId) => {
+e.stopPropagation();
+setWiring(prev => {
+if (prev && prev.fromId !== toNodeId) {
+addConnection(prev.fromId, prev.fromPort, toNodeId, toPortId);
+}
+return null;
+});
+};
+
+const grabCable = (e, conn) => {
+e.stopPropagation();
+if (!boardRef.current) return;
+const rect = boardRef.current.getBoundingClientRect();
+removeConnection(conn.id);
+setWiring({ fromId: conn.from, fromPort: conn.fromPort, x: e.clientX - rect.left, y: e.clientY - rect.top });
+};
+
+let draftCableGroup = null;
+if (wiring) {
+const fromNode = nodes.find(n => n.id === wiring.fromId);
+if (fromNode) {
+const start = getJackCoords(fromNode, true, wiring.fromPort);
+const end = { x: wiring.x, y: wiring.y };
+const dist = Math.abs(end.x - start.x) * 0.6;
+const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
+draftCableGroup = (
+<g>
+<path d={d} filter="url(#cable-shadow)" style={{ fill: 'none', stroke: '#f97316', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
+<path d={d} class="animate-dash-flow pointer-events-none" style={{ fill: 'none', stroke: '#ffffff', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+</g>
+);
+}
+}
+
+return (
+<div class="flex-1 min-h-0 w-full min-w-0 flex flex-col relative">
+<div 
+ref={boardRef}
+class="flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none"
+onPointerMove={handlePointerMove}
+onPointerUp={handlePointerUp}
+onPointerLeave={handlePointerUp}
+>
+<WebGLBackground />
+
+<svg xmlns="http://www.w3.org/2000/svg" class="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
+{draftCableGroup}
+
+{connections.map(c => {
+const fromNode = nodes.find(n => n.id === c.from);
+const toNode = nodes.find(n => n.id === c.to);
+if (!fromNode || !toNode) return null;
+
+const start = getJackCoords(fromNode, true, c.fromPort);
+const end = getJackCoords(toNode, false, c.toPort);
+const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
+const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
+
+return (
+<g key={c.id} class="pointer-events-auto group">
+<path d={d} class="cursor-grab active:cursor-grabbing pointer-events-auto" onPointerDown={(e) => grabCable(e, c)} style={{ fill: 'none', stroke: 'transparent', "stroke-width": 24 }} />
+<path d={d} transform="translate(0,6)" class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.8)', "stroke-width": 12 }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#171717', "stroke-width": 10, "stroke-linecap": 'round' }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#3f3f46', "stroke-width": 3, "stroke-linecap": 'round' }} />
+
+<path d={d} class="animate-dash-flow pointer-events-none opacity-80" style={{ fill: 'none', stroke: '#f97316', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+
+<g class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
+<circle cx={(start.x+end.x)/2} cy={(start.y+end.y)/2} r="14" fill="#ef4444" class="drop-shadow-md" />
+<text x={(start.x+end.x)/2} y={(start.y+end.y)/2 + 4} style={{ fill: 'white', fontSize: '14px', fontWeight: 'bold', "text-anchor": 'middle' }}>X</text>
+</g>
+</g>
+);
+})}
+</svg>
+
+{nodes.map(node => {
+const ports = getNodePorts(node);
+
+return (
+<div key={node.id} class="absolute z-20 pointer-events-auto" style={{ transform: "translate(" + String(node.x) + "px, " + String(node.y) + "px)" }}>
+
+
+{node.type !== 'SYS_IN' && ports["in"].map(port => {
+const coords = getJackCoords(node, false, port);
+return (
+<div 
+key={"in-" + port}
+class="absolute left-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
+onPointerUp={(e) => dropWire(e, node.id, port)}
+title={"Patch In: " + port.toUpperCase()}
+>
+<div class="w-4 h-6 bg-gradient-to-r from-zinc-400 to-zinc-600 rounded-sm border border-zinc-700 shadow-[2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
+<div class="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
+</div>
+{ports["in"].length > 1 && <span class="absolute -left-6 text-[10px] font-black text-white/50">{port.toUpperCase()}</span>}
+</div>
+);
+})}
+
+
+{node.type !== 'SYS_OUT' && ports["out"].map(port => {
+const coords = getJackCoords(node, true, port);
+return (
+<div 
+key={"out-" + port}
+class="absolute right-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
+style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
+onPointerDown={(e) => startWire(e, node.id, port)}
+title={"Drag out from: " + port.toUpperCase()}
+>
+<div class="w-4 h-6 bg-gradient-to-r from-zinc-600 to-zinc-400 rounded-sm border border-zinc-700 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
+<div class="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
+</div>
+{ports["out"].length > 1 && <span class="absolute -right-10 text-[10px] font-black text-white/50">{port.toUpperCase()}</span>}
+</div>
+);
+})}
+
+
+{node.type === 'SYS_IN' ? (
+<div 
+onPointerDown={(e) => startDragNode(e, node)}
+class="flex flex-col items-center justify-center w-24 h-[140px] border-2 border-green-700 bg-gradient-to-b from-green-900/40 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing relative group"
+>
+<span class="transform -rotate-90 text-xs font-black tracking-widest text-green-500 drop-shadow-md select-none whitespace-nowrap truncate w-[120px] text-center">{node.label}</span>
+<button onClick={() => removeNode(node.id)} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity"><X class="w-4 h-4 text-red-500 hover:text-red-400" /></button>
+</div>
+) : node.type === 'SYS_OUT' ? (
+<div 
+onPointerDown={(e) => startDragNode(e, node)}
+class="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-neutral-700 bg-gradient-to-b from-neutral-800 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing"
+>
+<span class="transform -rotate-90 text-sm font-black tracking-widest text-orange-500 drop-shadow-md select-none whitespace-nowrap">{node.label}</span>
+</div>
+) : node.type === 'master_eq' ? (
+<RackNode 
+node={node} 
+onRemove={() => removeNode(node.id)} 
+onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+onDragStart={(e) => startDragNode(e, node)}
+onToggleBypass={() => toggleNodeBypass(node.id)}
+audioDataMap={nodeAudioMapRef.current}
+/>
+) : node.type === 'graphic_eq' ? (
+<GraphicEqNode 
+node={node} 
+onRemove={() => removeNode(node.id)} 
+onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+onDragStart={(e) => startDragNode(e, node)}
+onToggleBypass={() => toggleNodeBypass(node.id)}
+audioDataMap={nodeAudioMapRef.current}
+/>
+) : node.type === 'vu_meter' ? (
+<VuMeterNode 
+node={node} 
+onRemove={() => removeNode(node.id)} 
+onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+onDragStart={(e) => startDragNode(e, node)}
+audioDataMap={nodeAudioMapRef.current}
+/>
+) : node.type === 'console_mixer' ? (
+<ConsoleNode 
+node={node} 
+onRemove={() => removeNode(node.id)} 
+onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+onDragStart={(e) => startDragNode(e, node)}
+audioDataMap={nodeAudioMapRef.current}
+/>
+) : (node.type === 'splitter' || node.type === 'crossover') ? (
+<div 
+class={"relative w-[140px] h-[180px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/20 border-l-white/20 border-r-black/50 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_10px_rgba(0,0,0,0.5)] p-4 flex flex-col transition-all duration-300 " + (node.bypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
+style={{ filter: 'url(#metal-texture)' }}
+>
+<div 
+onPointerDown={(e) => startDragNode(e, node)} 
+class="text-center font-black mb-4 text-xs uppercase text-white/90 drop-shadow-md cursor-grab active:cursor-grabbing select-none"
+>
+{node.label}
+</div>
+
+<div class="flex-1 flex flex-wrap justify-center gap-2">
+{Object.entries(node.params).map(([key, val]) => {
+let min = 0; let max = 2;
+if (key === 'freq') { min = 100; max = 5000; }
+return <RotaryKnob key={key} label={key} min={min} max={max} value={val} theme={node.theme} onChange={(v) => updateNodeParam(node.id, key, v)} />
+})}
+</div>
+<button onClick={() => removeNode(node.id)} class="absolute top-2 right-2 text-white/50 hover:text-white transition-colors"><X class="w-5 h-5 drop-shadow-md" /></button>
+</div>
+) : (
+<PedalNode 
+pedal={node} 
+onRemove={() => removeNode(node.id)} 
+onChange={(param, val) => updateNodeParam(node.id, param, val)} 
+onDragStart={(e) => startDragNode(e, node)}
+onToggleBypass={() => toggleNodeBypass(node.id)}
+/>
+)}
+</div>
+)})}
+</div>
+</div>
+);
+}

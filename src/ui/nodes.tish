@@ -1,0 +1,277 @@
+import { h, useEffect, useRef } from "lattish"
+import { VerticalFader, RotaryKnob, LedMeter } from "./controls.tish"
+import { X } from "../icons.tish"
+
+export fn ConsoleNode(props) { let node = props.node; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let audioDataMap = props.audioDataMap;
+const numCh = node.params.channels || 4;
+const w = 160 + (numCh * 64); 
+const panelH = 300;
+const analysers = audioDataMap[node.id]?.analysers || {};
+
+return (
+<div class={"relative bg-gradient-to-b from-zinc-800 via-zinc-900 to-black rounded-sm border-t-2 border-t-zinc-600 border-x border-x-zinc-900 border-b-4 border-b-black shadow-[0_30px_60px_rgba(0,0,0,0.9),inset_0_2px_10px_rgba(255,255,255,0.1)] flex flex-col transition-all duration-300 " + (node.bypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")} style={{ width: String(w) + "px", height: String(panelH) + "px" }}>
+<div class="absolute inset-0 mix-blend-multiply opacity-40 pointer-events-none rounded-sm" style={{ filter: 'url(#metal-texture)' }} />
+
+<div 
+onPointerDown={onDragStart}
+class="w-full h-16 bg-gradient-to-b from-black to-zinc-950 border-b-2 border-zinc-800 flex items-center justify-between px-5 cursor-grab active:cursor-grabbing shrink-0 shadow-inner"
+>
+<div class="flex flex-col">
+<span class="text-[10px] font-black text-white/50 tracking-[0.2em] uppercase">Studio</span>
+<span class="text-sm font-black text-white/90 tracking-widest uppercase drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]">{node.label}</span>
+</div>
+
+<div class="flex items-center gap-2 bg-black/60 border border-zinc-800 rounded px-2 py-1.5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.5)]">
+<button onClick={() => onChange('channels', Math.max(1, numCh - 1))} class="text-zinc-500 hover:text-white px-1.5 font-bold transition-colors">-</button>
+<span class="text-[10px] font-bold text-orange-500 w-10 text-center tracking-widest font-mono drop-shadow-[0_0_5px_rgba(249,115,22,0.8)]">{numCh} CH</span>
+<button onClick={() => onChange('channels', Math.min(16, numCh + 1))} class="text-zinc-500 hover:text-white px-1.5 font-bold transition-colors">+</button>
+<div class="w-px h-4 bg-zinc-800 mx-1"></div>
+<button onClick={onRemove} class="text-zinc-500 hover:text-red-500 transition-colors"><X class="w-4 h-4" /></button>
+</div>
+</div>
+
+<div class="flex-1 flex px-5 pt-6 pb-2 justify-between items-start">
+<div class="flex gap-4">
+{Array.from({length: numCh}).map((_, i) => {
+const key = "ch" + String(i + 1);
+return (
+<div key={key} class="flex flex-col items-center bg-black/30 rounded-lg py-3 px-1 shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)] border border-white/5">
+<VerticalFader heightClass="h-36" label={"CH " + String(i + 1)} min={0} max={2} value={node.params[key] ?? 1.0} onChange={(v) => onChange(key, v)} analyser={analysers[key]} />
+</div>
+);
+})}
+</div>
+<div class="w-1.5 h-full bg-gradient-to-b from-black/80 to-transparent mx-4 rounded-full shadow-[1px_0_0_rgba(255,255,255,0.1)]"></div>
+<div class="flex bg-black/30 rounded-lg py-3 px-1 shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)] border border-white/5">
+<VerticalFader heightClass="h-36" label="MASTER" min={0} max={2} value={node.params.master ?? 1.0} onChange={(v) => onChange('master', v)} analyser={analysers.master} variant="master" />
+</div>
+</div>
+
+<div class="h-8 w-full bg-gradient-to-b from-zinc-900 to-black border-t border-zinc-800 rounded-b-sm shrink-0 shadow-[0_-2px_10px_rgba(0,0,0,0.5)]" />
+</div>
+);
+}
+
+export fn GraphicEqNode(props) { let node = props.node; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let onToggleBypass = props.onToggleBypass; let audioDataMap = props.audioDataMap;
+const isBypassed = node.bypassed;
+const analysers = audioDataMap[node.id]?.analysers || {};
+const masterAnalyser = audioDataMap[node.id]?.analyser;
+const bands = [31, 62, 125, 250, 500, '1k', '2k', '4k', '8k', '16k'];
+
+return (
+<div class={"relative w-[760px] h-[240px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col group transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
+<div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
+
+<div class="flex justify-between items-center p-3">
+<div onPointerDown={onDragStart} class="flex-1 text-left font-black tracking-widest text-lg uppercase cursor-grab active:cursor-grabbing select-none text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] px-2">
+{node.label}
+</div>
+<div class="flex items-center gap-4">
+<div 
+onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
+class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-colors " + (!isBypassed ? "bg-red-500 border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)]" : "bg-red-950 border-black shadow-black")}
+></div>
+<button onClick={onRemove} class="text-white/50 hover:text-white transition-colors"><X class="w-5 h-5 drop-shadow-md bg-black/30 rounded-full" /></button>
+</div>
+</div>
+
+<div class="flex flex-1 px-4 pb-4 gap-2 justify-center">
+{bands.map(b => (
+<VerticalFader key={"b" + String(b)} label={b} min={-1} max={1} value={node.params["b" + String(b)] ?? 0} onChange={(v) => onChange("b" + String(b), v)} analyser={analysers["b" + String(b)]} />
+))}
+<div class="w-px h-full bg-black/50 mx-2 border-r border-white/10"></div>
+<VerticalFader label="LEVEL" min={0} max={2} value={node.params.level ?? 1.0} onChange={(v) => onChange('level', v)} analyser={masterAnalyser} variant="master" />
+</div>
+</div>
+);
+}
+
+export fn VuMeterNode(props) { let node = props.node; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let audioDataMap = props.audioDataMap;
+const analyser = audioDataMap[node.id]?.analyser;
+
+return (
+<div class={"relative w-[120px] h-[200px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col transition-all duration-300"}>
+<div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
+
+<div onPointerDown={onDragStart} class="text-center font-black mt-2 tracking-widest text-xs uppercase cursor-grab active:cursor-grabbing select-none text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+VU
+</div>
+
+<div class="flex-1 flex flex-col items-center justify-center gap-4 mt-2">
+<LedMeter analyser={analyser} width={12} height={80} />
+<RotaryKnob label="TRIM" min={0} max={2} value={node.params.level ?? 1.0} theme={node.theme} onChange={(v) => onChange('level', v)} />
+</div>
+<button onClick={onRemove} class="absolute top-2 right-2 text-white/50 hover:text-white transition-colors"><X class="w-4 h-4 drop-shadow-md" /></button>
+</div>
+);
+}
+
+export fn RackNode(props) { let node = props.node; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let onToggleBypass = props.onToggleBypass; let audioDataMap = props.audioDataMap;
+const isBypassed = node.bypassed;
+const analysers = audioDataMap[node.id]?.analysers || {};
+const masterAnalyser = audioDataMap[node.id]?.analyser;
+const canvasRef = useRef(null);
+
+useEffect(() => {
+const canvas = canvasRef.current;
+if (!canvas) return;
+const ctx = canvas.getContext('2d');
+let animationId;
+const dataArray = new Uint8Array(512);
+
+const draw = () => {
+animationId = requestAnimationFrame(draw);
+
+if (!masterAnalyser || node.bypassed) {
+ctx.fillStyle = '#0a0a0a';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+return;
+}
+
+masterAnalyser.getByteFrequencyData(dataArray);
+
+ctx.fillStyle = 'rgba(10, 10, 10, 0.4)'; 
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+const barWidth = (canvas.width / 120); 
+let x = 0;
+
+for(let i = 0; i < 120; i = i + 1) {
+const val = dataArray[i] * (1 + (i/120)*0.5); 
+const barHeight = (val / 255) * canvas.height;
+
+ctx.fillStyle = "rgb(" + String(Math.floor(val)) + ", " + String(Math.floor(250 - val)) + ", 100)";
+ctx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight);
+x = x + (barWidth);
+}
+};
+draw();
+return () => cancelAnimationFrame(animationId);
+}, [masterAnalyser, node.bypassed]);
+
+return (
+<div class={"relative w-[640px] h-[200px] bg-gradient-to-br " + node.color + " rounded-sm border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex group transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
+<div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none" style={{ filter: 'url(#metal-texture)' }} />
+
+<div class="w-8 h-full bg-gradient-to-r from-zinc-800 to-zinc-950 border-r border-black/80 flex flex-col justify-between py-4 items-center shadow-lg rounded-l-sm">
+<div class="w-3 h-5 rounded-full bg-black/80 shadow-inner"></div>
+<div class="w-3 h-5 rounded-full bg-black/80 shadow-inner"></div>
+</div>
+
+<div class="flex-1 flex flex-col p-4">
+<div class="flex justify-between items-center mb-4">
+<div 
+onPointerDown={onDragStart}
+class="text-left font-black tracking-widest text-lg uppercase cursor-grab active:cursor-grabbing select-none text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
+>
+{node.label}
+</div>
+
+<div class="flex items-center gap-4">
+<div 
+onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
+class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-colors " + (!isBypassed ? "bg-red-500 border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)]" : "bg-red-950 border-black shadow-black")}
+></div>
+<button onClick={onRemove} class="text-white/50 hover:text-white transition-colors" title="Remove EQ">
+<X class="w-5 h-5 drop-shadow-md bg-black/30 rounded-full" />
+</button>
+</div>
+</div>
+
+<div class="flex flex-1 gap-6">
+<div class="flex-1 h-full bg-black rounded-sm border-2 border-neutral-800 shadow-[inset_0_0_20px_rgba(0,0,0,1)] relative overflow-hidden flex flex-col">
+<canvas ref={canvasRef} class="w-full h-full" width={300} height={100} />
+<div class="w-full h-2 bg-gradient-to-b from-white/10 to-transparent absolute top-0 pointer-events-none"></div>
+<div class="absolute bottom-1 left-0 w-full flex justify-between px-2 text-[8px] text-white/40 font-mono">
+<span>60Hz</span><span>1kHz</span><span>10kHz</span>
+</div>
+</div>
+
+<div class="flex gap-2 shrink-0">
+{['sub', 'low', 'mid', 'high', 'air'].map(key => (
+<VerticalFader key={key} label={key} min={-1} max={1} value={node.params[key]} onChange={(v) => onChange(key, v)} analyser={analysers[key]} />
+))}
+<div class="w-px h-full bg-black/50 mx-1"></div>
+<VerticalFader label="level" min={0} max={2} value={node.params.level} onChange={(v) => onChange('level', v)} analyser={masterAnalyser} variant="master" />
+</div>
+</div>
+</div>
+
+<div class="w-8 h-full bg-gradient-to-l from-zinc-800 to-zinc-950 border-l border-white/10 flex flex-col justify-between py-4 items-center shadow-lg rounded-r-sm">
+<div class="w-3 h-5 rounded-full bg-black/80 shadow-inner"></div>
+<div class="w-3 h-5 rounded-full bg-black/80 shadow-inner"></div>
+</div>
+</div>
+);
+}
+
+
+export fn PedalNode(props) { let pedal = props.pedal; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let onToggleBypass = props.onToggleBypass;
+const isDark = pedal.theme === 'dark';
+const isCompact = Object.keys(pedal.params).length > 4;
+const isBypassed = pedal.bypassed;
+
+return (
+<div 
+class={"relative w-[200px] h-[340px] bg-gradient-to-br " + pedal.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] p-5 flex flex-col group transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
+>
+<div class="absolute inset-0 rounded-xl mix-blend-multiply opacity-50 pointer-events-none" style={{ filter: 'url(#metal-texture)' }} />
+
+{[[3,3], [3, 11], [18, 3], [18, 11]].map(([t, l], i) => (
+<div key={i} class={"absolute w-2.5 h-2.5 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-[inset_0_1px_1px_rgba(0,0,0,0.8),0_1px_1px_rgba(255,255,255,0.2)] flex items-center justify-center border border-black/40 pointer-events-none " + (i===0 ? "top-3 left-3" : i===1 ? "top-3 right-3" : i===2 ? "bottom-24 left-3" : "bottom-24 right-3")}>
+<div class={"w-1.5 h-[1px] bg-black/60 transform " + (i%2===0 ? "rotate-45" : "-rotate-12")} />
+</div>
+))}
+
+<div 
+onPointerDown={onDragStart}
+class={"text-center font-black " + (isCompact ? "mb-2 mt-0" : "mb-6 mt-4") + " tracking-widest text-lg uppercase cursor-grab active:cursor-grabbing select-none " + (isDark ? "text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]" : "text-black/80 drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]")}
+>
+{pedal.label}
+</div>
+
+<div class={"flex-1 flex flex-wrap justify-center content-start " + (isCompact ? "gap-1.5" : "gap-3")}>
+{Object.entries(pedal.params).map(([key, val]) => {
+let min = 0; let max = 1;
+if (['sub', 'low', 'mid', 'high', 'air'].includes(key)) { min = -1; max = 1; }
+else if (['tone', 'midFreq', 'presence', 'baseFreq', 'filter'].includes(key)) { min = 100; max = 5000; }
+else if (['drive', 'fuzz'].includes(key)) { min = 0; max = 1000; }
+else if (['speed', 'rate'].includes(key)) { min = 0.1; max = 15; }
+else if (key === 'threshold') { min = -60; max = 0; }
+else if (key === 'ratio') { min = 1; max = 20; }
+else if (key === 'highs') { min = 0; max = 10; }
+else if (['makeup', 'gain', 'bass', 'treble'].includes(key)) { min = 0; max = 5; }
+else if (['decay', 'time'].includes(key)) { min = 0; max = 3; }
+else if (key.startsWith('b') && key.length <= 4) { min = -15; max = 15; } 
+else if (key === 'midCut') { min = -20; max = 0; }
+else if (['sweep', 'spread'].includes(key)) { min = 100; max = 3000; }
+else if (key === 'bits') { min = 2; max = 16; }
+
+return (
+<RotaryKnob key={key} label={key} min={min} max={max} value={val} theme={pedal.theme} compact={isCompact} onChange={(v) => onChange(key, v)} />
+);
+})}
+</div>
+
+<div 
+class={"absolute bottom-[4.5rem] left-1/2 -translate-x-1/2 w-2 h-2 rounded-full shadow-[0_1px_1px_rgba(255,255,255,0.5)] border border-black transition-colors duration-300 " + (!isBypassed ? "bg-red-500 box-shadow-[0_0_10px_2px_rgba(239,68,68,0.8)]" : "bg-neutral-800")} 
+style={!isBypassed ? { boxShadow: '0 0 12px 3px rgba(239,68,68,0.8)' } : {}} 
+/>
+
+<div class="absolute bottom-6 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-gradient-to-br from-zinc-400 to-zinc-700 shadow-[0_5px_10px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.5)] border border-black/50 flex items-center justify-center">
+<div class="w-10 h-10 rounded-full bg-black/80 flex items-center justify-center shadow-inner">
+<div 
+onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
+class={"w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-200 to-zinc-500 border border-zinc-400 shadow-[0_2px_4px_rgba(0,0,0,0.9),inset_0_2px_2px_rgba(255,255,255,0.8)] flex items-center justify-center cursor-pointer active:scale-95 transition-transform select-none " + (isBypassed ? "brightness-75" : "brightness-100")}
+>
+<div class="w-5 h-5 rounded-full border border-black/10 pointer-events-none"></div>
+<div class="absolute w-2 h-2 rounded-full border border-black/10 pointer-events-none"></div>
+</div>
+</div>
+</div>
+<button onClick={onRemove} class={"absolute top-3 right-3 transition-all opacity-0 group-hover:opacity-100 " + (isDark ? "text-white hover:text-red-400" : "text-black/70 hover:text-red-600")} title="Remove Pedal">
+<X class="w-5 h-5 drop-shadow-md bg-black/10 rounded-full" />
+</button>
+</div>
+);
+}

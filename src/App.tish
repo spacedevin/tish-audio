@@ -1,0 +1,359 @@
+import { useState, useEffect, useLayoutEffect, useRef, h } from "lattish"
+import { Play, Volume2, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2 } from "./icons.tish"
+import { autoCorrelate, noteFromPitch, noteStrings } from "./audio/dsp.tish"
+import { PEDAL_LIBRARY } from "./audio/pedalLibrary.tish"
+import { audioGraphRebuildSignature } from "./audio/graphSignature.tish"
+import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
+import { NodeGraphView } from "./ui/NodeGraphView.tish"
+import { ModuleLibraryPanel } from "./ui/ModuleLibraryPanel.tish"
+import { JamMode } from "./ui/JamMode.tish"
+import { Guitarcade } from "./ui/Guitarcade.tish"
+
+export fn App() {
+let [activeTab, setActiveTab] = useState('pedalboard');
+let [audioReady, setAudioReady] = useState(false);
+let [inputLevel, setInputLevel] = useState(0);
+let [currentPitch, setCurrentPitch] = useState({ freq: 0, note: '-', cents: 0 });
+let [devices, setDevices] = useState([]);
+let [showDeviceMenu, setShowDeviceMenu] = useState(false);
+let [showModuleLibrary, setShowModuleLibrary] = useState(false);
+
+// NODE GRAPH STATE
+let [nodes, setNodes] = useState([
+{ id: 'sys_out', type: 'SYS_OUT', x: 1000, y: 300, label: 'MASTER OUT', isSystem: true }
+]);
+let [connections, setConnections] = useState([]); 
+
+const audioCtxRef = useRef(null);
+const sourcesRef = useRef({}); 
+const analyserRef = useRef(null);
+const outGainRef = useRef(null);
+const nodeAudioMapRef = useRef({}); 
+const animationRef = useRef(null);
+const audioRebuildSigRef = useRef("");
+const lastInputLevelBucketRef = useRef(-1);
+
+async fn getDevices() {
+if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+const port = window.location.port;
+const localhostUrl = "http://localhost" + (port ? ":" + port : "");
+alert("Use " + localhostUrl + " in the address bar instead of " + window.location.host + " so the microphone can work.");
+return;
+}
+try {
+if (!audioCtxRef.current) {
+audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+}
+await navigator.mediaDevices.getUserMedia({ audio: true });
+const devs = await navigator.mediaDevices.enumerateDevices();
+const audioDevs = devs.filter(d => d.kind === 'audioinput');
+setDevices(audioDevs);
+setShowModuleLibrary(false);
+setShowDeviceMenu(true);
+} catch (e) {
+console.error("Error enumerating devices:", e);
+alert("Could not access audio interface. Please check permissions.");
+}
+};
+
+async fn connectDevice(deviceId, label) {
+try {
+if (!audioCtxRef.current) return;
+const ctx = audioCtxRef.current;
+
+const stream = await navigator.mediaDevices.getUserMedia({ 
+audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false, latency: 0 } 
+});
+
+const source = ctx.createMediaStreamSource(stream);
+sourcesRef.current[deviceId] = source;
+
+if (!analyserRef.current) {
+const analyser = ctx.createAnalyser();
+analyser.fftSize = 2048;
+analyserRef.current = analyser;
+
+const outGain = ctx.createGain();
+outGain.gain.value = 1.0;
+outGainRef.current = outGain;
+analyser.connect(outGain);
+outGain.connect(ctx.destination);
+startAnalyzers();
+}
+
+setNodes(prev => [...prev, {
+id: "sys_in_" + deviceId.slice(0, 6),
+type: 'SYS_IN',
+x: 50, 
+y: 200 + (Object.keys(sourcesRef.current).length * 150),
+label: (label || 'INPUT').substring(0, 15),
+isSystem: true,
+params: { deviceId }
+}]);
+
+setAudioReady(true);
+setShowDeviceMenu(false);
+} catch (err) {
+console.error("Error connecting specific device:", err);
+}
+};
+
+useLayoutEffect(() => {
+if (!audioReady) {
+audioRebuildSigRef.current = "";
+return;
+}
+const sig = audioGraphRebuildSignature(nodes, connections);
+if (sig === audioRebuildSigRef.current) return;
+audioRebuildSigRef.current = sig;
+const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, analyserRef: analyserRef, outGainRef: outGainRef };
+rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
+}, [nodes, connections, audioReady]);
+
+const startAnalyzers = () => {
+const analyser = analyserRef.current;
+if (!analyser) return;
+const bufferLength = analyser.fftSize;
+const dataArray = new Float32Array(bufferLength);
+let lastUiMs = 0;
+let lastPitchNote = '';
+let lastPitchFreq = 0;
+
+const updateLoop = () => {
+analyser.getFloatTimeDomainData(dataArray);
+let sumSquares = 0;
+for (let i = 0; i < bufferLength; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
+const level = Math.sqrt(sumSquares / bufferLength) * 10;
+
+const freq = autoCorrelate(dataArray, audioCtxRef.current.sampleRate);
+const now = performance.now();
+if (now - lastUiMs >= 80) {
+lastUiMs = now;
+const levelBucket = Math.min(100, Math.floor(level * 100 + 0.5));
+if (levelBucket !== lastInputLevelBucketRef.current) {
+lastInputLevelBucketRef.current = levelBucket;
+setInputLevel(level);
+}
+if (freq !== -1 && freq > 40 && freq < 2000) {
+const note = noteFromPitch(freq);
+const noteName = noteStrings[note % 12];
+const rounded = Math.round(freq);
+if (noteName !== lastPitchNote || Math.abs(rounded - lastPitchFreq) >= 2) {
+lastPitchNote = noteName;
+lastPitchFreq = rounded;
+setCurrentPitch({ freq: rounded, note: noteName, octave: Math.floor(note / 12) - 1 });
+}
+} else if (freq === -1 && lastPitchNote !== '-') {
+lastPitchNote = '-';
+lastPitchFreq = 0;
+setCurrentPitch({ freq: 0, note: '-', cents: 0 });
+}
+}
+animationRef.current = requestAnimationFrame(updateLoop);
+};
+updateLoop();
+};
+
+useEffect(() => {
+return () => {
+if (animationRef.current) cancelAnimationFrame(animationRef.current);
+if (audioCtxRef.current) audioCtxRef.current.close();
+};
+}, []);
+
+const addNode = (category, type) => {
+const template = PEDAL_LIBRARY[category].find(p => p.type === type);
+if (!template) return;
+
+setNodes(prev => [...prev, { 
+id: Math.random().toString(36).substr(2, 9), 
+...template, 
+params: { ...template.defaultParams },
+bypassed: false, 
+x: 300 + Math.random() * 100, 
+y: 200 + Math.random() * 100 
+}]);
+};
+
+const removeNode = (id) => {
+const nodeToRemove = nodes.find(n => n.id === id);
+if (nodeToRemove && nodeToRemove.type === 'SYS_IN' && nodeToRemove.params?.deviceId) {
+const deviceId = nodeToRemove.params.deviceId;
+if (sourcesRef.current[deviceId]) {
+const track = sourcesRef.current[deviceId].mediaStream.getTracks()[0];
+if (track) track.stop();
+let nextSources = {}
+let sk = Object.keys(sourcesRef.current)
+let si = 0
+while (si < sk.length) {
+let k = sk[si]
+if (k !== deviceId) {
+nextSources[k] = sourcesRef.current[k]
+}
+si = si + 1
+}
+sourcesRef.current = nextSources
+}
+}
+
+setNodes(prev => prev.filter(n => n.id !== id));
+setConnections(prev => prev.filter(c => c.from !== id && c.to !== id));
+};
+
+const clearBoard = () => {
+setNodes(prev => prev.filter(n => n.isSystem));
+setConnections([]);
+};
+
+const updateNodeParam = (id, param, value) => {
+const floatValue = parseFloat(value);
+const safeValue = Number.isFinite(floatValue) ? floatValue : 0;
+setNodes(prev => prev.map(n => { if (n.id === id) { let p = { ...n.params }; p[param] = safeValue; return { ...n, params: p }; } return n; }));
+};
+
+const updateNodePos = (id, x, y) => {
+setNodes(prev => prev.map(n => n.id === id ? { ...n, x, y } : n));
+};
+
+const toggleNodeBypass = (id) => {
+setNodes(prev => prev.map(n => n.id === id ? { ...n, bypassed: !n.bypassed } : n));
+};
+
+const addConnection = (fromId, fromPort, toId, toPort) => {
+if (fromId === toId) return;
+setConnections(prev => {
+if (prev.some(c => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) return prev;
+return [...prev, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort, to: toId, toPort }];
+});
+};
+
+const removeConnection = (id) => {
+setConnections(prev => prev.filter(c => c.id !== id));
+};
+
+return (
+<div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans">
+<style dangerouslySetInnerHTML={{__html: "
+.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); border-radius: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+
+@keyframes dash-flow {
+to { stroke-dashoffset: -24; }
+}
+.animate-dash-flow {
+animation: dash-flow 0.5s linear infinite;
+}
+
+"}} />
+
+<header class="bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
+<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+<div class="flex flex-wrap items-center gap-3 min-w-0">
+<Activity class="text-orange-500 w-7 h-7 shrink-0" />
+<h1 class="text-lg sm:text-2xl font-black tracking-tighter text-white shrink-0">TONE<span class="text-orange-500">FRAME</span></h1>
+<button 
+onClick={getDevices} 
+class="bg-orange-500 hover:bg-orange-400 text-black font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(249,115,22,0.4)] text-xs sm:text-sm shrink-0"
+>
+<Mic class="w-4 h-4" /> 
+<span class="hidden sm:inline">{Object.keys(sourcesRef.current).length === 0 ? 'Connect Input' : 'Add Input'}</span>
+<span class="sm:hidden">Input</span>
+</button>
+{activeTab === 'pedalboard' ? (
+<div class="flex items-center gap-2 shrink-0">
+<button 
+type="button"
+onClick={() => { setShowDeviceMenu(false); setShowModuleLibrary(prev => !prev); }} 
+class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-orange-500/50 bg-gradient-to-b from-orange-900/30 to-neutral-900 hover:from-orange-800/40 font-bold tracking-wide text-xs text-orange-400"
+>
+<Plus class="w-3.5 h-3.5" /> <span class="hidden sm:inline">MODULES</span><ChevronDown class="w-3.5 h-3.5 opacity-50" />
+</button>
+<button type="button" onClick={clearBoard} class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-900/80 bg-red-950/30 hover:bg-red-900/50 text-red-400 text-xs font-bold">
+<Trash2 class="w-3.5 h-3.5" /> <span class="hidden sm:inline">CLEAR</span>
+</button>
+</div>
+) : null}
+</div>
+
+<div class="flex items-center gap-1 sm:gap-2 flex-wrap justify-center">
+{[
+{ id: 'pedalboard', icon: Sliders, label: 'Patch' },
+{ id: 'jam', icon: Play, label: 'Jam' },
+{ id: 'game', icon: Gamepad2, label: 'Arcade' }
+].map(tab => (
+<button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-950")}>
+{tab.icon({ class: "w-4 h-4 sm:w-5 sm:h-5" })} {tab.label}
+</button>
+))}
+</div>
+
+<div class={"flex items-center gap-4 shrink-0 " + (audioReady ? "" : "hidden")}>
+<div class="flex items-center gap-2 bg-neutral-800 px-3 py-1.5 rounded-lg border border-neutral-700">
+<span class="text-[10px] text-neutral-400 font-mono">PITCH</span>
+<span class="text-lg font-bold w-10 text-center text-orange-400">{currentPitch.note || '-'}</span>
+<span class="text-[10px] text-neutral-500 w-10">{currentPitch.freq}Hz</span>
+</div>
+<div class="flex items-center gap-2">
+<Volume2 class="w-4 h-4 text-neutral-500" />
+<div class="w-24 sm:w-32 h-2.5 sm:h-3 bg-neutral-800 rounded-full overflow-hidden border border-neutral-700 shadow-inner">
+<div class="h-full bg-green-500 transition-all duration-75" style={{ width: String(Math.min(100, inputLevel * 100)) + "%" }} />
+</div>
+</div>
+</div>
+</div>
+</header>
+
+<main class="flex-1 min-h-0 flex flex-col relative overflow-hidden">
+{activeTab === 'pedalboard' ? (
+<NodeGraphView 
+nodes={nodes} 
+connections={connections}
+nodeAudioMapRef={nodeAudioMapRef}
+removeNode={removeNode} 
+updateNodeParam={updateNodeParam} 
+updateNodePos={updateNodePos}
+toggleNodeBypass={toggleNodeBypass}
+addConnection={addConnection}
+removeConnection={removeConnection}
+/>
+) : activeTab === 'jam' ? (
+<JamMode tabActive={true} audioCtx={audioCtxRef.current} pitch={currentPitch} />
+) : (
+<Guitarcade tabActive={true} analyzerRef={analyserRef} audioReady={audioReady} currentPitch={currentPitch} />
+)}
+</main>
+
+{showDeviceMenu ? (
+<div class="w-72 bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-[20000] fixed" style={{ left: "1rem", top: "4.75rem", maxHeight: "calc(100vh - 5.5rem)" }}>
+<div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center">
+<span class="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
+<button onClick={() => setShowDeviceMenu(false)}><X class="w-4 h-4 text-neutral-500 hover:text-white" /></button>
+</div>
+<div class="max-h-64 overflow-y-auto custom-scrollbar">
+{devices.length === 0 ? (
+<div class="p-4 text-center text-sm text-neutral-500">No audio inputs found. Check permissions.</div>
+) : (
+devices.map(d => (
+<button 
+key={d.deviceId} 
+onClick={() => connectDevice(d.deviceId, d.label)} 
+class="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
+title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
+>
+{d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
+</button>
+))
+)}
+</div>
+</div>
+) : null}
+{showModuleLibrary ? (
+<div class="bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden z-[20000] fixed" style={{ left: "1rem", top: "4.75rem", width: "min(800px, calc(100vw - 2rem))", maxHeight: "calc(100vh - 5.5rem)" }}>
+<ModuleLibraryPanel onClose={() => setShowModuleLibrary(false)} addNode={addNode} />
+</div>
+) : null}
+</div>
+);
+}

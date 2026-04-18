@@ -1,0 +1,83 @@
+import { useEffect, useRef, h } from "lattish"
+import { WebGLBackground } from "./WebGLBackground.tish"
+
+export fn Guitarcade(props) { let tabActive = props.tabActive; let analyzerRef = props.analyzerRef; let audioReady = props.audioReady; let currentPitch = props.currentPitch;
+const canvasRef = useRef(null);
+const gameRef = useRef({ playerY: 200, lasers: [], enemies: [], score: 0, lastFire: 0, gameOver: false });
+
+useEffect(() => {
+if (!tabActive || !audioReady || !canvasRef.current || !analyzerRef.current) return;
+const canvas = canvasRef.current; const ctx = canvas.getContext('2d');
+let animationId;
+const analyser = analyzerRef.current;
+const dataArray = new Float32Array(analyser.fftSize);
+let previousRms = 0;
+
+const gameLoop = (time) => {
+analyser.getFloatTimeDomainData(dataArray);
+let sumSquares = 0;
+for (let i = 0; i < dataArray.length; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
+const rms = Math.sqrt(sumSquares / dataArray.length);
+const state = gameRef.current;
+
+if (currentPitch.freq > 0 && currentPitch.freq > 60 && currentPitch.freq < 1000) {
+const minLog = Math.log2(82); const maxLog = Math.log2(880); const currentLog = Math.log2(currentPitch.freq);
+let normalized = (currentLog - minLog) / (maxLog - minLog); normalized = Math.max(0, Math.min(1, normalized));
+const targetY = canvas.height - (normalized * canvas.height);
+state.playerY = state.playerY + ((targetY - state.playerY) * 0.2);
+}
+
+const deltaRms = rms - previousRms;
+if (deltaRms > 0.05 && time - state.lastFire > 200 && !state.gameOver) {
+state.lasers.push({ x: 100, y: state.playerY }); state.lastFire = time;
+}
+previousRms = rms;
+
+if (!state.gameOver) {
+state.lasers.forEach(l => l.x = l.x + (15)); state.lasers = state.lasers.filter(l => l.x < canvas.width);
+if (Math.random() < 0.03) state.enemies.push({ x: canvas.width, y: Math.random() * (canvas.height - 40) + 20, speed: Math.random() * 3 + 2 });
+state.enemies.forEach(e => e.x = e.x - (e.speed));
+
+state.lasers.forEach(l => {
+state.enemies.forEach(e => {
+if (!e.dead && !l.dead && Math.abs(l.x - e.x) < 30 && Math.abs(l.y - e.y) < 30) { e.dead = true; l.dead = true; state.score = state.score + (10); }
+});
+});
+state.lasers = state.lasers.filter(l => !l.dead); state.enemies = state.enemies.filter(e => !e.dead);
+state.enemies.forEach(e => { if (e.x < 120 && Math.abs(state.playerY - e.y) < 30) state.gameOver = true; });
+state.enemies = state.enemies.filter(e => e.x > -50);
+}
+
+ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.strokeStyle = '#262626'; ctx.lineWidth = 1;
+for (let i = 0; i < canvas.width; i = i + (50) ){ ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke(); }
+
+ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.moveTo(100, state.playerY); ctx.lineTo(60, state.playerY - 20); ctx.lineTo(60, state.playerY + 20); ctx.fill();
+ctx.fillStyle = '#22d3ee'; state.lasers.forEach(l => ctx.fillRect(l.x, l.y - 2, 20, 4));
+ctx.fillStyle = '#ef4444'; state.enemies.forEach(e => { ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI * 2); ctx.fill(); });
+
+ctx.fillStyle = 'white'; ctx.font = '24px monospace'; ctx.fillText("SCORE: " + String(state.score), 20, 40);
+ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText("INPUT PITCH: " + currentPitch.note + " (" + String(currentPitch.freq) + "Hz)", 20, canvas.height - 20);
+
+if (state.gameOver) {
+ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.fillStyle = 'white'; ctx.font = '48px monospace'; ctx.textAlign = 'center'; ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
+ctx.font = '24px monospace'; ctx.fillText('Strum loudly to restart', canvas.width/2, canvas.height/2 + 50); ctx.textAlign = 'left';
+if (deltaRms > 0.1) { state.gameOver = false; state.score = 0; state.enemies = []; state.lasers = []; state.playerY = canvas.height/2; }
+}
+animationId = requestAnimationFrame(gameLoop);
+};
+animationId = requestAnimationFrame(gameLoop);
+return () => cancelAnimationFrame(animationId);
+}, [tabActive, audioReady, analyzerRef, currentPitch]);
+
+return (
+<div class="flex-1 min-h-0 flex flex-col items-center justify-center p-8 bg-black relative">
+<div class="absolute inset-0 pointer-events-none overflow-hidden">
+<WebGLBackground />
+</div>
+<div class="text-center mb-4 relative"><h2 class="text-3xl font-black text-white tracking-widest drop-shadow-lg">PITCH INVADERS</h2><p class="text-neutral-400 text-sm drop-shadow-md">Play High/Low notes to move. Strum aggressively to shoot.</p></div>
+<div class="relative border-4 border-neutral-800 rounded-xl overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.5)]"><canvas ref={canvasRef} width={800} height={500} class="bg-black/90" /></div>
+</div>
+);
+}

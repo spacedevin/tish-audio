@@ -1,0 +1,101 @@
+export fn makeDistortionCurve(amount) {
+const k = typeof amount === 'number' ? amount : 50;
+const n_samples = 44100;
+const curve = new Float32Array(n_samples);
+const deg = Math.PI / 180;
+for (let i = 0; i < n_samples; i = i + 1) {
+const x = (i * 2) / n_samples - 1;
+curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+}
+return curve;
+}
+
+export fn makeAsymmetricCurve(amount) {
+const k = typeof amount === 'number' ? amount : 50;
+const n_samples = 44100;
+const curve = new Float32Array(n_samples);
+const deg = Math.PI / 180;
+for (let i = 0; i < n_samples; i = i + 1) {
+const x = (i * 2) / n_samples - 1;
+curve[i] = x < 0 ? -1 + Math.exp(x) : ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+}
+return curve;
+}
+
+export fn makeRectifierCurve() {
+const n_samples = 44100;
+const curve = new Float32Array(n_samples);
+for (let i = 0; i < n_samples; i = i + 1) {
+const x = (i * 2) / n_samples - 1;
+curve[i] = Math.abs(x); 
+}
+return curve;
+}
+
+export fn makeBitcrusherCurve(bits) {
+const safeBits = typeof bits === 'number' && bits > 0 ? bits : 4;
+const steps = Math.pow(2, safeBits);
+const n_samples = 44100;
+const curve = new Float32Array(n_samples);
+for (let i = 0; i < n_samples; i = i + 1) {
+const x = (i * 2) / n_samples - 1;
+curve[i] = Math.round(x * steps) / steps;
+}
+return curve;
+}
+
+export fn createReverbIR(ctx, duration = 2.5, decay = 5.0, type = 'spring') {
+const sampleRate = ctx.sampleRate;
+const length = sampleRate * duration;
+const impulse = ctx.createBuffer(2, length, sampleRate);
+for (let i = 0; i < 2; i = i + 1) {
+const channel = impulse.getChannelData(i);
+for (let j = 0; j < length; j = j + 1) {
+let noise = (Math.random() * 2 - 1);
+if (type === 'plate') noise = Math.sin(j * 0.1) * noise; 
+if (type === 'hall') noise = noise * (1 - (j/length) * 0.5); 
+channel[j] = noise * Math.pow(1 - j / length, decay);
+}
+}
+return impulse;
+}
+
+export fn autoCorrelate(buf, sampleRate) {
+let SIZE = buf.length;
+let rms = 0;
+for (let i = 0; i < SIZE; i = i + 1) rms = rms + (buf[i] * buf[i]);
+rms = Math.sqrt(rms / SIZE);
+if (rms < 0.01) return -1;
+
+let r1 = 0; let r2 = SIZE - 1; let thres = 0.2;
+for (let i = 0; i < SIZE / 2; i = i + 1) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+for (let i = 1; i < SIZE / 2; i = i + 1) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+
+buf = buf.slice(r1, r2);
+SIZE = buf.length;
+
+let c = new Array(SIZE).fill(0);
+for (let i = 0; i < SIZE; i = i + 1)
+for (let j = 0; j < SIZE - i; j = j + 1)
+c[i] = c[i] + buf[j] * buf[j + i];
+
+let d = 0; while (c[d] > c[d + 1]) d = d + 1;
+let maxval = -1; let maxpos = -1;
+for (let i = d; i < SIZE; i = i + 1) {
+if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+}
+let T0 = maxpos;
+
+let x1 = c[T0 - 1]; let x2 = c[T0]; let x3 = c[T0 + 1];
+let a = (x1 + x3 - 2 * x2) / 2;
+let b = (x3 - x1) / 2;
+if (a) T0 = T0 - b / (2 * a);
+
+return sampleRate / T0;
+}
+
+export const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+export fn noteFromPitch(frequency) {
+const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+return Math.round(noteNum) + 69;
+}

@@ -1,0 +1,11 @@
+export fn audioGraphRebuildSignature(nodes, connections) {
+let stamps = [];
+let ni = 0;
+while (ni < nodes.length) {
+const n = nodes[ni];
+stamps.push({ id: n.id, type: n.type, bypassed: n.bypassed, isSystem: n.isSystem, params: n.params, label: n.label });
+ni = ni + 1;
+}
+let connBrief = connections.map(c => ({ id: c.id, from: c.from, to: c.to, fromPort: c.fromPort, toPort: c.toPort }));
+return JSON.stringify({ stamps: stamps, connections: connBrief });
+}

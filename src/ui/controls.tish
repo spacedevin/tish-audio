@@ -1,0 +1,183 @@
+import { useState, useEffect, useRef, h } from "lattish"
+
+export fn LedMeter(props) { let analyser = props.analyser; let width = props.width ?? 6; let height = props.height ?? 96;
+const canvasRef = useRef(null);
+
+useEffect(() => {
+if (!analyser || !canvasRef.current) return;
+const canvas = canvasRef.current;
+const ctx = canvas.getContext('2d');
+let animationId;
+const dataArray = new Float32Array(analyser.fftSize);
+
+const draw = () => {
+analyser.getFloatTimeDomainData(dataArray);
+let sumSquares = 0;
+for (let i = 0; i < dataArray.length; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
+const rms = Math.sqrt(sumSquares / dataArray.length);
+
+const db = 20 * Math.log10(Math.max(rms, 0.0001));
+const pct = (db + 60) / 60; 
+const level = Math.max(0, Math.min(1, pct));
+
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+const numSegments = 20;
+const segmentHeight = canvas.height / numSegments;
+const gap = 1;
+
+for (let i = 0; i < numSegments; i = i + 1) {
+const segmentThreshold = 1 - (i / numSegments);
+const isActive = level >= segmentThreshold;
+
+let color = '#22c55e'; // green
+if (i < 3) color = '#ef4444'; // red (top)
+else if (i < 7) color = '#eab308'; // yellow
+
+ctx.fillStyle = isActive ? color : 'rgba(0,0,0,0.5)';
+ctx.fillRect(0, i * segmentHeight, canvas.width, segmentHeight - gap);
+}
+animationId = requestAnimationFrame(draw);
+};
+draw();
+return () => cancelAnimationFrame(animationId);
+}, [analyser]);
+
+return <canvas ref={canvasRef} width={width} height={height} class="rounded-[1px] bg-black border border-neutral-900 shadow-inner" />;
+}
+
+export fn VerticalFader(props) { let label = props.label; let min = props.min; let max = props.max; let value = props.value; let onChange = props.onChange; let analyser = props.analyser; let variant = props.variant ?? "default"; let heightClass = props.heightClass ?? "h-24";
+let [isDragging, setIsDragging] = useState(false);
+const startYRef = useRef(0);
+const startValRef = useRef(0);
+const dragCtxRef = useRef({ min: min, max: max, onChange: onChange });
+dragCtxRef.current = { min: min, max: max, onChange: onChange };
+
+const safeVal = Number.isFinite(value) ? value : min;
+const pct = (safeVal - min) / (max - min); 
+
+const handlePointerDown = (e) => {
+e.stopPropagation();
+setIsDragging(true);
+startYRef.current = e.clientY;
+startValRef.current = safeVal;
+document.body.style.cursor = 'ns-resize';
+};
+
+useEffect(() => {
+if (!isDragging) return;
+const onMove = (e) => {
+const ctx = dragCtxRef.current;
+const dy = startYRef.current - e.clientY;
+const range = ctx.max - ctx.min;
+const deltaVal = (dy / 80) * range;
+let newVal = startValRef.current + deltaVal;
+newVal = Math.max(ctx.min, Math.min(ctx.max, newVal));
+ctx.onChange(newVal);
+};
+const onUp = () => {
+setIsDragging(false);
+document.body.style.cursor = '';
+};
+window.addEventListener('pointermove', onMove);
+window.addEventListener('pointerup', onUp);
+return () => {
+window.removeEventListener('pointermove', onMove);
+window.removeEventListener('pointerup', onUp);
+};
+}, [isDragging]);
+
+const isMaster = variant === 'master';
+const capBg = isMaster
+? 'bg-gradient-to-b from-red-600 to-red-800 border-red-900 shadow-[0_2px_4px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.3)]'
+: 'bg-gradient-to-b from-zinc-300 to-zinc-500 border-zinc-600 shadow-[0_2px_4px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.6)]';
+const lineBg = isMaster ? 'bg-white/80' : 'bg-black/60';
+
+return (
+<div class="flex flex-col items-center shrink-0 select-none px-1 w-14">
+<div class={"flex gap-1.5 items-center " + heightClass}>
+{analyser && <LedMeter analyser={analyser} height={heightClass === 'h-36' ? 144 : 96} />}
+<div class="relative w-2.5 h-full bg-black/90 rounded-full shadow-[inset_0_2px_5px_rgba(0,0,0,1)] flex justify-center border border-zinc-800/50">
+
+<div class="absolute w-8 h-full flex flex-col justify-between py-1 pointer-events-none opacity-30">
+<div class="w-full h-[2px] bg-white"></div>
+<div class="w-full h-px bg-white"></div>
+<div class="w-full h-px bg-white"></div>
+<div class="w-full h-[2px] bg-white"></div>
+<div class="w-full h-px bg-white"></div>
+<div class="w-full h-px bg-white"></div>
+<div class="w-full h-[2px] bg-white"></div>
+</div>
+
+<div
+onPointerDown={handlePointerDown}
+class={"absolute w-8 h-5 rounded-sm cursor-ns-resize flex items-center justify-center hover:brightness-110 active:brightness-95 " + capBg}
+style={{ bottom: String(pct * 100) + "%", transform: "translateY(50%)" }}
+>
+<div class={"w-5 h-0.5 shadow-inner rounded-full " + lineBg}></div>
+</div>
+</div>
+</div>
+<span class={"text-[9px] font-black uppercase mt-3 tracking-widest whitespace-nowrap text-center " + (isMaster ? "text-red-400" : "text-white/80")}>{label}</span>
+</div>
+);
+}
+
+export fn RotaryKnob(props) { let label = props.label; let min = props.min; let max = props.max; let value = props.value; let onChange = props.onChange; let theme = props.theme; let compact = props.compact;
+let [isDragging, setIsDragging] = useState(false);
+const startYRef = useRef(0);
+const startValRef = useRef(0);
+const dragCtxRef = useRef({ min: min, max: max, onChange: onChange });
+dragCtxRef.current = { min: min, max: max, onChange: onChange };
+
+const safeVal = Number.isFinite(value) ? value : min;
+const angle = ((safeVal - min) / (max - min)) * 270 - 135;
+
+const handlePointerDown = (e) => {
+e.stopPropagation();
+setIsDragging(true);
+startYRef.current = e.clientY;
+startValRef.current = safeVal;
+document.body.style.cursor = 'ns-resize';
+};
+
+useEffect(() => {
+if (!isDragging) return;
+const onMove = (e) => {
+const ctx = dragCtxRef.current;
+const dy = startYRef.current - e.clientY;
+const range = ctx.max - ctx.min;
+const deltaVal = (dy / 150) * range;
+let newVal = startValRef.current + deltaVal;
+newVal = Math.max(ctx.min, Math.min(ctx.max, newVal));
+ctx.onChange(newVal);
+};
+const onUp = () => {
+setIsDragging(false);
+document.body.style.cursor = '';
+};
+window.addEventListener('pointermove', onMove);
+window.addEventListener('pointerup', onUp);
+return () => {
+window.removeEventListener('pointermove', onMove);
+window.removeEventListener('pointerup', onUp);
+};
+}, [isDragging]);
+
+const isDark = theme === 'dark';
+
+return (
+<div class={"flex flex-col items-center select-none shrink-0 " + (compact ? "m-0.5" : "m-1")}>
+<div 
+onPointerDown={handlePointerDown}
+class={(compact ? "w-9 h-9" : "w-12 h-12") + " rounded-full relative overflow-hidden cursor-ns-resize shadow-[0_5px_10px_rgba(0,0,0,0.5),inset_0_2px_2px_rgba(255,255,255,0.2)] flex items-center justify-center border " + (isDark ? "bg-gradient-to-br from-neutral-700 to-black border-neutral-600" : "bg-gradient-to-br from-neutral-100 to-neutral-400 border-neutral-300")}
+>
+<div class={(compact ? "w-7 h-7" : "w-10 h-10") + " rounded-full border border-dashed opacity-30 " + (isDark ? "border-white" : "border-black")} />
+<div class="absolute w-full h-full top-0 left-0" style={{ transform: "rotate(" + String(Number.isFinite(angle) ? angle : 0) + "deg)" }}>
+<div class={"absolute transform " + (compact ? "top-1" : "top-1.5") + " left-1/2 -translate-x-1/2 w-1 " + (compact ? "h-2.5" : "h-3") + " rounded-full shadow-sm " + (isDark ? "bg-white shadow-[0_0_5px_rgba(255,255,255,0.8)]" : "bg-black")} />
+</div>
+</div>
+<span class={"text-[8px] font-black uppercase " + (compact ? "mt-1" : "mt-2") + " tracking-wider " + (isDark ? "text-white/80" : "text-black/80")}>{label}</span>
+</div>
+);
+}

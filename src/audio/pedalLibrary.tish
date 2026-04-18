@@ -1,0 +1,76 @@
+export const PEDAL_LIBRARY = {
+MIC_SIM: [
+{ type: 'sm57_sim', label: 'Dyn Mic 57', color: 'from-zinc-600 to-zinc-900', theme: 'dark', defaultParams: { level: 1.0 } },
+{ type: 'u87_sim', label: 'Condenser 87', color: 'from-amber-100 to-amber-300', theme: 'light', defaultParams: { level: 1.0 } },
+{ type: 'ribbon_sim', label: 'Classic Ribbon', color: 'from-stone-500 to-stone-800', theme: 'dark', defaultParams: { level: 1.0 } },
+{ type: 'vocal_doubler', label: 'Vocal Doubler', color: 'from-cyan-400 to-blue-600', theme: 'dark', defaultParams: { mix: 0.5, spread: 0.5 } }
+],
+DYNAMICS: [
+{ type: 'compressor', label: 'Studio Comp', color: 'from-slate-500 to-slate-700', theme: 'dark', defaultParams: { threshold: -24, ratio: 4, makeup: 2 } },
+{ type: 'eq7', label: '7-Band EQ', color: 'from-stone-300 to-stone-500', theme: 'light', defaultParams: { b100: 0, b200: 0, b400: 0, b800: 0, b1k6: 0, b3k2: 0, b6k4: 0, level: 1 } },
+{ type: 'boost', label: 'Clean Boost', color: 'from-gray-200 to-gray-400', theme: 'light', defaultParams: { gain: 2.0 } },
+{ type: 'noise_gate', label: 'Silencer', color: 'from-zinc-400 to-zinc-600', theme: 'dark', defaultParams: { threshold: -50, decay: 0.1 } }
+],
+FILTER: [
+{ type: 'auto_wah', label: 'Auto Wah', color: 'from-violet-600 to-fuchsia-800', theme: 'dark', defaultParams: { rate: 2.0, sweep: 1500, baseFreq: 400 } },
+{ type: 'tron', label: 'Q-Tron', color: 'from-zinc-400 to-zinc-600', theme: 'light', defaultParams: { rate: 5.0, sweep: 2000, baseFreq: 200 } }
+],
+DRIVE: [
+{ type: 'overdrive', label: 'Tube Drive', color: 'from-yellow-400 to-yellow-600', theme: 'light', defaultParams: { drive: 400, tone: 3000, level: 0.5 } },
+{ type: 'screamer', label: 'Grn Screamer', color: 'from-green-400 to-green-600', theme: 'light', defaultParams: { drive: 300, tone: 2500, level: 0.6 } },
+{ type: 'blues_od', label: 'Blues OD', color: 'from-blue-400 to-blue-600', theme: 'light', defaultParams: { drive: 350, tone: 3500, level: 0.5 } },
+{ type: 'ds1', label: 'Orange Dist', color: 'from-orange-500 to-orange-700', theme: 'dark', defaultParams: { drive: 600, tone: 4000, level: 0.4 } },
+{ type: 'rat', label: 'Rodent Fuzz', color: 'from-zinc-800 to-zinc-950', theme: 'dark', defaultParams: { drive: 800, filter: 1500, level: 0.4 } },
+{ type: 'fuzz', label: 'Fuzz Face', color: 'from-red-600 to-red-900', theme: 'dark', defaultParams: { drive: 800, tone: 2000, level: 0.3 } },
+{ type: 'muff', label: 'Muff Fuzz', color: 'from-neutral-700 to-neutral-900', theme: 'dark', defaultParams: { drive: 900, tone: 1000, level: 0.4 } },
+{ type: 'metal', label: 'Metal Zone', color: 'from-zinc-900 to-black', theme: 'dark', defaultParams: { drive: 1000, midFreq: 500, midCut: -15, level: 0.3 } },
+],
+MULTI_FX: [
+{ type: 'centaur', label: 'Mythic Drive', color: 'from-amber-200 to-amber-500', theme: 'light', defaultParams: { drive: 500, highs: 5, output: 0.5 } },
+{ type: 'octa_fuzz', label: 'Octavia Fuzz', color: 'from-fuchsia-700 to-fuchsia-950', theme: 'dark', defaultParams: { drive: 600, tone: 3000, level: 0.4 } },
+{ type: 'bitcrush', label: '8-Bit Crush', color: 'from-pink-600 to-purple-900', theme: 'dark', defaultParams: { bits: 4, level: 0.5 } },
+{ type: 'tape_echo', label: 'Space Echo', color: 'from-emerald-700 to-emerald-950', theme: 'dark', defaultParams: { time: 0.4, feedback: 0.6, age: 0.5, mix: 0.5 } }
+],
+AMP_SIM: [
+{ type: 'amp_tweed', label: 'Tweed Combo', color: 'from-yellow-700 to-yellow-900', theme: 'dark', defaultParams: { gain: 30, bass: 1.0, mid: 1.2, treble: 1.0, presence: 4000, master: 0.8 } },
+{ type: 'amp_stack', label: 'Brit Stack', color: 'from-amber-800 to-amber-950', theme: 'dark', defaultParams: { gain: 50, bass: 1.0, mid: 1.0, treble: 1.0, presence: 3000, master: 0.8 } },
+{ type: 'amp_modern', label: 'Modern High', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { gain: 80, bass: 1.5, mid: 0.5, treble: 1.2, presence: 5000, master: 0.8 } }
+],
+MODULATION: [
+{ type: 'chorus', label: 'Analog Chorus', color: 'from-cyan-500 to-cyan-800', theme: 'dark', defaultParams: { rate: 1.5, depth: 1.0 } },
+{ type: 'vibrato', label: 'Vibrato', color: 'from-sky-500 to-sky-700', theme: 'dark', defaultParams: { rate: 4.0, depth: 0.003 } },
+{ type: 'tremolo', label: 'Tremolo', color: 'from-green-600 to-green-900', theme: 'dark', defaultParams: { speed: 5, depth: 0.5 } },
+{ type: 'rotary', label: 'Rotary Spkr', color: 'from-stone-500 to-stone-700', theme: 'dark', defaultParams: { rate: 6.0, mix: 0.5 } },
+{ type: 'flanger', label: 'Jet Flanger', color: 'from-purple-600 to-purple-950', theme: 'dark', defaultParams: { rate: 0.5, depth: 0.005, feedback: 0.7 } },
+{ type: 'phaser', label: 'Phase 90', color: 'from-orange-500 to-orange-700', theme: 'dark', defaultParams: { rate: 0.8, sweep: 800 } },
+],
+TIME: [
+{ type: 'slapback', label: 'Slapback', color: 'from-rose-500 to-rose-800', theme: 'dark', defaultParams: { time: 0.08, feedback: 0.1, mix: 0.4 } },
+{ type: 'delay', label: 'Digi Delay', color: 'from-blue-600 to-blue-900', theme: 'dark', defaultParams: { time: 0.3, feedback: 0.4, mix: 0.5 } },
+{ type: 'spring_verb', label: 'Spring Verb', color: 'from-teal-700 to-teal-950', theme: 'dark', defaultParams: { mix: 0.3, decay: 3.0 } },
+{ type: 'plate_verb', label: 'Plate Verb', color: 'from-slate-400 to-slate-600', theme: 'light', defaultParams: { mix: 0.4, decay: 2.0 } },
+{ type: 'hall_verb', label: 'Hall Verb', color: 'from-indigo-800 to-black', theme: 'dark', defaultParams: { mix: 0.5, decay: 6.0 } }
+],
+MASTERING: [
+{ type: 'master_eq', label: 'Studio EQ', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { sub: 0, low: 0, mid: 0, high: 0, air: 0, level: 1.0 } },
+{ type: 'graphic_eq', label: 'Graphic EQ', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { b31: 0, b62: 0, b125: 0, b250: 0, b500: 0, b1k: 0, b2k: 0, b4k: 0, b8k: 0, b16k: 0, level: 1.0 } }
+],
+UTILITY: [
+{ type: 'console_mixer', label: 'Mixing Console', color: 'from-zinc-800 to-black', theme: 'dark', defaultParams: { channels: 4, ch1: 1.0, ch2: 1.0, ch3: 1.0, ch4: 1.0, master: 1.0 } },
+{ type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
+{ type: 'crossover', label: 'Freq Split', color: 'from-blue-800 to-indigo-950', theme: 'dark', defaultParams: { freq: 800 } },
+{ type: 'splitter', label: 'Splitter', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { output: 1.0 } }
+]
+};
+
+export const getNodePorts = (node) => {
+if (!node) return { "in": ['main'], "out": ['main'] };
+if (node.type === 'crossover') return { "in": ['main'], "out": ['low', 'high'] };
+if (node.type === 'console_mixer') {
+const numCh = node.params.channels || 4;
+const ins = [];
+for(let i=1; i<=numCh; i = i + 1) ins.push("ch" + String(i));
+return { "in": ins, "out": ['main'] };
+}
+return { "in": ['main'], "out": ['main'] };
+};
