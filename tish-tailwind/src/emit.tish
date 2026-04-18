@@ -1,21 +1,64 @@
-import { writeFile } from "fs"
+import { writeFile, readFile } from "fs"
 import { getPreflight } from "./preflight.tish"
 import { getUtilities } from "./utilities.tish"
 import { process } from "process"
 
-export fn fullStylesheet() {
-  return getPreflight() + "\n" + getUtilities()
+export async fn fullStylesheet() {
+  let content = "";
+  
+  try {
+    let mainTish = await readFile("src/main.tish");
+    content = content + mainTish;
+  } catch (e) {}
+  
+  try {
+    let iconsTish = await readFile("src/icons.tish");
+    content = content + iconsTish;
+  } catch (e) {}
+
+  let css = await getPreflight();
+  css = css + "\n";
+  let utils = getUtilities();
+  let i = 0;
+
+  let usedUtils = [];
+  while (i < utils.length) {
+    let u = utils[i];
+    if (content.indexOf(u.cls) !== -1 || u.cls === "animate-dash-flow") {
+      usedUtils.push(u.css);
+    }
+    i = i + 1;
+  }
+
+  css = css + usedUtils.join("\n") + "\n";
+
+  try {
+    let pedalExtras = await readFile("tish-tailwind/src/pedal-extras.css");
+    css = css + "\n" + pedalExtras + "\n";
+  } catch (e) {}
+
+  try {
+    let nodeGraphExtras = await readFile("tish-tailwind/src/node-graph-extras.css");
+    css = css + "\n" + nodeGraphExtras + "\n";
+  } catch (e) {}
+
+  console.log("Included " + String(usedUtils.length) + " out of " + String(utils.length) + " utilities.");
+  return css;
 }
 
 export async fn emitStylesheet(outputPath) {
-  let css = fullStylesheet()
-  await writeFile(outputPath, css)
-  console.log("Emitted CSS to " + outputPath)
+  let css = await fullStylesheet();
+  await writeFile(outputPath, css);
+  console.log("Emitted CSS to " + outputPath);
 }
 
 // If run directly
-let outPath = "dist/assets/tish-tailwind.css"
-if (process !== null && process.env !== null && "OUT_CSS" in process.env) {
-  outPath = process.env.OUT_CSS
+async fn run() {
+  let outPath = "dist/assets/tish-tailwind.css"
+  if (process !== null && process.env !== null && "OUT_CSS" in process.env) {
+    outPath = process.env.OUT_CSS
+  }
+  await emitStylesheet(outPath)
 }
-emitStylesheet(outPath)
+
+run()

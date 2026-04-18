@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, createRoot, h, Fragment } from "lattish"
+import { useState, useEffect, useLayoutEffect, useRef, createRoot, h, Fragment } from "lattish"
 import { Play, Square, Plus, Volume2, Gamepad2, Mic, Activity, X, Sliders, ChevronDown, Trash2 } from "./icons.tish"
 
 // --- DSP & AUDIO UTILITIES ---
@@ -176,7 +176,7 @@ if (node.type === 'crossover') return { "in": ['main'], "out": ['low', 'high'] }
 if (node.type === 'console_mixer') {
 const numCh = node.params.channels || 4;
 const ins = [];
-for(let i=1; i<=numCh; i = i + 1) ins.push("ch${i}");
+for(let i=1; i<=numCh; i = i + 1) ins.push("ch" + String(i));
 return { "in": ins, "out": ['main'] };
 }
 return { "in": ['main'], "out": ['main'] };
@@ -287,7 +287,7 @@ render();
 return () => cancelAnimationFrame(animationId);
 }, []);
 
-return <canvas ref={canvasRef} class="absolute inset-0 w-full h-full pointer-events-none opacity-40 mix-blend-screen" />;
+return <canvas ref={canvasRef} class="absolute inset-0 z-0 w-full h-full pointer-events-none opacity-40 mix-blend-screen" />;
 }
 
 // --- MAIN APPLICATION ---
@@ -298,6 +298,8 @@ let [inputLevel, setInputLevel] = useState(0);
 let [currentPitch, setCurrentPitch] = useState({ freq: 0, note: '-', cents: 0 });
 let [devices, setDevices] = useState([]);
 let [showDeviceMenu, setShowDeviceMenu] = useState(false);
+let [showAddMenu, setShowAddMenu] = useState(false);
+let [audioGraphEpoch, setAudioGraphEpoch] = useState(0);
 
 // NODE GRAPH STATE
 let [nodes, setNodes] = useState([
@@ -354,7 +356,7 @@ startAnalyzers();
 }
 
 setNodes(prev => [...prev, {
-id: "sys_in_${deviceId.slice(0, 6)}",
+id: "sys_in_" + deviceId.slice(0, 6),
 type: 'SYS_IN',
 x: 50, 
 y: 200 + (Object.keys(sourcesRef.current).length * 150),
@@ -456,7 +458,7 @@ else if (node.type === 'eq7') {
 const freqs = [100, 200, 400, 800, 1600, 3200, 6400];
 const filters = freqs.map((f) => {
 const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.414;
-const paramKey = "b${f >= 1000 ? (f/1000).toString().replace('.','k') : f}";
+const paramKey = "b" + (f >= 1000 ? (f/1000).toString().replace(".", "k") : String(f));
 filter.gain.value = node.params[paramKey] ?? 0;
 return filter;
 });
@@ -511,7 +513,7 @@ inNode = ctx.createGain(); outNode = inNode;
 const freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const filters = freqs.map((f) => {
 const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.4;
-const paramKey = f >= 1000 ? "b${f/1000}k" : "b${f}";
+const paramKey = f >= 1000 ? ("b" + String(f/1000) + "k") : ("b" + String(f));
 filter.gain.value = (node.params[paramKey] ?? 0) * 12; // +/- 12 dB
 return filter;
 });
@@ -528,7 +530,7 @@ outNode.connect(nodeAnalyser);
 
 // Parallel analyzers for each fader
 freqs.forEach((f) => {
-const paramKey = f >= 1000 ? "b${f/1000}k" : "b${f}";
+const paramKey = f >= 1000 ? ("b" + String(f/1000) + "k") : ("b" + String(f));
 const bp = ctx.createBiquadFilter();
 bp.type = 'bandpass';
 bp.frequency.value = f;
@@ -597,16 +599,17 @@ outNode.connect(masterAn);
 analysers.master = masterAn;
 
 for(let i=1; i<=numCh; i = i + 1) {
+const chKey = "ch" + String(i);
 const chGain = ctx.createGain();
-chGain.gain.value = node.params["ch${i}"] ?? 1.0;
+chGain.gain.value = node.params[chKey] ?? 1.0;
 
 const chAn = ctx.createAnalyser();
 chAn.fftSize = 512;
 chGain.connect(chAn);
 chAn.connect(outNode);
 
-analysers["ch${i}"] = chAn;
-inPorts["ch${i}"] = chGain;
+analysers[chKey] = chAn;
+inPorts[chKey] = chGain;
 }
 inNode = ctx.createGain(); // Unused, just a fallback
 }
@@ -708,7 +711,7 @@ inNode.connect(delay);
 if (node.type === 'flanger' || node.type === 'delay' || node.type === 'slapback') {
 const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.5;
 delay.connect(feedback); feedback.connect(delay);
-if (node.params.mix !== null) {
+if (node.params.mix !== undefined) {
 const wetMix = ctx.createGain(); wetMix.gain.value = node.params.mix;
 delay.disconnect(outNode); 
 delay.connect(wetMix); wetMix.connect(outNode);
@@ -764,26 +767,42 @@ outAudioNode.connect(inAudioNode);
 });
 };
 
-useEffect(() => {
-if (audioReady) rebuildAudioGraph(nodes, connections);
-}, [nodes, connections, rebuildAudioGraph, audioReady]);
+useLayoutEffect(() => {
+if (!audioReady) return;
+rebuildAudioGraph(nodes, connections);
+setAudioGraphEpoch((e) => e + 1);
+}, [nodes, connections, audioReady]);
 
 const startAnalyzers = () => {
 const analyser = analyserRef.current;
 if (!analyser) return;
 const bufferLength = analyser.fftSize;
 const dataArray = new Float32Array(bufferLength);
+let lastUiMs = 0;
+let lastPitchNote = '';
+let lastPitchFreq = 0;
 
 const updateLoop = () => {
 analyser.getFloatTimeDomainData(dataArray);
 let sumSquares = 0;
 for (let i = 0; i < bufferLength; i = i + 1) sumSquares = sumSquares + (dataArray[i] * dataArray[i]);
-setInputLevel(Math.sqrt(sumSquares / bufferLength) * 10); 
+const level = Math.sqrt(sumSquares / bufferLength) * 10;
 
 const freq = autoCorrelate(dataArray, audioCtxRef.current.sampleRate);
+const now = performance.now();
+if (now - lastUiMs >= 50) {
+lastUiMs = now;
+setInputLevel(level);
 if (freq !== -1 && freq > 40 && freq < 2000) {
 const note = noteFromPitch(freq);
-setCurrentPitch({ freq: Math.round(freq), note: noteStrings[note % 12], octave: Math.floor(note / 12) - 1 });
+const noteName = noteStrings[note % 12];
+const rounded = Math.round(freq);
+if (noteName !== lastPitchNote || Math.abs(rounded - lastPitchFreq) >= 2) {
+lastPitchNote = noteName;
+lastPitchFreq = rounded;
+setCurrentPitch({ freq: rounded, note: noteName, octave: Math.floor(note / 12) - 1 });
+}
+}
 }
 animationRef.current = requestAnimationFrame(updateLoop);
 };
@@ -818,7 +837,17 @@ const deviceId = nodeToRemove.params.deviceId;
 if (sourcesRef.current[deviceId]) {
 const track = sourcesRef.current[deviceId].mediaStream.getTracks()[0];
 if (track) track.stop();
-delete sourcesRef.current[deviceId];
+let nextSources = {}
+let sk = Object.keys(sourcesRef.current)
+let si = 0
+while (si < sk.length) {
+let k = sk[si]
+if (k !== deviceId) {
+nextSources[k] = sourcesRef.current[k]
+}
+si = si + 1
+}
+sourcesRef.current = nextSources
 }
 }
 
@@ -846,9 +875,11 @@ setNodes(prev => prev.map(n => n.id === id ? { ...n, bypassed: !n.bypassed } : n
 };
 
 const addConnection = (fromId, fromPort, toId, toPort) => {
-if (fromId === toId) return; 
-if (connections.some(c => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) return;
-setConnections(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort, to: toId, toPort }]);
+if (fromId === toId) return;
+setConnections(prev => {
+if (prev.some(c => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) return prev;
+return [...prev, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort, to: toId, toPort }];
+});
 };
 
 const removeConnection = (id) => {
@@ -871,7 +902,7 @@ animation: dash-flow 0.5s linear infinite;
 }
 "}} />
 
-<header class="bg-neutral-900 border-b border-neutral-800 p-4 flex justify-between items-center shadow-md z-[100] relative shrink-0">
+<header class="bg-neutral-900 border-b border-neutral-800 p-4 flex justify-between items-center shadow-md z-[200] relative shrink-0">
 <div class="flex items-center gap-3">
 <Activity class="text-orange-500 w-8 h-8" />
 <h1 class="text-2xl font-black tracking-tighter text-white">TONE<span class="text-orange-500">FRAME</span></h1>
@@ -884,35 +915,10 @@ class="bg-orange-500 hover:bg-orange-400 text-black font-bold py-1.5 px-4 rounde
 <Mic class="w-4 h-4" /> 
 {Object.keys(sourcesRef.current).length === 0 ? 'Connect Input' : 'Add Input'}
 </button>
-{showDeviceMenu && (
-<div class="absolute top-full mt-2 left-0 w-72 bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl z-50 overflow-hidden">
-<div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center">
-<span class="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
-<button onClick={() => setShowDeviceMenu(false)}><X class="w-4 h-4 text-neutral-500 hover:text-white" /></button>
-</div>
-<div class="max-h-64 overflow-y-auto custom-scrollbar">
-{devices.length === 0 ? (
-<div class="p-4 text-center text-sm text-neutral-500">No audio inputs found. Check permissions.</div>
-) : (
-devices.map(d => (
-<button 
-key={d.deviceId} 
-onClick={() => connectDevice(d.deviceId, d.label)} 
-class="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
-title={d.label || "Unknown Input (${d.deviceId.slice(0,5)})"}
->
-{d.label || "Unknown Input (${d.deviceId.slice(0,5)})"}
-</button>
-))
-)}
-</div>
-</div>
-)}
 </div>
 </div>
 
-{audioReady && (
-<div class="flex items-center gap-6">
+<div class={"flex items-center gap-6 " + (audioReady ? "" : "hidden")}>
 <div class="flex items-center gap-2 bg-neutral-800 px-4 py-2 rounded-lg border border-neutral-700">
 <span class="text-xs text-neutral-400 font-mono">PITCH</span>
 <span class="text-xl font-bold w-12 text-center text-orange-400">{currentPitch.note || '-'}</span>
@@ -921,27 +927,26 @@ title={d.label || "Unknown Input (${d.deviceId.slice(0,5)})"}
 <div class="flex items-center gap-2">
 <Volume2 class="w-4 h-4 text-neutral-500" />
 <div class="w-32 h-3 bg-neutral-800 rounded-full overflow-hidden border border-neutral-700 shadow-inner">
-<div class="h-full bg-green-500 transition-all duration-75" style={{ width: "${Math.min(100, inputLevel * 100)}%" }} />
+<div class="h-full bg-green-500 transition-all duration-75" style={{ width: String(Math.min(100, inputLevel * 100)) + "%" }} />
 </div>
 </div>
 </div>
-)}
 </header>
 
-<nav class="flex justify-center gap-2 p-4 bg-neutral-950 z-20 relative border-b border-neutral-900 shrink-0 shadow-lg">
+<nav class="flex justify-center gap-2 p-4 bg-neutral-950 z-[100] relative border-b border-neutral-900 shrink-0 shadow-lg">
 {[
 { id: 'pedalboard', icon: Sliders, label: 'Patch System' },
 { id: 'jam', icon: Play, label: 'Session Jam' },
 { id: 'game', icon: Gamepad2, label: 'Guitarcade' }
 ].map(tab => (
-<button key={tab.id} onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-2 px-6 py-3 rounded-lg font-bold transition-all ${activeTab === tab.id ? 'bg-neutral-800 text-white shadow-inner border border-neutral-700' : 'text-neutral-500 hover:text-white hover:bg-neutral-900'}"}>
+<button key={tab.id} onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-2 px-6 py-3 rounded-lg font-bold transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white shadow-inner border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-900")}>
 {tab.icon({ class: "w-5 h-5" })} {tab.label}
 </button>
 ))}
 </nav>
 
-<main class="flex-1 overflow-hidden relative flex flex-col">
-{activeTab === 'pedalboard' && (
+<main class="flex-1 min-h-0 overflow-visible relative flex flex-col z-0">
+<div class={"absolute inset-0 flex flex-col min-h-0 " + (activeTab !== 'pedalboard' ? "hidden" : "")}>
 <NodeGraphView 
 nodes={nodes} 
 connections={connections}
@@ -955,11 +960,67 @@ toggleNodeBypass={toggleNodeBypass}
 addConnection={addConnection}
 removeConnection={removeConnection}
 audioReady={audioReady}
+audioGraphEpoch={audioGraphEpoch}
+showAddMenu={showAddMenu}
+setShowAddMenu={setShowAddMenu}
 />
-)}
-{activeTab === 'jam' && <JamMode audioCtx={audioCtxRef.current} audioReady={audioReady} pitch={currentPitch} />}
-{activeTab === 'game' && <Guitarcade analyzerRef={analyserRef} audioReady={audioReady} currentPitch={currentPitch} />}
+</div>
+<div class={"absolute inset-0 min-h-0 " + (activeTab !== 'jam' ? "hidden" : "")}>
+<JamMode tabActive={activeTab === 'jam'} audioCtx={audioCtxRef.current} audioReady={audioReady} pitch={currentPitch} />
+</div>
+<div class={"absolute inset-0 min-h-0 " + (activeTab !== 'game' ? "hidden" : "")}>
+<Guitarcade tabActive={activeTab === 'game'} analyzerRef={analyserRef} audioReady={audioReady} currentPitch={currentPitch} />
+</div>
 </main>
+
+<div class={"w-72 bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden " + (showDeviceMenu ? "" : "hidden")} style={{ position: "fixed", zIndex: 2147483647, left: "1rem", top: "5.5rem", maxHeight: "calc(100vh - 6rem)" }}>
+<div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center">
+<span class="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
+<button onClick={() => setShowDeviceMenu(false)}><X class="w-4 h-4 text-neutral-500 hover:text-white" /></button>
+</div>
+<div class="max-h-64 overflow-y-auto custom-scrollbar">
+{devices.length === 0 ? (
+<div class="p-4 text-center text-sm text-neutral-500">No audio inputs found. Check permissions.</div>
+) : (
+devices.map(d => (
+<button 
+key={d.deviceId} 
+onClick={() => connectDevice(d.deviceId, d.label)} 
+class="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
+title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
+>
+{d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
+</button>
+))
+)}
+</div>
+</div>
+
+<div class={"w-[800px] max-w-[90vw] max-h-[70vh] bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden " + (showAddMenu ? "" : "hidden")} style={{ position: "fixed", zIndex: 2147483647, left: "50%", marginLeft: "max(-400px, calc(-1 * min(400px, 46vw)))", top: "6rem", width: "min(800px, 92vw)", maxHeight: "min(70vh, calc(100vh - 8rem))" }}>
+<div class="p-4 border-b border-neutral-800 bg-black/40 flex justify-between items-center shrink-0">
+<span class="text-sm font-black tracking-widest text-neutral-300">MODULE LIBRARY</span>
+<button onClick={() => setShowAddMenu(false)} class="text-neutral-500 hover:text-white transition-colors"><X class="w-5 h-5" /></button>
+</div>
+<div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-8">
+{Object.keys(PEDAL_LIBRARY).map(category => (
+<div key={category} class="flex flex-col gap-2">
+<h4 class="text-[10px] font-black text-orange-500/80 tracking-widest uppercase mb-2 border-b border-neutral-800 pb-2">{category.replace('_', ' ')}</h4>
+{PEDAL_LIBRARY[category].map(def => (
+<button 
+key={def.type} 
+onClick={() => { addNode(category, def.type); setShowAddMenu(false); }} 
+class="text-left px-3 py-2 rounded-md hover:bg-neutral-800 transition-colors flex items-center justify-between group border border-transparent hover:border-neutral-700"
+>
+<span class="font-bold text-xs text-neutral-300 group-hover:text-white transition-colors">{def.label}</span>
+<div class={"w-2.5 h-2.5 rounded-full bg-gradient-to-br " + def.color + " shadow-sm border border-black/50"} />
+</button>
+))}
+</div>
+))}
+</div>
+</div>
+</div>
 </div>
 );
 }
@@ -1062,7 +1123,7 @@ const lineBg = isMaster ? 'bg-white/80' : 'bg-black/60';
 
 return (
 <div class="flex flex-col items-center shrink-0 select-none px-1 w-14">
-<div class={"flex gap-1.5 items-center ${heightClass}"}>
+<div class={"flex gap-1.5 items-center " + heightClass}>
 {analyser && <LedMeter analyser={analyser} height={heightClass === 'h-36' ? 144 : 96} />}
 <div class="relative w-2.5 h-full bg-black/90 rounded-full shadow-[inset_0_2px_5px_rgba(0,0,0,1)] flex justify-center border border-zinc-800/50">
 
@@ -1078,14 +1139,14 @@ return (
 
 <div
 onPointerDown={handlePointerDown}
-class={"absolute w-8 h-5 rounded-sm cursor-ns-resize flex items-center justify-center hover:brightness-110 active:brightness-95 ${capBg}"}
-style={{ bottom: "${pct * 100}%", transform: 'translateY(50%)' }}
+class={"absolute w-8 h-5 rounded-sm cursor-ns-resize flex items-center justify-center hover:brightness-110 active:brightness-95 " + capBg}
+style={{ bottom: String(pct * 100) + "%", transform: "translateY(50%)" }}
 >
-<div class={"w-5 h-0.5 shadow-inner rounded-full ${lineBg}"}></div>
+<div class={"w-5 h-0.5 shadow-inner rounded-full " + lineBg}></div>
 </div>
 </div>
 </div>
-<span class={"text-[9px] font-black uppercase mt-3 tracking-widest whitespace-nowrap text-center ${isMaster ? 'text-red-400' : 'text-white/80'}"}>{label}</span>
+<span class={"text-[9px] font-black uppercase mt-3 tracking-widest whitespace-nowrap text-center " + (isMaster ? "text-red-400" : "text-white/80")}>{label}</span>
 </div>
 );
 }
@@ -1136,18 +1197,17 @@ window.removeEventListener('pointerup', handlePointerUp);
 const isDark = theme === 'dark';
 
 return (
-<div class={"flex flex-col items-center select-none shrink-0 ${compact ? 'm-0.5' : 'm-1'}"}>
+<div class={"flex flex-col items-center select-none shrink-0 " + (compact ? "m-0.5" : "m-1")}>
 <div 
 onPointerDown={handlePointerDown}
-class={"${compact ? 'w-9 h-9' : 'w-12 h-12'} rounded-full relative cursor-ns-resize shadow-[0_5px_10px_rgba(0,0,0,0.5),inset_0_2px_2px_rgba(255,255,255,0.2)] flex items-center justify-center border
-${isDark ? 'bg-gradient-to-br from-neutral-700 to-black border-neutral-600' : 'bg-gradient-to-br from-neutral-100 to-neutral-400 border-neutral-300'}"}
+class={(compact ? "w-9 h-9" : "w-12 h-12") + " rounded-full relative overflow-hidden cursor-ns-resize shadow-[0_5px_10px_rgba(0,0,0,0.5),inset_0_2px_2px_rgba(255,255,255,0.2)] flex items-center justify-center border " + (isDark ? "bg-gradient-to-br from-neutral-700 to-black border-neutral-600" : "bg-gradient-to-br from-neutral-100 to-neutral-400 border-neutral-300")}
 >
-<div class={"${compact ? 'w-7 h-7' : 'w-10 h-10'} rounded-full border border-dashed opacity-30 ${isDark ? 'border-white' : 'border-black'}"} />
-<div class="absolute w-full h-full top-0 left-0" style={{ transform: "rotate(${Number.isFinite(angle) ? angle : 0}deg)" }}>
-<div class={"absolute ${compact ? 'top-1' : 'top-1.5'} left-1/2 -translate-x-1/2 w-1 ${compact ? 'h-2.5' : 'h-3'} rounded-full shadow-sm ${isDark ? 'bg-white shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'bg-black'}"} />
+<div class={(compact ? "w-7 h-7" : "w-10 h-10") + " rounded-full border border-dashed opacity-30 " + (isDark ? "border-white" : "border-black")} />
+<div class="absolute w-full h-full top-0 left-0" style={{ transform: "rotate(" + String(Number.isFinite(angle) ? angle : 0) + "deg)" }}>
+<div class={"absolute transform " + (compact ? "top-1" : "top-1.5") + " left-1/2 -translate-x-1/2 w-1 " + (compact ? "h-2.5" : "h-3") + " rounded-full shadow-sm " + (isDark ? "bg-white shadow-[0_0_5px_rgba(255,255,255,0.8)]" : "bg-black")} />
 </div>
 </div>
-<span class={"text-[8px] font-black uppercase ${compact ? 'mt-1' : 'mt-2'} tracking-wider ${isDark ? 'text-white/80' : 'text-black/80'}"}>{label}</span>
+<span class={"text-[8px] font-black uppercase " + (compact ? "mt-1" : "mt-2") + " tracking-wider " + (isDark ? "text-white/80" : "text-black/80")}>{label}</span>
 </div>
 );
 }
@@ -1156,11 +1216,11 @@ ${isDark ? 'bg-gradient-to-br from-neutral-700 to-black border-neutral-600' : 'b
 fn ConsoleNode(props) { let node = props.node; let onRemove = props.onRemove; let onChange = props.onChange; let onDragStart = props.onDragStart; let audioDataMap = props.audioDataMap;
 const numCh = node.params.channels || 4;
 const w = 160 + (numCh * 64); 
-const h = 300;
+const panelH = 300;
 const analysers = audioDataMap[node.id]?.analysers || {};
 
 return (
-<div class={"relative bg-gradient-to-b from-zinc-800 via-zinc-900 to-black rounded-sm border-t-2 border-t-zinc-600 border-x border-x-zinc-900 border-b-4 border-b-black shadow-[0_30px_60px_rgba(0,0,0,0.9),inset_0_2px_10px_rgba(255,255,255,0.1)] flex flex-col transition-all duration-300 ${node.bypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}"} style={{ width: "${w}px", height: "${h}px" }}>
+<div class={"relative bg-gradient-to-b from-zinc-800 via-zinc-900 to-black rounded-sm border-t-2 border-t-zinc-600 border-x border-x-zinc-900 border-b-4 border-b-black shadow-[0_30px_60px_rgba(0,0,0,0.9),inset_0_2px_10px_rgba(255,255,255,0.1)] flex flex-col transition-all duration-300 " + (node.bypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")} style={{ width: String(w) + "px", height: String(panelH) + "px" }}>
 <div class="absolute inset-0 mix-blend-multiply opacity-40 pointer-events-none rounded-sm" style={{ filter: 'url(#metal-texture)' }} />
 
 <div 
@@ -1184,10 +1244,10 @@ class="w-full h-16 bg-gradient-to-b from-black to-zinc-950 border-b-2 border-zin
 <div class="flex-1 flex px-5 pt-6 pb-2 z-10 justify-between items-start">
 <div class="flex gap-4">
 {Array.from({length: numCh}).map((_, i) => {
-const key = "ch${i+1}";
+const key = "ch" + String(i + 1);
 return (
 <div key={key} class="flex flex-col items-center bg-black/30 rounded-lg py-3 px-1 shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)] border border-white/5">
-<VerticalFader heightClass="h-36" label={"CH ${i+1}"} min={0} max={2} value={node.params[key] ?? 1.0} onChange={(v) => onChange(key, v)} analyser={analysers[key]} />
+<VerticalFader heightClass="h-36" label={"CH " + String(i + 1)} min={0} max={2} value={node.params[key] ?? 1.0} onChange={(v) => onChange(key, v)} analyser={analysers[key]} />
 </div>
 );
 })}
@@ -1211,7 +1271,7 @@ const masterAnalyser = audioDataMap[node.id]?.analyser;
 const bands = [31, 62, 125, 250, 500, '1k', '2k', '4k', '8k', '16k'];
 
 return (
-<div class={"relative w-[760px] h-[240px] bg-gradient-to-br ${node.color} rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col group transition-all duration-300 ${isBypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}"}>
+<div class={"relative w-[760px] h-[240px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col group transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
 <div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
 
 <div class="flex justify-between items-center p-3 z-20">
@@ -1221,7 +1281,7 @@ return (
 <div class="flex items-center gap-4">
 <div 
 onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
-class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-colors ${!isBypassed ? 'bg-red-500 border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)]' : 'bg-red-950 border-black shadow-black'}"}
+class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-colors " + (!isBypassed ? "bg-red-500 border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)]" : "bg-red-950 border-black shadow-black")}
 ></div>
 <button onClick={onRemove} class="text-white/50 hover:text-white transition-colors"><X class="w-5 h-5 drop-shadow-md bg-black/30 rounded-full" /></button>
 </div>
@@ -1229,7 +1289,7 @@ class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-color
 
 <div class="flex flex-1 px-4 pb-4 z-20 gap-2 justify-center">
 {bands.map(b => (
-<VerticalFader key={"b${b}"} label={b} min={-1} max={1} value={node.params["b${b}"] ?? 0} onChange={(v) => onChange("b${b}", v)} analyser={analysers["b${b}"]} />
+<VerticalFader key={"b" + String(b)} label={b} min={-1} max={1} value={node.params["b" + String(b)] ?? 0} onChange={(v) => onChange("b" + String(b), v)} analyser={analysers["b" + String(b)]} />
 ))}
 <div class="w-px h-full bg-black/50 mx-2 border-r border-white/10"></div>
 <VerticalFader label="LEVEL" min={0} max={2} value={node.params.level ?? 1.0} onChange={(v) => onChange('level', v)} analyser={masterAnalyser} variant="master" />
@@ -1243,7 +1303,7 @@ fn VuMeterNode(props) { let node = props.node; let onRemove = props.onRemove; le
 const analyser = audioDataMap[node.id]?.analyser;
 
 return (
-<div class={"relative w-[120px] h-[200px] bg-gradient-to-br ${node.color} rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col transition-all duration-300"}>
+<div class={"relative w-[120px] h-[200px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col transition-all duration-300"}>
 <div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
 <button onClick={onRemove} class="absolute top-2 right-2 text-white/50 hover:text-white transition-colors z-20"><X class="w-4 h-4 drop-shadow-md" /></button>
 
@@ -1259,44 +1319,12 @@ VU
 );
 }
 
-// --- NODE GRAPH VIEW (The Board) ---
-fn NodeGraphView(props) { let nodes = props.nodes; let connections = props.connections; let addNode = props.addNode; let removeNode = props.removeNode; let clearBoard = props.clearBoard; let updateNodeParam = props.updateNodeParam; let updateNodePos = props.updateNodePos; let toggleNodeBypass = props.toggleNodeBypass; let addConnection = props.addConnection; let removeConnection = props.removeConnection; let audioReady = props.audioReady; let nodeAudioMapRef = props.nodeAudioMapRef;
+// --- NODE GRAPH VIEW (The Board) — structure and behavior from 16.html; SVG strokes use style + hyphen keys (Lattish setAttribute cannot set strokeWidth on SVG paths).
+fn NodeGraphView(props) { let nodes = props.nodes; let connections = props.connections; let addNode = props.addNode; let removeNode = props.removeNode; let clearBoard = props.clearBoard; let updateNodeParam = props.updateNodeParam; let updateNodePos = props.updateNodePos; let toggleNodeBypass = props.toggleNodeBypass; let addConnection = props.addConnection; let removeConnection = props.removeConnection; let audioReady = props.audioReady; let nodeAudioMapRef = props.nodeAudioMapRef; let audioGraphEpoch = props.audioGraphEpoch; let showAddMenu = props.showAddMenu; let setShowAddMenu = props.setShowAddMenu;
 
-  const renderWiring = () => {
-    if (!wiring) return null;
-    const fromNode = nodes.find(n => n.id === wiring.fromId);
-    if (!fromNode) return null;
-    const start = getJackCoords(fromNode, true, wiring.fromPort);
-    const end = { x: wiring.x, y: wiring.y };
-    const dist = Math.abs(end.x - start.x) * 0.6;
-    const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
-    return (
-    <g>
-    <path d={d} stroke="#f97316" strokeWidth="6" fill="none" strokeLinecap="round" opacity="0.9" filter="url(#cable-shadow)" />
-    <path d={d} stroke="#ffffff" strokeWidth="2" fill="none" strokeLinecap="round" strokeDasharray="4 12" class="animate-dash-flow pointer-events-none" />
-    </g>
-    );
-  };
-
-const renderWiring = () => {
-if (!wiring) return null;
-const fromNode = nodes.find(n => n.id === wiring.fromId);
-if (!fromNode) return null;
-const start = getJackCoords(fromNode, true, wiring.fromPort);
-const end = { x: wiring.x, y: wiring.y };
-const dist = Math.abs(end.x - start.x) * 0.6;
-const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
-return (
-<g>
-<path d={d} stroke="#f97316" strokeWidth="6" fill="none" strokeLinecap="round" opacity="0.9" filter="url(#cable-shadow)" />
-<path d={d} stroke="#ffffff" strokeWidth="2" fill="none" strokeLinecap="round" strokeDasharray="4 12" class="animate-dash-flow pointer-events-none" />
-</g>
-);
-};
-
-let [showAddMenu, setShowAddMenu] = useState(false);
 const boardRef = useRef(null);
-let [wiring, setWiring] = useState(null); 
+const wiringRef = useRef(null);
+let [wiring, setWiring] = useState(null);
 let [draggingNode, setDraggingNode] = useState(null); 
 
 const getJackCoords = (node, isOutput, portId = 'main') => {
@@ -1330,8 +1358,12 @@ const rect = boardRef.current.getBoundingClientRect();
 const ex = e.clientX - rect.left;
 const ey = e.clientY - rect.top;
 
-if (wiring) {
-setWiring(prev => ({ ...prev, x: ex, y: ey }));
+if (wiringRef.current) {
+setWiring(prev => {
+const n = { ...prev, x: ex, y: ey };
+wiringRef.current = n;
+return n;
+});
 } else if (draggingNode) {
 const dx = ex - draggingNode.startMouseX;
 const dy = ey - draggingNode.startMouseY;
@@ -1340,7 +1372,10 @@ updateNodePos(draggingNode.id, draggingNode.startNodeX + dx, draggingNode.startN
 };
 
 const handlePointerUp = () => {
-if (wiring) setWiring(null); 
+if (wiringRef.current) {
+wiringRef.current = null;
+setWiring(null);
+}
 if (draggingNode) setDraggingNode(null);
 };
 
@@ -1353,14 +1388,21 @@ setDraggingNode({ id: node.id, startMouseX: e.clientX - rect.left, startMouseY: 
 
 const startWire = (e, nodeId, portId) => {
 e.stopPropagation();
+if (e.currentTarget && typeof e.pointerId === 'number') {
+try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+}
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
-setWiring({ fromId: nodeId, fromPort: portId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+const w = { fromId: nodeId, fromPort: portId, x: e.clientX - rect.left, y: e.clientY - rect.top };
+wiringRef.current = w;
+setWiring(w);
 };
 
 const dropWire = (e, toNodeId, toPortId) => {
 e.stopPropagation();
-if (wiring && wiring.fromId !== toNodeId) addConnection(wiring.fromId, wiring.fromPort, toNodeId, toPortId);
+const w = wiringRef.current;
+if (w && w.fromId !== toNodeId) addConnection(w.fromId, w.fromPort, toNodeId, toPortId);
+wiringRef.current = null;
 setWiring(null);
 };
 
@@ -1369,53 +1411,45 @@ e.stopPropagation();
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
 removeConnection(conn.id);
-setWiring({ fromId: conn.from, fromPort: conn.fromPort, x: e.clientX - rect.left, y: e.clientY - rect.top });
+const w = { fromId: conn.from, fromPort: conn.fromPort, x: e.clientX - rect.left, y: e.clientY - rect.top };
+wiringRef.current = w;
+setWiring(w);
 };
 
+let draftCableGroup = null;
+const wireDraft = wiringRef.current != null ? wiringRef.current : wiring;
+if (wireDraft) {
+const fromNode = nodes.find(n => n.id === wireDraft.fromId);
+if (fromNode) {
+const start = getJackCoords(fromNode, true, wireDraft.fromPort);
+const end = { x: wireDraft.x, y: wireDraft.y };
+const dist = Math.abs(end.x - start.x) * 0.6;
+const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
+draftCableGroup = (
+<g>
+<path d={d} filter="url(#cable-shadow)" style={{ fill: 'none', stroke: '#f97316', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
+<path d={d} class="animate-dash-flow pointer-events-none" style={{ fill: 'none', stroke: '#ffffff', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+</g>
+);
+}
+}
+
 return (
-<div class="absolute inset-0 flex flex-col bg-neutral-950">
-{!audioReady && (
-<div class="absolute inset-0 bg-neutral-950/80 z-50 flex items-center justify-center backdrop-blur-sm">
+<div class={"absolute inset-0 flex flex-col min-h-0 bg-neutral-950 ag-" + String(audioGraphEpoch)}>
+{audioReady ? null : (
+<div class="absolute inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-neutral-950/80 pointer-events-auto">
 <p class="text-xl text-neutral-400 font-medium">Connect instrument to enable DSP chain</p>
 </div>
 )}
 
-<div class="flex justify-between items-center p-4 w-full relative z-40 bg-neutral-950 border-b border-neutral-900 shadow-xl shrink-0">
+<div class="flex justify-between items-center p-4 w-full relative z-[200] bg-neutral-950 border-b border-neutral-900 shadow-xl shrink-0 pointer-events-auto overflow-visible">
 <div class="relative flex-1">
 <button 
-onClick={() => setShowAddMenu(!showAddMenu)} 
+onClick={() => setShowAddMenu(prev => !prev)} 
 class="flex items-center gap-2 px-6 py-2 rounded-md border border-orange-500/50 bg-gradient-to-b from-orange-900/30 to-neutral-900 hover:from-orange-800/40 transition-all font-bold tracking-wider text-sm text-orange-400 shadow-md"
 >
 <Plus class="w-4 h-4" /> ADD MODULE <ChevronDown class="w-4 h-4 ml-2 opacity-50" />
 </button>
-
-{showAddMenu && (
-<div class="absolute top-full mt-4 left-0 w-[800px] max-w-[90vw] max-h-[70vh] bg-neutral-900/95 backdrop-blur-xl border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 flex flex-col overflow-hidden">
-<div class="p-4 border-b border-neutral-800 bg-black/40 flex justify-between items-center shrink-0">
-<span class="text-sm font-black tracking-widest text-neutral-300">MODULE LIBRARY</span>
-<button onClick={() => setShowAddMenu(false)} class="text-neutral-500 hover:text-white transition-colors"><X class="w-5 h-5" /></button>
-</div>
-<div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
-<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-8">
-{Object.keys(PEDAL_LIBRARY).map(category => (
-<div key={category} class="flex flex-col gap-2">
-<h4 class="text-[10px] font-black text-orange-500/80 tracking-widest uppercase mb-2 border-b border-neutral-800 pb-2">{category.replace('_', ' ')}</h4>
-{PEDAL_LIBRARY[category].map(def => (
-<button 
-key={def.type} 
-onClick={() => { addNode(category, def.type); setShowAddMenu(false); }} 
-class="text-left px-3 py-2 rounded-md hover:bg-neutral-800 transition-colors flex items-center justify-between group border border-transparent hover:border-neutral-700"
->
-<span class="font-bold text-xs text-neutral-300 group-hover:text-white transition-colors">{def.label}</span>
-<div class={"w-2.5 h-2.5 rounded-full bg-gradient-to-br ${def.color} shadow-sm border border-black/50"} />
-</button>
-))}
-</div>
-))}
-</div>
-</div>
-</div>
-)}
 </div>
 
 <button onClick={clearBoard} class="ml-4 flex items-center gap-2 px-4 py-2 rounded-md border border-red-900 bg-red-950/30 hover:bg-red-900/50 text-red-500 hover:text-red-400 transition-colors font-bold tracking-wider text-sm shrink-0">
@@ -1430,24 +1464,12 @@ onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
 onPointerLeave={handlePointerUp}
 >
-<svg class="w-0 h-0 absolute pointer-events-none">
-<defs>
-<filter id="metal-texture">
-<feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" result="noise" />
-<feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.15 0" style={{ "in": "noise" }} result="coloredNoise" />
-<feBlend style={{ "in": "SourceGraphic" }} in2="coloredNoise" mode="multiply" />
-</filter>
-<filter id="cable-shadow" x="-20%" y="-20%" width="140%" height="140%">
-<feDropShadow dx="0" dy="8" stdDeviation="6" floodOpacity="0.8"/>
-</filter>
-</defs>
-</svg>
-
+<div class="absolute inset-0 z-0 pointer-events-none overflow-hidden">
 <WebGLBackground />
+</div>
 
-
-<svg class="absolute inset-0 w-full h-full pointer-events-none z-10">
-{ renderWiring() }
+<svg xmlns="http://www.w3.org/2000/svg" class="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
+{draftCableGroup}
 
 {connections.map(c => {
 const fromNode = nodes.find(n => n.id === c.from);
@@ -1457,43 +1479,42 @@ if (!fromNode || !toNode) return null;
 const start = getJackCoords(fromNode, true, c.fromPort);
 const end = getJackCoords(toNode, false, c.toPort);
 const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
-const d = "M ${start.x} ${start.y} C ${start.x + dist} ${start.y}, ${end.x - dist} ${end.y}, ${end.x} ${end.y}";
+const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
 
 return (
-<g key={c.id} class="pointer-events-auto group">
-<path d={d} stroke="transparent" strokeWidth="24" fill="none" class="cursor-grab active:cursor-grabbing" onPointerDown={(e) => grabCable(e, c)} />
-<path d={d} stroke="rgba(0,0,0,0.8)" strokeWidth="12" fill="none" transform="translate(0,6)" class="blur-sm pointer-events-none" />
-<path d={d} stroke="#171717" strokeWidth="10" fill="none" strokeLinecap="round" class="pointer-events-none" />
-<path d={d} stroke="#3f3f46" strokeWidth="3" fill="none" strokeLinecap="round" class="pointer-events-none" />
+<g key={c.id} class="group">
+<path d={d} class="cursor-grab active:cursor-grabbing pointer-events-auto" onPointerDown={(e) => grabCable(e, c)} style={{ fill: 'none', stroke: 'transparent', "stroke-width": 24 }} />
+<path d={d} transform="translate(0,6)" class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.8)', "stroke-width": 12 }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#171717', "stroke-width": 10, "stroke-linecap": 'round' }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#3f3f46', "stroke-width": 3, "stroke-linecap": 'round' }} />
 
-<path d={d} stroke="#f97316" strokeWidth="2" fill="none" strokeLinecap="round" strokeDasharray="4 12" class="animate-dash-flow pointer-events-none opacity-80" />
+<path d={d} class="animate-dash-flow pointer-events-none opacity-80" style={{ fill: 'none', stroke: '#f97316', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
 
-<g class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
+<g class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
 <circle cx={(start.x+end.x)/2} cy={(start.y+end.y)/2} r="14" fill="#ef4444" class="drop-shadow-md" />
-<text x={(start.x+end.x)/2} y={(start.y+end.y)/2 + 4} fill="white" fontSize="14" fontWeight="bold" textAnchor="middle">X</text>
+<text x={(start.x+end.x)/2} y={(start.y+end.y)/2 + 4} style={{ fill: 'white', fontSize: '14px', fontWeight: 'bold', "text-anchor": 'middle' }}>X</text>
 </g>
 </g>
 );
 })}
 </svg>
 
-
 {nodes.map(node => {
 const ports = getNodePorts(node);
 
 return (
-<div key={node.id} class="absolute z-20" style={{ transform: "translate(${node.x}px, ${node.y}px)" }}>
+<div key={node.id} class="absolute z-20" style={{ transform: "translate(" + String(node.x) + "px, " + String(node.y) + "px)" }}>
 
 
 {node.type !== 'SYS_IN' && ports["in"].map(port => {
 const coords = getJackCoords(node, false, port);
 return (
 <div 
-key={"in-${port}"}
+key={"in-" + port}
 class="absolute left-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
-style={{ top: "${coords.y - node.y}px", transform: 'translateY(-50%)' }}
+style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
-title={"Patch In: ${port.toUpperCase()}"}
+title={"Patch In: " + port.toUpperCase()}
 >
 <div class="w-4 h-6 bg-gradient-to-r from-zinc-400 to-zinc-600 rounded-sm border border-zinc-700 shadow-[2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
 <div class="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
@@ -1508,11 +1529,11 @@ title={"Patch In: ${port.toUpperCase()}"}
 const coords = getJackCoords(node, true, port);
 return (
 <div 
-key={"out-${port}"}
+key={"out-" + port}
 class="absolute right-[-14px] w-8 h-16 bg-transparent z-30 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
-style={{ top: "${coords.y - node.y}px", transform: 'translateY(-50%)' }}
+style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
 onPointerDown={(e) => startWire(e, node.id, port)}
-title={"Drag out from: ${port.toUpperCase()}"}
+title={"Drag out from: " + port.toUpperCase()}
 >
 <div class="w-4 h-6 bg-gradient-to-r from-zinc-600 to-zinc-400 rounded-sm border border-zinc-700 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
 <div class="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
@@ -1574,7 +1595,7 @@ audioDataMap={nodeAudioMapRef.current}
 />
 ) : (node.type === 'splitter' || node.type === 'crossover') ? (
 <div 
-class={"w-[140px] h-[180px] bg-gradient-to-br ${node.color} rounded-xl border-t border-l border-t-white/20 border-l-white/20 border-r-black/50 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_10px_rgba(0,0,0,0.5)] p-4 flex flex-col transition-all duration-300 ${node.bypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}"}
+class={"w-[140px] h-[180px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/20 border-l-white/20 border-r-black/50 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_10px_rgba(0,0,0,0.5)] p-4 flex flex-col transition-all duration-300 " + (node.bypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
 style={{ filter: 'url(#metal-texture)' }}
 >
 <div 
@@ -1644,7 +1665,7 @@ for(let i = 0; i < 120; i = i + 1) {
 const val = dataArray[i] * (1 + (i/120)*0.5); 
 const barHeight = (val / 255) * canvas.height;
 
-ctx.fillStyle = "rgb(${val}, ${250 - val}, 100)";
+ctx.fillStyle = "rgb(" + String(Math.floor(val)) + ", " + String(Math.floor(250 - val)) + ", 100)";
 ctx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight);
 x = x + (barWidth);
 }
@@ -1654,7 +1675,7 @@ return () => cancelAnimationFrame(animationId);
 }, [masterAnalyser, node.bypassed]);
 
 return (
-<div class={"relative w-[640px] h-[200px] bg-gradient-to-br ${node.color} rounded-sm border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex group transition-all duration-300 ${isBypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}"}>
+<div class={"relative w-[640px] h-[200px] bg-gradient-to-br " + node.color + " rounded-sm border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex group transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
 <div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none" style={{ filter: 'url(#metal-texture)' }} />
 
 <div class="w-8 h-full bg-gradient-to-r from-zinc-800 to-zinc-950 border-r border-black/80 flex flex-col justify-between py-4 items-center shadow-lg z-10 rounded-l-sm">
@@ -1674,7 +1695,7 @@ class="text-left font-black tracking-widest text-lg uppercase cursor-grab active
 <div class="flex items-center gap-4">
 <div 
 onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
-class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-colors ${!isBypassed ? 'bg-red-500 border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)]' : 'bg-red-950 border-black shadow-black'}"}
+class={"w-6 h-6 rounded-full cursor-pointer shadow-inner border transition-colors " + (!isBypassed ? "bg-red-500 border-red-300 shadow-[0_0_15px_rgba(239,68,68,0.8)]" : "bg-red-950 border-black shadow-black")}
 ></div>
 <button onClick={onRemove} class="text-white/50 hover:text-white transition-colors" title="Remove EQ">
 <X class="w-5 h-5 drop-shadow-md bg-black/30 rounded-full" />
@@ -1718,28 +1739,28 @@ const isBypassed = pedal.bypassed;
 
 return (
 <div 
-class={"relative w-[200px] h-[340px] bg-gradient-to-br ${pedal.color} rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] p-5 flex flex-col group transition-all duration-300 ${isBypassed ? 'brightness-50 grayscale opacity-80' : 'brightness-100 grayscale-0 opacity-100'}"}
+class={"relative w-[200px] h-[340px] bg-gradient-to-br " + pedal.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] p-5 flex flex-col group transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
 >
 <div class="absolute inset-0 rounded-xl mix-blend-multiply opacity-50 pointer-events-none" style={{ filter: 'url(#metal-texture)' }} />
 
 {[[3,3], [3, 11], [18, 3], [18, 11]].map(([t, l], i) => (
-<div key={i} class={"absolute w-2.5 h-2.5 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-[inset_0_1px_1px_rgba(0,0,0,0.8),0_1px_1px_rgba(255,255,255,0.2)] flex items-center justify-center border border-black/40 pointer-events-none ${i===0?'top-3 left-3':i===1?'top-3 right-3':i===2?'bottom-24 left-3':'bottom-24 right-3'}"}>
-<div class={"w-1.5 h-[1px] bg-black/60 transform ${i%2===0?'rotate-45':'-rotate-12'}"} />
+<div key={i} class={"absolute w-2.5 h-2.5 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-600 shadow-[inset_0_1px_1px_rgba(0,0,0,0.8),0_1px_1px_rgba(255,255,255,0.2)] flex items-center justify-center border border-black/40 pointer-events-none " + (i===0 ? "top-3 left-3" : i===1 ? "top-3 right-3" : i===2 ? "bottom-24 left-3" : "bottom-24 right-3")}>
+<div class={"w-1.5 h-[1px] bg-black/60 transform " + (i%2===0 ? "rotate-45" : "-rotate-12")} />
 </div>
 ))}
 
-<button onClick={onRemove} class={"absolute top-3 right-3 transition-all opacity-0 group-hover:opacity-100 z-30 ${isDark ? 'text-white hover:text-red-400' : 'text-black/70 hover:text-red-600'}"} title="Remove Pedal">
+<button onClick={onRemove} class={"absolute top-3 right-3 transition-all opacity-0 group-hover:opacity-100 z-30 " + (isDark ? "text-white hover:text-red-400" : "text-black/70 hover:text-red-600")} title="Remove Pedal">
 <X class="w-5 h-5 drop-shadow-md bg-black/10 rounded-full" />
 </button>
 
 <div 
 onPointerDown={onDragStart}
-class={"text-center font-black ${isCompact ? 'mb-2 mt-0' : 'mb-6 mt-4'} tracking-widest text-lg uppercase cursor-grab active:cursor-grabbing select-none z-20 ${isDark ? 'text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]' : 'text-black/80 drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]'}"}
+class={"text-center font-black " + (isCompact ? "mb-2 mt-0" : "mb-6 mt-4") + " tracking-widest text-lg uppercase cursor-grab active:cursor-grabbing select-none z-20 " + (isDark ? "text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]" : "text-black/80 drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]")}
 >
 {pedal.label}
 </div>
 
-<div class={"flex-1 flex flex-wrap justify-center content-start ${isCompact ? 'gap-1.5' : 'gap-3'} z-20"}>
+<div class={"flex-1 flex flex-wrap justify-center content-start " + (isCompact ? "gap-1.5" : "gap-3") + " z-20"}>
 {Object.entries(pedal.params).map(([key, val]) => {
 let min = 0; let max = 1;
 if (['sub', 'low', 'mid', 'high', 'air'].includes(key)) { min = -1; max = 1; }
@@ -1763,7 +1784,7 @@ return (
 </div>
 
 <div 
-class={"absolute bottom-[4.5rem] left-1/2 -translate-x-1/2 w-2 h-2 rounded-full z-20 shadow-[0_1px_1px_rgba(255,255,255,0.5)] border border-black transition-colors duration-300 ${!isBypassed ? 'bg-red-500 box-shadow-[0_0_10px_2px_rgba(239,68,68,0.8)]' : 'bg-neutral-800'}"} 
+class={"absolute bottom-[4.5rem] left-1/2 -translate-x-1/2 w-2 h-2 rounded-full z-20 shadow-[0_1px_1px_rgba(255,255,255,0.5)] border border-black transition-colors duration-300 " + (!isBypassed ? "bg-red-500 box-shadow-[0_0_10px_2px_rgba(239,68,68,0.8)]" : "bg-neutral-800")} 
 style={!isBypassed ? { boxShadow: '0 0 12px 3px rgba(239,68,68,0.8)' } : {}} 
 />
 
@@ -1771,7 +1792,7 @@ style={!isBypassed ? { boxShadow: '0 0 12px 3px rgba(239,68,68,0.8)' } : {}}
 <div class="w-10 h-10 rounded-full bg-black/80 flex items-center justify-center shadow-inner">
 <div 
 onPointerDown={(e) => { e.stopPropagation(); onToggleBypass(); }}
-class={"w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-200 to-zinc-500 border border-zinc-400 shadow-[0_2px_4px_rgba(0,0,0,0.9),inset_0_2px_2px_rgba(255,255,255,0.8)] flex items-center justify-center cursor-pointer active:scale-95 transition-transform select-none ${isBypassed ? 'brightness-75' : 'brightness-100'}"}
+class={"w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-200 to-zinc-500 border border-zinc-400 shadow-[0_2px_4px_rgba(0,0,0,0.9),inset_0_2px_2px_rgba(255,255,255,0.8)] flex items-center justify-center cursor-pointer active:scale-95 transition-transform select-none " + (isBypassed ? "brightness-75" : "brightness-100")}
 >
 <div class="w-5 h-5 rounded-full border border-black/10 pointer-events-none"></div>
 <div class="absolute w-2 h-2 rounded-full border border-black/10 pointer-events-none"></div>
@@ -1783,7 +1804,7 @@ class={"w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-200 to-zinc-500 border 
 }
 
 // --- JAM MODE (Procedural Backing Track) ---
-fn JamMode(props) { let audioCtx = props.audioCtx; let audioReady = props.audioReady; let pitch = props.pitch;
+fn JamMode(props) { let tabActive = props.tabActive; let audioCtx = props.audioCtx; let audioReady = props.audioReady; let pitch = props.pitch;
 let [isPlaying, setIsPlaying] = useState(false);
 let [tempo, setTempo] = useState(120);
 const sequenceRef = useRef(null);
@@ -1826,6 +1847,10 @@ sequenceRef.current = setTimeout(scheduler, 25.0);
 };
 
 useEffect(() => {
+if (!tabActive) {
+clearTimeout(sequenceRef.current);
+return;
+}
 if (isPlaying && audioCtx) {
 if (audioCtx.state === 'suspended') audioCtx.resume();
 current16thNoteRef.current = 0;
@@ -1835,21 +1860,19 @@ scheduler();
 clearTimeout(sequenceRef.current);
 }
 return () => clearTimeout(sequenceRef.current);
-}, [isPlaying, scheduler, audioCtx]);
+}, [tabActive, isPlaying, scheduler, audioCtx]);
 
 return (
 <div class="absolute inset-0 flex flex-col items-center justify-center p-8 bg-black overflow-hidden">
 <WebGLBackground />
-{!audioReady && (
-<div class="absolute inset-0 bg-neutral-950/80 z-10 flex items-center justify-center backdrop-blur-sm">
+<div class={"absolute inset-0 z-10 flex items-center justify-center backdrop-blur-sm transition-opacity " + (audioReady ? "opacity-0 pointer-events-none hidden" : "bg-neutral-950/80 opacity-100")}>
 <p class="text-xl text-neutral-400 font-medium">Connect instrument to enable Jam Session</p>
 </div>
-)}
 <div class="bg-neutral-900/90 border border-neutral-700 p-8 rounded-2xl w-full max-w-2xl text-center shadow-2xl backdrop-blur-md z-20">
 <h2 class="text-3xl font-black mb-2 text-white">AI DRUMMER</h2>
 <p class="text-neutral-400 mb-8">Auto-accompaniment engine</p>
 <div class="flex flex-col items-center gap-8">
-<button onClick={() => setIsPlaying(!isPlaying)} class={"w-24 h-24 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all ${isPlaying ? 'bg-red-500 hover:bg-red-400' : 'bg-green-500 hover:bg-green-400'}"}>
+<button onClick={() => setIsPlaying(!isPlaying)} class={"w-24 h-24 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all " + (isPlaying ? "bg-red-500 hover:bg-red-400" : "bg-green-500 hover:bg-green-400")}>
 {isPlaying ? <Square class="w-10 h-10 text-black fill-current" /> : <Play class="w-10 h-10 text-black fill-current ml-2" />}
 </button>
 <div class="w-full max-w-xs">
@@ -1860,7 +1883,7 @@ return (
 </div>
 {pitch.freq > 0 && (
 <div class="absolute inset-0 z-10 overflow-hidden pointer-events-none opacity-30">
-<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 mix-blend-screen transition-all duration-100 blur-[100px]" style={{ width: "${Math.min(1200, pitch.freq)}px", height: "${Math.min(1200, pitch.freq)}px" }} />
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 mix-blend-screen transition-all duration-100 blur-[100px]" style={{ width: String(Math.min(1200, pitch.freq)) + "px", height: String(Math.min(1200, pitch.freq)) + "px" }} />
 </div>
 )}
 </div>
@@ -1868,12 +1891,12 @@ return (
 }
 
 // --- GUITARCADE (Canvas Game controlled by audio) ---
-fn Guitarcade(props) { let analyzerRef = props.analyzerRef; let audioReady = props.audioReady; let currentPitch = props.currentPitch;
+fn Guitarcade(props) { let tabActive = props.tabActive; let analyzerRef = props.analyzerRef; let audioReady = props.audioReady; let currentPitch = props.currentPitch;
 const canvasRef = useRef(null);
 const gameRef = useRef({ playerY: 200, lasers: [], enemies: [], score: 0, lastFire: 0, gameOver: false });
 
 useEffect(() => {
-if (!audioReady || !canvasRef.current || !analyzerRef.current) return;
+if (!tabActive || !audioReady || !canvasRef.current || !analyzerRef.current) return;
 const canvas = canvasRef.current; const ctx = canvas.getContext('2d');
 let animationId;
 const analyser = analyzerRef.current;
@@ -1923,8 +1946,8 @@ ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.moveTo(100, state.playerY); ctx.
 ctx.fillStyle = '#22d3ee'; state.lasers.forEach(l => ctx.fillRect(l.x, l.y - 2, 20, 4));
 ctx.fillStyle = '#ef4444'; state.enemies.forEach(e => { ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI * 2); ctx.fill(); });
 
-ctx.fillStyle = 'white'; ctx.font = '24px monospace'; ctx.fillText("SCORE: ${state.score}", 20, 40);
-ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText("INPUT PITCH: ${currentPitch.note} (${currentPitch.freq}Hz)", 20, canvas.height - 20);
+ctx.fillStyle = 'white'; ctx.font = '24px monospace'; ctx.fillText("SCORE: " + String(state.score), 20, 40);
+ctx.font = '16px monospace'; ctx.fillStyle = '#737373'; ctx.fillText("INPUT PITCH: " + currentPitch.note + " (" + String(currentPitch.freq) + "Hz)", 20, canvas.height - 20);
 
 if (state.gameOver) {
 ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1936,16 +1959,14 @@ animationId = requestAnimationFrame(gameLoop);
 };
 animationId = requestAnimationFrame(gameLoop);
 return () => cancelAnimationFrame(animationId);
-}, [audioReady, analyzerRef, currentPitch]);
+}, [tabActive, audioReady, analyzerRef, currentPitch]);
 
 return (
 <div class="absolute inset-0 flex flex-col items-center justify-center p-8 bg-black">
 <WebGLBackground />
-{!audioReady && (
-<div class="absolute inset-0 bg-neutral-950/80 z-10 flex items-center justify-center backdrop-blur-sm">
+<div class={"absolute inset-0 z-10 flex items-center justify-center backdrop-blur-sm transition-opacity " + (audioReady ? "opacity-0 pointer-events-none hidden" : "bg-neutral-950/80 opacity-100")}>
 <p class="text-xl text-neutral-400 font-medium">Connect instrument to play Pitch Invaders</p>
 </div>
-)}
 <div class="text-center mb-4 z-20"><h2 class="text-3xl font-black text-white tracking-widest drop-shadow-lg">PITCH INVADERS</h2><p class="text-neutral-400 text-sm drop-shadow-md">Play High/Low notes to move. Strum aggressively to shoot.</p></div>
 <div class="relative border-4 border-neutral-800 rounded-xl overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.5)] z-20"><canvas ref={canvasRef} width={800} height={500} class="bg-black/90 backdrop-blur-md" /></div>
 </div>

@@ -4,3 +4,5 @@ src/entries/
 src/mains/
 *.app.html
 .DS_Store
+debug-*
+test-*
