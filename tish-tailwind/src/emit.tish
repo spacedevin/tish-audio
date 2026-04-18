@@ -1,3 +1,5 @@
+// Legacy JIT emitter (subset in utilities.tish). The app build uses official Tailwind via npm run build:css
+// (tailwind.config.cjs + tailwind-input.css). Keep this file for experiments or `tish run ... emit.tish` only.
 import { writeFile, readFile } from "fs"
 import { getPreflight } from "./preflight.tish"
 import { getUtilities } from "./utilities.tish"

@@ -4,10 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "mkdir -p dist/assets && OUT_CSS=dist/assets/tish-tailwind.css tish run --feature full tish-tailwind/src/emit.tish && tish build --target js src/main.tish -o dist/main && cp index.html dist/index.html",
-    "dev": "tish run --feature full dev-server.tish"
+    "build:css": "tailwindcss -c tish-tailwind/tailwind.config.cjs -i tish-tailwind/src/tailwind-input.css -o dist/assets/tish-tailwind.css --minify",
+    "build": "mkdir -p dist/assets && npm run build:css && tish build --target js src/main.tish -o dist/main && cp index.html dist/index.html",
+    "dev": "mkdir -p dist/assets && npm run build:css && tish run --feature full dev-server.tish"
   },
   "dependencies": {
     "lattish": "file:../tish/lattish"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17"
   }
 }

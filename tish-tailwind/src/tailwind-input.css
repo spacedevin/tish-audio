@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* SVG cable dash animation (also duplicated in App inline style for safety) */
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.animate-dash-flow {
+  animation: dash-flow 0.5s linear infinite;
+}

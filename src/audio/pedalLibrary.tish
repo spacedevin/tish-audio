@@ -32,9 +32,9 @@ MULTI_FX: [
 { type: 'tape_echo', label: 'Space Echo', color: 'from-emerald-700 to-emerald-950', theme: 'dark', defaultParams: { time: 0.4, feedback: 0.6, age: 0.5, mix: 0.5 } }
 ],
 AMP_SIM: [
-{ type: 'amp_tweed', label: 'Tweed Combo', color: 'from-yellow-700 to-yellow-900', theme: 'dark', defaultParams: { gain: 30, bass: 1.0, mid: 1.2, treble: 1.0, presence: 4000, master: 0.8 } },
-{ type: 'amp_stack', label: 'Brit Stack', color: 'from-amber-800 to-amber-950', theme: 'dark', defaultParams: { gain: 50, bass: 1.0, mid: 1.0, treble: 1.0, presence: 3000, master: 0.8 } },
-{ type: 'amp_modern', label: 'Modern High', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { gain: 80, bass: 1.5, mid: 0.5, treble: 1.2, presence: 5000, master: 0.8 } }
+{ type: 'amp_tweed', label: 'Tweed Combo', color: 'from-amber-700 via-yellow-800 to-amber-950', theme: 'dark', defaultParams: { gain: 30, bass: 1.0, mid: 1.2, treble: 1.0, presence: 4000, master: 0.8 } },
+{ type: 'amp_stack', label: 'Brit Stack', color: 'from-orange-600 via-amber-800 to-stone-950', theme: 'dark', defaultParams: { gain: 50, bass: 1.0, mid: 1.0, treble: 1.0, presence: 3000, master: 0.8 } },
+{ type: 'amp_modern', label: 'Modern High', color: 'from-neutral-700 via-stone-800 to-zinc-950', theme: 'dark', defaultParams: { gain: 80, bass: 1.5, mid: 0.5, treble: 1.2, presence: 5000, master: 0.8 } }
 ],
 MODULATION: [
 { type: 'chorus', label: 'Analog Chorus', color: 'from-cyan-500 to-cyan-800', theme: 'dark', defaultParams: { rate: 1.5, depth: 1.0 } },
