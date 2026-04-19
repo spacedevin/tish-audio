@@ -3,19 +3,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 // import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'sm57_sim';
-export const category = 'MIC_SIM';
+export const sm57_sim_type = 'sm57_sim';
+export const sm57_sim_category = 'MIC_SIM';
 
-export const metadata = {
+export const sm57_sim_metadata = {
   label: 'Dyn Mic 57',
   color: 'from-zinc-600 to-zinc-900',
   theme: 'dark',
   defaultParams: {"level":1}
 };
 
-export const layout = {"width":200,"height":340};
+export const sm57_sim_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn sm57_sim_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -25,17 +25,17 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={sm57_sim_layout.width}
+      panelH={sm57_sim_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={sm57_sim_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn sm57_sim_buildAudio(ctx, node) {
   const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 100;
   const p1 = ctx.createBiquadFilter(); p1.type = 'peaking'; p1.frequency.value = 3000; p1.gain.value = 4;
   const p2 = ctx.createBiquadFilter(); p2.type = 'peaking'; p2.frequency.value = 6000; p2.gain.value = 2;

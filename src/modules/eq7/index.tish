@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'eq7';
-export const category = 'DYNAMICS';
+export const eq7_type = 'eq7';
+export const eq7_category = 'DYNAMICS';
 
-export const metadata = {
+export const eq7_metadata = {
   label: '7-Band EQ',
   color: 'from-stone-300 to-stone-500',
   theme: 'light',
   defaultParams: {"b100":0,"b200":0,"b400":0,"b800":0,"b1k6":0,"b3k2":0,"b6k4":0,"level":1}
 };
 
-export const layout = {"width":400,"height":340};
+export const eq7_layout = {"width":400,"height":340};
 
-export fn View(props) {
+export fn eq7_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,24 +26,24 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={eq7_layout.width}
+      panelH={eq7_layout.height}
       isAmpSim={false}
       isCompact={true}
     >
-      <RotaryKnob label={formatKnobLabel('b100')} min={-15} max={15} value={node.params.b100} theme={node.theme} compact={true} onChange={(v) => onChange('b100', v)} resetValue={metadata.defaultParams.b100} />
-      <RotaryKnob label={formatKnobLabel('b200')} min={-15} max={15} value={node.params.b200} theme={node.theme} compact={true} onChange={(v) => onChange('b200', v)} resetValue={metadata.defaultParams.b200} />
-      <RotaryKnob label={formatKnobLabel('b400')} min={-15} max={15} value={node.params.b400} theme={node.theme} compact={true} onChange={(v) => onChange('b400', v)} resetValue={metadata.defaultParams.b400} />
-      <RotaryKnob label={formatKnobLabel('b800')} min={-15} max={15} value={node.params.b800} theme={node.theme} compact={true} onChange={(v) => onChange('b800', v)} resetValue={metadata.defaultParams.b800} />
-      <RotaryKnob label={formatKnobLabel('b1k6')} min={-15} max={15} value={node.params.b1k6} theme={node.theme} compact={true} onChange={(v) => onChange('b1k6', v)} resetValue={metadata.defaultParams.b1k6} />
-      <RotaryKnob label={formatKnobLabel('b3k2')} min={-15} max={15} value={node.params.b3k2} theme={node.theme} compact={true} onChange={(v) => onChange('b3k2', v)} resetValue={metadata.defaultParams.b3k2} />
-      <RotaryKnob label={formatKnobLabel('b6k4')} min={-15} max={15} value={node.params.b6k4} theme={node.theme} compact={true} onChange={(v) => onChange('b6k4', v)} resetValue={metadata.defaultParams.b6k4} />
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} compact={true} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('b100')} min={-15} max={15} value={node.params.b100} theme={node.theme} compact={true} onChange={(v) => onChange('b100', v)} resetValue={eq7_metadata.defaultParams.b100} />
+      <RotaryKnob label={formatKnobLabel('b200')} min={-15} max={15} value={node.params.b200} theme={node.theme} compact={true} onChange={(v) => onChange('b200', v)} resetValue={eq7_metadata.defaultParams.b200} />
+      <RotaryKnob label={formatKnobLabel('b400')} min={-15} max={15} value={node.params.b400} theme={node.theme} compact={true} onChange={(v) => onChange('b400', v)} resetValue={eq7_metadata.defaultParams.b400} />
+      <RotaryKnob label={formatKnobLabel('b800')} min={-15} max={15} value={node.params.b800} theme={node.theme} compact={true} onChange={(v) => onChange('b800', v)} resetValue={eq7_metadata.defaultParams.b800} />
+      <RotaryKnob label={formatKnobLabel('b1k6')} min={-15} max={15} value={node.params.b1k6} theme={node.theme} compact={true} onChange={(v) => onChange('b1k6', v)} resetValue={eq7_metadata.defaultParams.b1k6} />
+      <RotaryKnob label={formatKnobLabel('b3k2')} min={-15} max={15} value={node.params.b3k2} theme={node.theme} compact={true} onChange={(v) => onChange('b3k2', v)} resetValue={eq7_metadata.defaultParams.b3k2} />
+      <RotaryKnob label={formatKnobLabel('b6k4')} min={-15} max={15} value={node.params.b6k4} theme={node.theme} compact={true} onChange={(v) => onChange('b6k4', v)} resetValue={eq7_metadata.defaultParams.b6k4} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} compact={true} onChange={(v) => onChange('level', v)} resetValue={eq7_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn eq7_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

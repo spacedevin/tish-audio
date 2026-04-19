@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'tape_echo';
-export const category = 'MULTI_FX';
+export const tape_echo_type = 'tape_echo';
+export const tape_echo_category = 'MULTI_FX';
 
-export const metadata = {
+export const tape_echo_metadata = {
   label: 'Space Echo',
   color: 'from-emerald-700 to-emerald-950',
   theme: 'dark',
   defaultParams: {"time":0.4,"feedback":0.6,"age":0.5,"mix":0.5}
 };
 
-export const layout = {"width":200,"height":340};
+export const tape_echo_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn tape_echo_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,20 +26,20 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={tape_echo_layout.width}
+      panelH={tape_echo_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={metadata.defaultParams.time} />
-      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={metadata.defaultParams.feedback} />
-      <RotaryKnob label={formatKnobLabel('age')} min={0} max={1} value={node.params.age} theme={node.theme} onChange={(v) => onChange('age', v)} resetValue={metadata.defaultParams.age} />
-      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={tape_echo_metadata.defaultParams.time} />
+      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={tape_echo_metadata.defaultParams.feedback} />
+      <RotaryKnob label={formatKnobLabel('age')} min={0} max={1} value={node.params.age} theme={node.theme} onChange={(v) => onChange('age', v)} resetValue={tape_echo_metadata.defaultParams.age} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={tape_echo_metadata.defaultParams.mix} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn tape_echo_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

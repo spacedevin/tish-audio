@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'boost';
-export const category = 'DYNAMICS';
+export const boost_type = 'boost';
+export const boost_category = 'DYNAMICS';
 
-export const metadata = {
+export const boost_metadata = {
   label: 'Clean Boost',
   color: 'from-gray-200 to-gray-400',
   theme: 'light',
   defaultParams: {"gain":2}
 };
 
-export const layout = {"width":200,"height":340};
+export const boost_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn boost_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,17 +26,17 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={boost_layout.width}
+      panelH={boost_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('gain')} min={0} max={5} value={node.params.gain} theme={node.theme} onChange={(v) => onChange('gain', v)} resetValue={metadata.defaultParams.gain} />
+      <RotaryKnob label={formatKnobLabel('gain')} min={0} max={5} value={node.params.gain} theme={node.theme} onChange={(v) => onChange('gain', v)} resetValue={boost_metadata.defaultParams.gain} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn boost_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

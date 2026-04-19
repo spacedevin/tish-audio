@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'flanger';
-export const category = 'MODULATION';
+export const flanger_type = 'flanger';
+export const flanger_category = 'MODULATION';
 
-export const metadata = {
+export const flanger_metadata = {
   label: 'Jet Flanger',
   color: 'from-purple-600 to-purple-950',
   theme: 'dark',
   defaultParams: {"rate":0.5,"depth":0.005,"feedback":0.7}
 };
 
-export const layout = {"width":200,"height":340};
+export const flanger_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn flanger_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,19 +26,19 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={flanger_layout.width}
+      panelH={flanger_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={metadata.defaultParams.rate} />
-      <RotaryKnob label={formatKnobLabel('depth')} min={0} max={1} value={node.params.depth} theme={node.theme} onChange={(v) => onChange('depth', v)} resetValue={metadata.defaultParams.depth} />
-      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={metadata.defaultParams.feedback} />
+      <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={flanger_metadata.defaultParams.rate} />
+      <RotaryKnob label={formatKnobLabel('depth')} min={0} max={1} value={node.params.depth} theme={node.theme} onChange={(v) => onChange('depth', v)} resetValue={flanger_metadata.defaultParams.depth} />
+      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={flanger_metadata.defaultParams.feedback} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn flanger_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

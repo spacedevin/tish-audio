@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'sub_mosh';
-export const category = 'SIGNATURE';
+export const sub_mosh_type = 'sub_mosh';
+export const sub_mosh_category = 'SIGNATURE';
 
-export const metadata = {
+export const sub_mosh_metadata = {
   label: 'Sub Mosh',
   color: 'from-violet-900 via-purple-950 to-black',
   theme: 'dark',
   defaultParams: {"mix":0.45,"cut":1400,"level":0.75}
 };
 
-export const layout = {"width":200,"height":340};
+export const sub_mosh_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn sub_mosh_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,19 +26,19 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={sub_mosh_layout.width}
+      panelH={sub_mosh_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
-      <RotaryKnob label={formatKnobLabel('cut')} min={200} max={4200} value={node.params.cut} theme={node.theme} onChange={(v) => onChange('cut', v)} resetValue={metadata.defaultParams.cut} />
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={sub_mosh_metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('cut')} min={200} max={4200} value={node.params.cut} theme={node.theme} onChange={(v) => onChange('cut', v)} resetValue={sub_mosh_metadata.defaultParams.cut} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={sub_mosh_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn sub_mosh_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'ribbon_sim';
-export const category = 'MIC_SIM';
+export const ribbon_sim_type = 'ribbon_sim';
+export const ribbon_sim_category = 'MIC_SIM';
 
-export const metadata = {
+export const ribbon_sim_metadata = {
   label: 'Classic Ribbon',
   color: 'from-stone-500 to-stone-800',
   theme: 'dark',
   defaultParams: {"level":1}
 };
 
-export const layout = {"width":200,"height":340};
+export const ribbon_sim_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn ribbon_sim_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,17 +26,17 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={ribbon_sim_layout.width}
+      panelH={ribbon_sim_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={ribbon_sim_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn ribbon_sim_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

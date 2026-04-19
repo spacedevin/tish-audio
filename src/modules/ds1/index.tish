@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'ds1';
-export const category = 'DRIVE';
+export const ds1_type = 'ds1';
+export const ds1_category = 'DRIVE';
 
-export const metadata = {
+export const ds1_metadata = {
   label: 'Orange Dist',
   color: 'from-orange-500 to-orange-700',
   theme: 'dark',
   defaultParams: {"drive":600,"tone":4000,"level":0.4}
 };
 
-export const layout = {"width":200,"height":340};
+export const ds1_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn ds1_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,19 +26,19 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={ds1_layout.width}
+      panelH={ds1_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metadata.defaultParams.drive} />
-      <RotaryKnob label={formatKnobLabel('tone')} min={100} max={5000} value={node.params.tone} theme={node.theme} onChange={(v) => onChange('tone', v)} resetValue={metadata.defaultParams.tone} />
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={ds1_metadata.defaultParams.drive} />
+      <RotaryKnob label={formatKnobLabel('tone')} min={100} max={5000} value={node.params.tone} theme={node.theme} onChange={(v) => onChange('tone', v)} resetValue={ds1_metadata.defaultParams.tone} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={ds1_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn ds1_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

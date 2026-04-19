@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, h } from "lattish"
 import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2 } from "./icons.tish"
-import { PEDAL_LIBRARY } from "./audio/pedalLibrary.tish"
+import { PEDAL_LIBRARY } from "./modules/registry.tish"
 import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
 import { syncAudioNodeParams } from "./audio/syncAudioNodeParams.tish"
@@ -153,6 +153,53 @@ if (!audioReady) return;
 let frame = 0;
 const loop = () => {
 try { tickSmartGates(nodeAudioMapRef, nodesRef.current); } catch (eTick) { console.error(eTick); }
+
+if (nodeAudioMapRef.current) {
+  const els = document.querySelectorAll('.audio-cable-path');
+  const SILENCE_DB = -42;
+  let i = 0;
+  while (i < els.length) {
+    const el = els[i];
+    i = i + 1;
+    const idStr = el.id || '';
+    let from = '';
+    let port = 'main';
+    if (idStr.startsWith('cable_')) {
+      const rest = idStr.slice(6);
+      const u = rest.lastIndexOf('_');
+      if (u > 0) {
+        from = rest.slice(0, u);
+        port = rest.slice(u + 1);
+      }
+    }
+    const mapNode = from ? nodeAudioMapRef.current[from] : null;
+    const a = mapNode && mapNode.portAnalysers && mapNode.portAnalysers[port];
+    let hasSignal = false;
+    if (a) {
+      if (!el._vbuf) el._vbuf = new Float32Array(a.fftSize);
+      a.getFloatTimeDomainData(el._vbuf);
+      let sum = 0;
+      let j = 0;
+      while (j < el._vbuf.length) { sum = sum + el._vbuf[j] * el._vbuf[j]; j = j + 1; }
+      const rms = Math.sqrt(sum / el._vbuf.length);
+      const db = 20 * Math.log10(Math.max(rms, 0.0001));
+      hasSignal = db > SILENCE_DB;
+
+      let color = '#a855f7';
+      if (hasSignal) {
+        if (db > -5) color = '#ef4444';
+        else if (db > -18) color = '#eab308';
+        else color = '#22c55e';
+      }
+      if (el.style.stroke !== color) el.style.stroke = color;
+    } else {
+      if (el.style.stroke !== '#a855f7') el.style.stroke = '#a855f7';
+    }
+    const dashState = hasSignal ? 'running' : 'paused';
+    if (el.style.animationPlayState !== dashState) el.style.animationPlayState = dashState;
+  }
+}
+
 frame = requestAnimationFrame(loop);
 };
 frame = requestAnimationFrame(loop);

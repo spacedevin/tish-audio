@@ -1,9 +1,9 @@
 import { h } from "lattish"
 import { X } from "../../icons.tish"
 
-export const hardwareRemoveClass = "z-30 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-950/90 bg-gradient-to-b from-zinc-200 via-zinc-500 to-zinc-900 text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-4px_8px_rgba(0,0,0,0.55),0_3px_12px_rgba(0,0,0,0.55)] transition-all duration-200 hover:from-orange-200 hover:via-orange-400 hover:to-orange-950 hover:text-white hover:border-orange-950/80 hover:shadow-[0_0_14px_rgba(249,115,22,0.45)] active:scale-95";
+export const _hardwareRemoveClass = "z-30 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-950/90 bg-gradient-to-b from-zinc-200 via-zinc-500 to-zinc-900 text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-4px_8px_rgba(0,0,0,0.55),0_3px_12px_rgba(0,0,0,0.55)] transition-all duration-200 hover:from-orange-200 hover:via-orange-400 hover:to-orange-950 hover:text-white hover:border-orange-950/80 hover:shadow-[0_0_14px_rgba(249,115,22,0.45)] active:scale-95";
 
-export fn PedalChassis(props) {
+export fn _PedalChassis(props) {
   const { node, previewOnly, onDragStart, onRemove, onToggleBypass, panelW, panelH, isAmpSim, isCompact, children } = props;
   const isDark = node.theme === 'dark';
   const isBypassed = node.bypassed;
@@ -15,7 +15,8 @@ export fn PedalChassis(props) {
 
   return (
     <div 
-      class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br " + node.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
+      onPointerDown={previewOnly ? undefined : onDragStart}
+      class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none " + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + node.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
       style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
     >
       <div class={"absolute inset-0 rounded-2xl mix-blend-multiply pointer-events-none " + (isAmpSim ? "opacity-40" : "opacity-45")} style={{ filter: 'url(#metal-texture)' }} />
@@ -28,8 +29,7 @@ export fn PedalChassis(props) {
       ))}
       
       <div 
-        onPointerDown={previewOnly ? undefined : onDragStart}
-        class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
+        class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
       >
         {node.label}
       </div>
@@ -58,7 +58,7 @@ export fn PedalChassis(props) {
       </div>
 
       {!previewOnly && onRemove ? (
-        <button type="button" title="Remove pedal" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-3 right-3 pointer-events-auto " + hardwareRemoveClass}>
+        <button type="button" title="Remove pedal" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-3 right-3 pointer-events-auto " + _hardwareRemoveClass}>
           <X class="w-4 h-4" />
         </button>
       ) : null}

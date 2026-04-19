@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'metal';
-export const category = 'DRIVE';
+export const metal_type = 'metal';
+export const metal_category = 'DRIVE';
 
-export const metadata = {
+export const metal_metadata = {
   label: 'Metal Zone',
   color: 'from-zinc-900 to-black',
   theme: 'dark',
   defaultParams: {"drive":1000,"midFreq":500,"midCut":-15,"level":0.3}
 };
 
-export const layout = {"width":200,"height":340};
+export const metal_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn metal_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,20 +26,20 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={metal_layout.width}
+      panelH={metal_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metadata.defaultParams.drive} />
-      <RotaryKnob label={formatKnobLabel('midFreq')} min={100} max={5000} value={node.params.midFreq} theme={node.theme} onChange={(v) => onChange('midFreq', v)} resetValue={metadata.defaultParams.midFreq} />
-      <RotaryKnob label={formatKnobLabel('midCut')} min={-20} max={0} value={node.params.midCut} theme={node.theme} onChange={(v) => onChange('midCut', v)} resetValue={metadata.defaultParams.midCut} />
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metal_metadata.defaultParams.drive} />
+      <RotaryKnob label={formatKnobLabel('midFreq')} min={100} max={5000} value={node.params.midFreq} theme={node.theme} onChange={(v) => onChange('midFreq', v)} resetValue={metal_metadata.defaultParams.midFreq} />
+      <RotaryKnob label={formatKnobLabel('midCut')} min={-20} max={0} value={node.params.midCut} theme={node.theme} onChange={(v) => onChange('midCut', v)} resetValue={metal_metadata.defaultParams.midCut} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metal_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn metal_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

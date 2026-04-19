@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'crossover';
-export const category = 'UTILITY';
+export const crossover_type = 'crossover';
+export const crossover_category = 'UTILITY';
 
-export const metadata = {
+export const crossover_metadata = {
   label: 'Freq Split',
   color: 'from-blue-800 to-indigo-950',
   theme: 'dark',
   defaultParams: {"freq":800}
 };
 
-export const layout = {"width":140,"height":180};
+export const crossover_layout = {"width":140,"height":180};
 
-export fn View(props) {
+export fn crossover_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,17 +26,17 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={crossover_layout.width}
+      panelH={crossover_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('freq')} min={0} max={1} value={node.params.freq} theme={node.theme} onChange={(v) => onChange('freq', v)} resetValue={metadata.defaultParams.freq} />
+      <RotaryKnob label={formatKnobLabel('freq')} min={0} max={1} value={node.params.freq} theme={node.theme} onChange={(v) => onChange('freq', v)} resetValue={crossover_metadata.defaultParams.freq} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn crossover_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

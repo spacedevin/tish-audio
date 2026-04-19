@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'noise_gate';
-export const category = 'DYNAMICS';
+export const noise_gate_type = 'noise_gate';
+export const noise_gate_category = 'DYNAMICS';
 
-export const metadata = {
+export const noise_gate_metadata = {
   label: 'Silencer',
   color: 'from-zinc-400 to-zinc-600',
   theme: 'dark',
   defaultParams: {"threshold":-50,"decay":0.1}
 };
 
-export const layout = {"width":200,"height":340};
+export const noise_gate_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn noise_gate_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,18 +26,18 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={noise_gate_layout.width}
+      panelH={noise_gate_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('threshold')} min={-60} max={0} value={node.params.threshold} theme={node.theme} onChange={(v) => onChange('threshold', v)} resetValue={metadata.defaultParams.threshold} />
-      <RotaryKnob label={formatKnobLabel('decay')} min={0} max={8} value={node.params.decay} theme={node.theme} onChange={(v) => onChange('decay', v)} resetValue={metadata.defaultParams.decay} />
+      <RotaryKnob label={formatKnobLabel('threshold')} min={-60} max={0} value={node.params.threshold} theme={node.theme} onChange={(v) => onChange('threshold', v)} resetValue={noise_gate_metadata.defaultParams.threshold} />
+      <RotaryKnob label={formatKnobLabel('decay')} min={0} max={8} value={node.params.decay} theme={node.theme} onChange={(v) => onChange('decay', v)} resetValue={noise_gate_metadata.defaultParams.decay} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn noise_gate_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'delay';
-export const category = 'TIME';
+export const delay_type = 'delay';
+export const delay_category = 'TIME';
 
-export const metadata = {
+export const delay_metadata = {
   label: 'Digi Delay',
   color: 'from-blue-600 to-blue-900',
   theme: 'dark',
   defaultParams: {"time":0.3,"feedback":0.4,"mix":0.5}
 };
 
-export const layout = {"width":200,"height":340};
+export const delay_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn delay_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,19 +26,19 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={delay_layout.width}
+      panelH={delay_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={metadata.defaultParams.time} />
-      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={metadata.defaultParams.feedback} />
-      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={delay_metadata.defaultParams.time} />
+      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={delay_metadata.defaultParams.feedback} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={delay_metadata.defaultParams.mix} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn delay_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

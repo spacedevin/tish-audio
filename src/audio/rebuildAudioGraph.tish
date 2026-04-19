@@ -647,11 +647,23 @@ inNode.connect(convolver); convolver.connect(wetGain); wetGain.connect(outNode);
 nodeParamSync = (ctx, n) => { smoothAudioParam(wetGain.gain, n.params.mix ?? 0.5, ctx); };
 }
 
+const finalOutPorts = outPorts || { main: outNode };
+const portAnalysers = {};
+Object.entries(finalOutPorts).forEach(([pName, pNode]) => {
+  if (pNode && typeof pNode.connect === 'function') {
+    const a = ctx.createAnalyser();
+    a.fftSize = 256;
+    a.smoothingTimeConstant = 0.5;
+    try { pNode.connect(a); portAnalysers[pName] = a; } catch(e) {}
+  }
+});
+
 nodeAudioMapRef.current[node.id] = { 
 "in": inNode, 
 "out": outNode, 
 inPorts: inPorts || { main: inNode },
-outPorts: outPorts || { main: outNode },
+outPorts: finalOutPorts,
+portAnalysers: portAnalysers,
 lfo: lfo,
 analyser: nodeAnalyser,
 analysers: analysers,

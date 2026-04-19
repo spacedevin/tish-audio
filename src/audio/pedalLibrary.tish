@@ -1,1 +1,0 @@
-export { PEDAL_LIBRARY, getNodePorts } from "../modules/registry.tish"

@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'slapback';
-export const category = 'TIME';
+export const slapback_type = 'slapback';
+export const slapback_category = 'TIME';
 
-export const metadata = {
+export const slapback_metadata = {
   label: 'Slapback',
   color: 'from-rose-500 to-rose-800',
   theme: 'dark',
   defaultParams: {"time":0.08,"feedback":0.1,"mix":0.4}
 };
 
-export const layout = {"width":200,"height":340};
+export const slapback_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn slapback_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,19 +26,19 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={slapback_layout.width}
+      panelH={slapback_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={metadata.defaultParams.time} />
-      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={metadata.defaultParams.feedback} />
-      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={slapback_metadata.defaultParams.time} />
+      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={slapback_metadata.defaultParams.feedback} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={slapback_metadata.defaultParams.mix} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn slapback_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

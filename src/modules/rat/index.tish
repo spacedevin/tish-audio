@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'rat';
-export const category = 'DRIVE';
+export const rat_type = 'rat';
+export const rat_category = 'DRIVE';
 
-export const metadata = {
+export const rat_metadata = {
   label: 'Rodent Fuzz',
   color: 'from-zinc-800 to-zinc-950',
   theme: 'dark',
   defaultParams: {"drive":800,"filter":1500,"level":0.4}
 };
 
-export const layout = {"width":200,"height":340};
+export const rat_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn rat_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,19 +26,19 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={rat_layout.width}
+      panelH={rat_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metadata.defaultParams.drive} />
-      <RotaryKnob label={formatKnobLabel('filter')} min={100} max={5000} value={node.params.filter} theme={node.theme} onChange={(v) => onChange('filter', v)} resetValue={metadata.defaultParams.filter} />
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={rat_metadata.defaultParams.drive} />
+      <RotaryKnob label={formatKnobLabel('filter')} min={100} max={5000} value={node.params.filter} theme={node.theme} onChange={(v) => onChange('filter', v)} resetValue={rat_metadata.defaultParams.filter} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={rat_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn rat_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

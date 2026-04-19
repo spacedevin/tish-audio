@@ -5,7 +5,7 @@
 
 import { h, useState, useRef } from "lattish"
 import { X } from "../icons.tish"
-import { getNodePorts } from "../audio/pedalLibrary.tish"
+import { getNodePorts } from "../modules/registry.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
 import { RotaryKnob } from "./controls.tish"
 import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode, hardwareRemoveClass } from "./nodes.tish"
@@ -77,9 +77,9 @@ let addConnection = props.addConnection;
 let removeConnection = props.removeConnection;
 let nodeAudioMapRef = props.nodeAudioMapRef;
 let audioGraphTick = props.audioGraphTick !== undefined && props.audioGraphTick !== null ? props.audioGraphTick : 0;
-let onAudioUiBump = props.onAudioUiBump;
+  let onAudioUiBump = props.onAudioUiBump;
 
-const boardRef = useRef(null);
+  const boardRef = useRef(null);
 let [wiring, setWiring] = useState(null);
 let [draggingNode, setDraggingNode] = useState(null);
 
@@ -175,7 +175,7 @@ const dist = Math.abs(end.x - start.x) * 0.6;
 const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
 draftCableGroup = (
 <g>
-<path d={d} filter="url(#cable-shadow)" style={{ fill: 'none', stroke: '#f97316', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
+<path d={d} filter="url(#cable-shadow)" class="audio-cable-path transition-colors duration-150" id={"cable_" + String(wiring.fromId) + "_" + String(wiring.fromPort || 'main')} style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
 <path d={d} class="animate-dash-flow pointer-events-none" style={{ fill: 'none', stroke: '#ffffff', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
 </g>
 );
@@ -213,7 +213,7 @@ return (
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#171717', "stroke-width": 10, "stroke-linecap": 'round' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#3f3f46', "stroke-width": 3, "stroke-linecap": 'round' }} />
 
-<path d={d} class="animate-dash-flow pointer-events-none opacity-80" style={{ fill: 'none', stroke: '#f97316', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+<path d={d} id={"cable_" + String(c.from) + "_" + String(c.fromPort || 'main')} class="audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
 
 <g class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
 <circle cx={(start.x+end.x)/2} cy={(start.y+end.y)/2} r="14" fill="#ef4444" class="drop-shadow-md" />
@@ -272,7 +272,7 @@ title={"Drag out from: " + port.toUpperCase()}
 {node.type === 'SYS_IN' ? (
 <div 
 onPointerDown={(e) => startDragNode(e, node)}
-class="flex flex-col items-center justify-center w-24 h-[140px] border-2 border-green-700 bg-gradient-to-b from-green-900/40 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing relative group"
+class="flex flex-col items-center justify-center w-24 h-[140px] border-2 border-green-700 bg-gradient-to-b from-green-900/40 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing select-none relative group"
 >
 <span class="transform -rotate-90 text-xs font-black tracking-widest text-green-500 drop-shadow-md select-none whitespace-nowrap truncate w-[120px] text-center">{node.label}</span>
 <button type="button" title="Remove input" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity"><X class="w-4 h-4 text-red-500 hover:text-red-400" /></button>
@@ -280,7 +280,7 @@ class="flex flex-col items-center justify-center w-24 h-[140px] border-2 border-
 ) : node.type === 'SYS_OUT' ? (
 <div 
 onPointerDown={(e) => startDragNode(e, node)}
-class="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-neutral-700 bg-gradient-to-b from-neutral-800 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing"
+class="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-neutral-700 bg-gradient-to-b from-neutral-800 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing select-none"
 >
 <span class="transform -rotate-90 text-sm font-black tracking-widest text-orange-500 drop-shadow-md select-none whitespace-nowrap">{node.label}</span>
 </div>

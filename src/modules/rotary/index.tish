@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'rotary';
-export const category = 'MODULATION';
+export const rotary_type = 'rotary';
+export const rotary_category = 'MODULATION';
 
-export const metadata = {
+export const rotary_metadata = {
   label: 'Rotary Spkr',
   color: 'from-stone-500 to-stone-700',
   theme: 'dark',
   defaultParams: {"rate":6,"mix":0.5}
 };
 
-export const layout = {"width":200,"height":340};
+export const rotary_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn rotary_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,18 +26,18 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={rotary_layout.width}
+      panelH={rotary_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={metadata.defaultParams.rate} />
-      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={rotary_metadata.defaultParams.rate} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={rotary_metadata.defaultParams.mix} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn rotary_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

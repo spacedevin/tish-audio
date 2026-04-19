@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'dub_layer';
-export const category = 'SIGNATURE';
+export const dub_layer_type = 'dub_layer';
+export const dub_layer_category = 'SIGNATURE';
 
-export const metadata = {
+export const dub_layer_metadata = {
   label: 'Dub Layer',
   color: 'from-amber-900 via-orange-950 to-black',
   theme: 'dark',
   defaultParams: {"time":0.55,"feedback":0.62,"dark":2800,"mix":0.48}
 };
 
-export const layout = {"width":200,"height":340};
+export const dub_layer_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn dub_layer_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,20 +26,20 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={dub_layer_layout.width}
+      panelH={dub_layer_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={metadata.defaultParams.time} />
-      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={metadata.defaultParams.feedback} />
-      <RotaryKnob label={formatKnobLabel('dark')} min={400} max={7200} value={node.params.dark} theme={node.theme} onChange={(v) => onChange('dark', v)} resetValue={metadata.defaultParams.dark} />
-      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={metadata.defaultParams.mix} />
+      <RotaryKnob label={formatKnobLabel('time')} min={0} max={8} value={node.params.time} theme={node.theme} onChange={(v) => onChange('time', v)} resetValue={dub_layer_metadata.defaultParams.time} />
+      <RotaryKnob label={formatKnobLabel('feedback')} min={0} max={1} value={node.params.feedback} theme={node.theme} onChange={(v) => onChange('feedback', v)} resetValue={dub_layer_metadata.defaultParams.feedback} />
+      <RotaryKnob label={formatKnobLabel('dark')} min={400} max={7200} value={node.params.dark} theme={node.theme} onChange={(v) => onChange('dark', v)} resetValue={dub_layer_metadata.defaultParams.dark} />
+      <RotaryKnob label={formatKnobLabel('mix')} min={0} max={1} value={node.params.mix} theme={node.theme} onChange={(v) => onChange('mix', v)} resetValue={dub_layer_metadata.defaultParams.mix} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn dub_layer_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

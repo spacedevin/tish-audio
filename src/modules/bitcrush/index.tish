@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'bitcrush';
-export const category = 'MULTI_FX';
+export const bitcrush_type = 'bitcrush';
+export const bitcrush_category = 'MULTI_FX';
 
-export const metadata = {
+export const bitcrush_metadata = {
   label: '8-Bit Crush',
   color: 'from-pink-600 to-purple-900',
   theme: 'dark',
   defaultParams: {"bits":4,"level":0.5}
 };
 
-export const layout = {"width":200,"height":340};
+export const bitcrush_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn bitcrush_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,18 +26,18 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={bitcrush_layout.width}
+      panelH={bitcrush_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('bits')} min={2} max={16} value={node.params.bits} theme={node.theme} onChange={(v) => onChange('bits', v)} resetValue={metadata.defaultParams.bits} />
-      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={metadata.defaultParams.level} />
+      <RotaryKnob label={formatKnobLabel('bits')} min={2} max={16} value={node.params.bits} theme={node.theme} onChange={(v) => onChange('bits', v)} resetValue={bitcrush_metadata.defaultParams.bits} />
+      <RotaryKnob label={formatKnobLabel('level')} min={0} max={1} value={node.params.level} theme={node.theme} onChange={(v) => onChange('level', v)} resetValue={bitcrush_metadata.defaultParams.level} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn bitcrush_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 

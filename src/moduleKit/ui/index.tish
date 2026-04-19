@@ -1,5 +1,8 @@
-export { PedalChassis, hardwareRemoveClass } from "./PedalChassis.tish"
-export { RackChassis } from "./RackChassis.tish"
+import * as pedal from "./PedalChassis.tish"
+import * as rack from "./RackChassis.tish"
+
+export const PedalChassis = pedal._PedalChassis;
+export const RackChassis = rack._RackChassis;
 
 export const formatKnobLabel = (key) => {
   const map = {

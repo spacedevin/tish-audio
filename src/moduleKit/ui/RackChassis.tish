@@ -1,13 +1,16 @@
 import { h } from "lattish"
 import { X } from "../../icons.tish"
-import { hardwareRemoveClass } from "./PedalChassis.tish"
+import { _hardwareRemoveClass } from "./PedalChassis.tish"
 
-export fn RackChassis(props) {
+export fn _RackChassis(props) {
   const { node, previewOnly, onDragStart, onRemove, onToggleBypass, typeLabel, children } = props;
   const isBypassed = node.bypassed;
 
   return (
-    <div class={"relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
+    <div 
+      onPointerDown={previewOnly ? undefined : onDragStart}
+      class={"relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-all duration-300 select-none " + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
+    >
       <div class="absolute inset-0 pointer-events-none opacity-[0.18]" style={{ filter: 'url(#metal-texture)' }} />
       
       <div class="w-6 shrink-0 flex flex-col items-center justify-between py-3 px-0.5 bg-gradient-to-b from-zinc-500 via-zinc-700 to-zinc-900 border-r border-black/70">
@@ -27,10 +30,7 @@ export fn RackChassis(props) {
         <div class="flex justify-between items-center gap-2 px-3 py-2 border-b border-black/55 bg-black/35">
           <div class="flex flex-col min-w-0 flex-1">
             <span class="text-[8px] font-black tracking-[0.2em] text-zinc-500 uppercase">{typeLabel}</span>
-            <div 
-              onPointerDown={previewOnly ? undefined : onDragStart}
-              class={"text-sm font-black tracking-widest uppercase truncate text-white drop-shadow-md " + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing")}
-            >
+            <div class="text-sm font-black tracking-widest uppercase truncate text-white drop-shadow-md">
               {node.label}
             </div>
           </div>
@@ -47,7 +47,7 @@ export fn RackChassis(props) {
             {props.renderHeaderExtra && !previewOnly ? props.renderHeaderExtra() : null}
 
             {!previewOnly && onRemove ? (
-              <button type="button" title="Remove rack" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={hardwareRemoveClass}>
+              <button type="button" title="Remove rack" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={_hardwareRemoveClass}>
                 <X class="w-4 h-4" />
               </button>
             ) : null}

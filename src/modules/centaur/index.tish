@@ -4,19 +4,19 @@ import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
-export const type = 'centaur';
-export const category = 'MULTI_FX';
+export const centaur_type = 'centaur';
+export const centaur_category = 'MULTI_FX';
 
-export const metadata = {
+export const centaur_metadata = {
   label: 'Mythic Drive',
   color: 'from-amber-200 to-amber-500',
   theme: 'light',
   defaultParams: {"drive":500,"highs":5,"output":0.5}
 };
 
-export const layout = {"width":200,"height":340};
+export const centaur_layout = {"width":200,"height":340};
 
-export fn View(props) {
+export fn centaur_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
   
   return (
@@ -26,19 +26,19 @@ export fn View(props) {
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
       previewOnly={previewOnly}
-      panelW={layout.width}
-      panelH={layout.height}
+      panelW={centaur_layout.width}
+      panelH={centaur_layout.height}
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={metadata.defaultParams.drive} />
-      <RotaryKnob label={formatKnobLabel('highs')} min={0} max={10} value={node.params.highs} theme={node.theme} onChange={(v) => onChange('highs', v)} resetValue={metadata.defaultParams.highs} />
-      <RotaryKnob label={formatKnobLabel('output')} min={0} max={1} value={node.params.output} theme={node.theme} onChange={(v) => onChange('output', v)} resetValue={metadata.defaultParams.output} />
+      <RotaryKnob label={formatKnobLabel('drive')} min={0} max={1000} value={node.params.drive} theme={node.theme} onChange={(v) => onChange('drive', v)} resetValue={centaur_metadata.defaultParams.drive} />
+      <RotaryKnob label={formatKnobLabel('highs')} min={0} max={10} value={node.params.highs} theme={node.theme} onChange={(v) => onChange('highs', v)} resetValue={centaur_metadata.defaultParams.highs} />
+      <RotaryKnob label={formatKnobLabel('output')} min={0} max={1} value={node.params.output} theme={node.theme} onChange={(v) => onChange('output', v)} resetValue={centaur_metadata.defaultParams.output} />
     </PedalChassis>
   );
 }
 
-export fn buildAudio(ctx, node) {
+export fn centaur_buildAudio(ctx, node) {
   let inNode; let outNode; let lfo; let nodeAnalyser;
   let inPorts = null; let outPorts = null;
   let analysers = {}; 
