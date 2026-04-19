@@ -15,8 +15,7 @@ export fn _PedalChassis(props) {
 
   return (
     <div 
-      onPointerDown={previewOnly ? undefined : onDragStart}
-      class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none " + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + node.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
+      class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none " + node.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
       style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
     >
       <div class={"absolute inset-0 rounded-2xl mix-blend-multiply pointer-events-none " + (isAmpSim ? "opacity-40" : "opacity-45")} style={{ filter: 'url(#metal-texture)' }} />
@@ -29,7 +28,8 @@ export fn _PedalChassis(props) {
       ))}
       
       <div 
-        class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
+        onPointerDown={previewOnly ? undefined : onDragStart}
+        class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
       >
         {node.label}
       </div>

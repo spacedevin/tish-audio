@@ -37,6 +37,8 @@ const nodeAudioMapRef = useRef({});
 const audioRebuildSigRef = useRef("");
 const nodesRef = useRef(nodes);
 nodesRef.current = nodes;
+const connectionsRef = useRef(connections);
+connectionsRef.current = connections;
 const patchBoardMeterTickRef = useRef(0);
 if (activeTab === 'pedalboard') {
 patchBoardMeterTickRef.current = audioGraphTick;
@@ -156,7 +158,7 @@ try { tickSmartGates(nodeAudioMapRef, nodesRef.current); } catch (eTick) { conso
 
 if (nodeAudioMapRef.current) {
   const els = document.querySelectorAll('.audio-cable-path');
-  const SILENCE_DB = -42;
+  const SILENCE_DB = -58;
   let i = 0;
   while (i < els.length) {
     const el = els[i];
@@ -164,12 +166,18 @@ if (nodeAudioMapRef.current) {
     const idStr = el.id || '';
     let from = '';
     let port = 'main';
-    if (idStr.startsWith('cable_')) {
-      const rest = idStr.slice(6);
-      const u = rest.lastIndexOf('_');
-      if (u > 0) {
-        from = rest.slice(0, u);
-        port = rest.slice(u + 1);
+    if (idStr.startsWith('c_')) {
+      const connId = idStr.slice(2);
+      const conns = connectionsRef.current;
+      let ci = 0;
+      while (ci < conns.length) {
+        const c = conns[ci];
+        if (c.id === connId) {
+          from = c.from;
+          port = c.fromPort || 'main';
+          break;
+        }
+        ci = ci + 1;
       }
     }
     const mapNode = from ? nodeAudioMapRef.current[from] : null;
@@ -179,10 +187,19 @@ if (nodeAudioMapRef.current) {
       if (!el._vbuf) el._vbuf = new Float32Array(a.fftSize);
       a.getFloatTimeDomainData(el._vbuf);
       let sum = 0;
+      let peak = 0;
       let j = 0;
-      while (j < el._vbuf.length) { sum = sum + el._vbuf[j] * el._vbuf[j]; j = j + 1; }
+      while (j < el._vbuf.length) {
+        const v = el._vbuf[j];
+        const av = v < 0 ? -v : v;
+        if (av > peak) peak = av;
+        sum = sum + v * v;
+        j = j + 1;
+      }
       const rms = Math.sqrt(sum / el._vbuf.length);
-      const db = 20 * Math.log10(Math.max(rms, 0.0001));
+      const dbRms = 20 * Math.log10(Math.max(rms, 0.0001));
+      const dbPk = 20 * Math.log10(Math.max(peak, 0.0001));
+      const db = dbRms > dbPk ? dbRms : dbPk;
       hasSignal = db > SILENCE_DB;
 
       let color = '#a855f7';
@@ -379,6 +396,7 @@ removeConnection={removeConnection}
 </main>
 </AudioMeterProvider>
 
+<div>
 {showDeviceMenu ? (
 <div class="w-72 bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-[20000] fixed" style={{ left: "1rem", top: "4.75rem", maxHeight: "calc(100vh - 5.5rem)" }}>
 <div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center">
@@ -411,6 +429,7 @@ title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 {showModuleDebug ? (
 <ModuleDebugPanel onClose={() => setShowModuleDebug(false)} addNode={addNode} />
 ) : null}
+</div>
 </div>
 );
 }

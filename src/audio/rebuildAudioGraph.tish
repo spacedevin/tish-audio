@@ -626,7 +626,8 @@ smoothAudioParam(lfoDepthTrem.gain, p.depth ?? 0.5, ctx);
 else if (node.type === 'shimmer_verb') {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const convolver = ctx.createConvolver();
-convolver.buffer = createReverbIR(ctx, Math.min(4.5, node.params.decay ?? 3.2), 6.2, 'hall');
+let lastDecay = Math.min(4.5, node.params.decay ?? 3.2);
+convolver.buffer = createReverbIR(ctx, lastDecay, 6.2, 'hall');
 const air = ctx.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 3200; air.gain.value = (node.params.sheen ?? 0.65) * 14;
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.38;
 inNode.connect(convolver); convolver.connect(air); air.connect(wetGain); wetGain.connect(outNode);
@@ -635,16 +636,29 @@ nodeParamSync = (ctx, n) => {
 const p = n.params;
 smoothAudioParam(wetGain.gain, p.mix ?? 0.38, ctx);
 smoothAudioParam(air.gain, (p.sheen ?? 0.65) * 14, ctx);
+const curDecay = Math.min(4.5, p.decay ?? 3.2);
+if (Math.abs(curDecay - lastDecay) > 0.05) {
+lastDecay = curDecay;
+convolver.buffer = createReverbIR(ctx, lastDecay, 6.2, 'hall');
+}
 };
 }
 else if (node.type.endsWith('_verb')) {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const convolver = ctx.createConvolver(); 
 const type = node.type.replace('_verb', '');
-convolver.buffer = createReverbIR(ctx, node.params.decay ?? 3.0, 5.0, type);
+let lastDecay = node.params.decay ?? 3.0;
+convolver.buffer = createReverbIR(ctx, lastDecay, 5.0, type);
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.5;
 inNode.connect(convolver); convolver.connect(wetGain); wetGain.connect(outNode); inNode.connect(outNode); 
-nodeParamSync = (ctx, n) => { smoothAudioParam(wetGain.gain, n.params.mix ?? 0.5, ctx); };
+nodeParamSync = (ctx, n) => { 
+smoothAudioParam(wetGain.gain, n.params.mix ?? 0.5, ctx); 
+const curDecay = n.params.decay ?? 3.0;
+if (Math.abs(curDecay - lastDecay) > 0.05) {
+lastDecay = curDecay;
+convolver.buffer = createReverbIR(ctx, lastDecay, 5.0, type);
+}
+};
 }
 
 const finalOutPorts = outPorts || { main: outNode };
