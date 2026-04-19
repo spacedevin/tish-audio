@@ -2,6 +2,7 @@ import { h } from "lattish"
 import { X } from "../icons.tish"
 import { PEDAL_LIBRARY } from "../modules/registry.tish"
 import { MODULE_REGISTRY } from "../modules/registry.tish"
+import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode } from "./nodes.tish"
 
 export fn ModuleDebugPanel(props) {
 let onClose = props.onClose;
@@ -73,9 +74,70 @@ if (MODULE_REGISTRY[mod.type]?.View) {
     meterSync: 0,
     onFaderDragEnd: noop
   });
+} else if (mod.type === 'master_eq') {
+  preview = (
+    <RackNode
+      node={mod}
+      previewOnly={true}
+      onRemove={noop}
+      onChange={noop}
+      onDragStart={noop}
+      onToggleBypass={noop}
+      audioDataMap={dbgAudioMap}
+      meterSync={0}
+      onFaderDragEnd={noop}
+    />
+  );
+} else if (mod.type === 'graphic_eq') {
+  preview = (
+    <GraphicEqNode
+      node={mod}
+      previewOnly={true}
+      onRemove={noop}
+      onChange={noop}
+      onDragStart={noop}
+      onToggleBypass={noop}
+      audioDataMap={dbgAudioMap}
+      meterSync={0}
+      onFaderDragEnd={noop}
+    />
+  );
+} else if (mod.type === 'vu_meter') {
+  preview = (
+    <VuMeterNode
+      node={mod}
+      previewOnly={true}
+      onRemove={noop}
+      onChange={noop}
+      onDragStart={noop}
+      audioDataMap={dbgAudioMap}
+    />
+  );
+} else if (mod.type === 'console_mixer') {
+  preview = (
+    <ConsoleNode
+      node={mod}
+      previewOnly={true}
+      onRemove={noop}
+      onChange={noop}
+      onDragStart={noop}
+      audioDataMap={dbgAudioMap}
+      meterSync={0}
+      onFaderDragEnd={noop}
+    />
+  );
 }
 
-const layout = MODULE_REGISTRY[mod.type]?.layout || { width: 200, height: 340 };
+let layout = MODULE_REGISTRY[mod.type]?.layout;
+if (!layout) {
+  if (mod.type === 'master_eq' || mod.type === 'graphic_eq' || mod.type === 'console_mixer') {
+    layout = { width: 640, height: 216 };
+  } else if (mod.type === 'vu_meter') {
+    layout = { width: 120, height: 200 };
+  } else {
+    layout = { width: 200, height: 340 };
+  }
+}
 const isRack = layout.width > 500;
 const isWidePedal = layout.width > 250 && !isRack;
 const isVuMeter = layout.width === 120;

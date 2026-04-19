@@ -38,8 +38,8 @@ export fn spring_verb_View(props) {
 
 export fn spring_verb_buildAudio(ctx, node) {
   // TODO: extract from rebuildAudioGraph.tish
-  const inNode = ctx.createGain();
-  const outNode = ctx.createGain();
+  let inNode = ctx.createGain();
+  let outNode = ctx.createGain();
   inNode.connect(outNode);
   return { "in": inNode, "out": outNode };
 }

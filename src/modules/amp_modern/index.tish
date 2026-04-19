@@ -1,7 +1,7 @@
 import { h } from "lattish"
 import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
-// import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+import { buildAmpSimAudio } from "../../moduleKit/audio/ampSimGraph.tish"
 
 export const amp_modern_type = 'amp_modern';
 export const amp_modern_category = 'AMP_SIM';
@@ -41,9 +41,5 @@ export fn amp_modern_View(props) {
 }
 
 export fn amp_modern_buildAudio(ctx, node) {
-  // TODO: extract from rebuildAudioGraph.tish
-  const inNode = ctx.createGain();
-  const outNode = ctx.createGain();
-  inNode.connect(outNode);
-  return { "in": inNode, "out": outNode };
+  return buildAmpSimAudio(ctx, node, 500);
 }

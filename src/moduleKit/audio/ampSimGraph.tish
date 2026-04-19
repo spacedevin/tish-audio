@@ -1,0 +1,50 @@
+import { makeDistortionCurve } from "../../audio/dsp.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+// midHz: 500 for amp_modern, 800 for amp_stack / amp_tweed (matches rebuildAudioGraph.tish)
+export fn buildAmpSimAudio(ctx, node, midHz) {
+  let inNode = ctx.createWaveShaper();
+  inNode.curve = makeDistortionCurve((node.params.gain ?? 50) * 10);
+  inNode.oversample = '4x';
+
+  let bass = ctx.createBiquadFilter();
+  bass.type = 'lowshelf';
+  bass.frequency.value = 120;
+  bass.gain.value = ((node.params.bass ?? 1.0) - 1) * 10;
+
+  let mid = ctx.createBiquadFilter();
+  mid.type = 'peaking';
+  mid.frequency.value = midHz;
+  mid.gain.value = ((node.params.mid ?? 1.0) - 1) * 10;
+  mid.Q.value = 1.0;
+
+  let treble = ctx.createBiquadFilter();
+  treble.type = 'highshelf';
+  treble.frequency.value = 4000;
+  treble.gain.value = ((node.params.treble ?? 1.0) - 1) * 10;
+
+  let presence = ctx.createBiquadFilter();
+  presence.type = 'lowpass';
+  presence.frequency.value = node.params.presence ?? 3000;
+
+  let outNode = ctx.createGain();
+  outNode.gain.value = node.params.master ?? 0.8;
+
+  inNode.connect(bass);
+  bass.connect(mid);
+  mid.connect(treble);
+  treble.connect(presence);
+  presence.connect(outNode);
+
+  let nodeParamSync = (ctxSync, n) => {
+    let p = n.params;
+    inNode.curve = makeDistortionCurve((p.gain ?? 50) * 10);
+    smoothAudioParam(bass.gain, ((p.bass ?? 1.0) - 1) * 10, ctxSync);
+    smoothAudioParam(mid.gain, ((p.mid ?? 1.0) - 1) * 10, ctxSync);
+    smoothAudioParam(treble.gain, ((p.treble ?? 1.0) - 1) * 10, ctxSync);
+    smoothAudioParam(presence.frequency, p.presence ?? 3000, ctxSync);
+    smoothAudioParam(outNode.gain, p.master ?? 0.8, ctxSync);
+  };
+
+  return { "in": inNode, "out": outNode, nodeParamSync: nodeParamSync };
+}
