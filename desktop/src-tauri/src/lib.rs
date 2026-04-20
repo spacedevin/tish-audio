@@ -2,6 +2,18 @@ mod audio_input;
 
 use audio_input::{AudioInputController, list_audio_inputs, start_native_input, stop_native_input};
 
+/// Write a log line to stderr, discarding any I/O error so we never panic in a
+/// packaged macOS app where stderr is closed (recent Rust eprintln! panics on
+/// write failure).
+macro_rules! log_safe {
+    ($($arg:tt)*) => {
+        let _ = std::io::Write::write_fmt(
+            &mut std::io::stderr(),
+            format_args!("{}\n", format_args!($($arg)*)),
+        );
+    };
+}
+
 /// Request microphone access via AVFoundation and WAIT for the user's answer before returning.
 /// Returns Ok(true) when granted, Err("denied") when denied/restricted, so callers can refuse
 /// to start capture instead of silently streaming zeros.
@@ -22,14 +34,14 @@ fn ensure_mic_permission() -> Result<bool, String> {
             let status = AVCaptureDevice::authorizationStatusForMediaType(media_type);
 
             if status == AVAuthorizationStatus::Authorized {
-                eprintln!("[ToneFrame:mic-permission] already authorized");
+                log_safe!("[ToneFrame:mic-permission] already authorized");
                 return Ok(true);
             }
 
             if status == AVAuthorizationStatus::Denied
                 || status == AVAuthorizationStatus::Restricted
             {
-                eprintln!("[ToneFrame:mic-permission] denied — opening System Settings");
+                log_safe!("[ToneFrame:mic-permission] denied — opening System Settings");
                 // Open the macOS Privacy → Microphone pane so the user can re-enable without
                 // hunting through menus.
                 let _ = std::process::Command::new("open")
@@ -39,10 +51,10 @@ fn ensure_mic_permission() -> Result<bool, String> {
             }
 
             // NotDetermined: show the system dialog and block until the user responds.
-            eprintln!("[ToneFrame:mic-permission] requesting microphone access…");
+            log_safe!("[ToneFrame:mic-permission] requesting microphone access…");
             let (tx, rx) = mpsc::channel::<bool>();
             let handler = block2::RcBlock::new(move |granted: Bool| {
-                eprintln!(
+                log_safe!(
                     "[ToneFrame:mic-permission] user response: granted={}",
                     granted.as_bool()
                 );

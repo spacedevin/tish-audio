@@ -15,6 +15,16 @@
 <body>
   <svg class="w-0 h-0 absolute pointer-events-none" aria-hidden="true">
     <defs>
+      <radialGradient id="jack-metal" cx="35%" cy="30%" r="70%" gradientUnits="objectBoundingBox">
+        <stop offset="0%" stop-color="#d4d8e0"/>
+        <stop offset="22%" stop-color="#a0a8b4"/>
+        <stop offset="55%" stop-color="#4e5668"/>
+        <stop offset="100%" stop-color="#1a1e27"/>
+      </radialGradient>
+      <radialGradient id="jack-socket" cx="38%" cy="32%" r="65%" gradientUnits="objectBoundingBox">
+        <stop offset="0%" stop-color="#1c1c1c"/>
+        <stop offset="100%" stop-color="#020202"/>
+      </radialGradient>
       <filter id="metal-texture">
         <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" result="noise" />
         <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.15 0" in="noise" result="coloredNoise" />

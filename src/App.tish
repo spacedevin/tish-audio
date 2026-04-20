@@ -695,7 +695,7 @@ title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 </div>
 ) : null}
 {showModuleLibrary ? (
-<div class="absolute left-3 sm:left-4 top-full mt-1.5 z-[60] max-w-[calc(100vw-1.5rem)] bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden" style={{ width: "min(800px, calc(100vw - 2rem))", maxHeight: "min(36rem, calc(100vh - 6rem))" }}>
+<div class="absolute left-3 sm:left-4 top-full mt-1.5 z-[60] max-w-[calc(100vw-1.5rem)] bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-y-auto custom-scrollbar" style={{ width: "min(800px, calc(100vw - 2rem))", maxHeight: "min(44rem, calc(100vh - 6rem))" }}>
 <ModuleLibraryPanel onClose={() => setShowModuleLibrary(false)} addNode={addNode} />
 </div>
 ) : null}

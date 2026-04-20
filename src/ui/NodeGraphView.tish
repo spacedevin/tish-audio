@@ -13,6 +13,7 @@ import { MODULE_REGISTRY } from "../modules/registry.tish"
 
 const SNAP_PEER_PX = 14;
 const SNAP_X_EDGE_GAP_PX = 20;
+const JACK_PROTRUDE = 13;
 
 const getNodeSize = (node) => {
 let w = 200; let h = 340;
@@ -94,7 +95,7 @@ const totalPorts = ports.length;
 const yOffset = ((portIdx + 1) * h) / (totalPorts + 1);
 
 return {
-x: node.x + (isOutput ? w : 0),
+x: node.x + (isOutput ? w + JACK_PROTRUDE : -JACK_PROTRUDE),
 y: node.y + yOffset
 };
 };
@@ -175,8 +176,11 @@ const dist = Math.abs(end.x - start.x) * 0.6;
 const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
 draftCableGroup = (
 <g>
-<path d={d} filter="url(#cable-shadow)" class="transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
+<path d={d} filter="url(#cable-shadow)" class="transition-colors duration-150" style={{ fill: 'none', stroke: '#6b21a8', "stroke-width": 10, "stroke-linecap": 'round', opacity: 0.7 }} />
+<path d={d} class="transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
 <path d={d} class="animate-dash-flow pointer-events-none" style={{ fill: 'none', stroke: '#ffffff', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+<circle cx={start.x} cy={start.y} r="5" fill="#4c1d95" stroke="#a855f7" style={{ "stroke-width": 1 }} class="pointer-events-none" />
+<circle cx={start.x} cy={start.y} r="2" fill="#1a0a2e" class="pointer-events-none" />
 </g>
 );
 }
@@ -208,11 +212,17 @@ const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.
 return (
 <g key={c.id} class="pointer-events-auto group">
 <path d={d} class="cursor-grab active:cursor-grabbing pointer-events-auto" onPointerDown={(e) => grabCable(e, c)} style={{ fill: 'none', stroke: 'transparent', "stroke-width": 24 }} />
-<path d={d} transform="translate(0,6)" class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.8)', "stroke-width": 12 }} />
-<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#171717', "stroke-width": 10, "stroke-linecap": 'round' }} />
-<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#3f3f46', "stroke-width": 3, "stroke-linecap": 'round' }} />
+<path d={d} transform="translate(0,6)" class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.75)', "stroke-width": 16 }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#0d0d0d', "stroke-width": 12, "stroke-linecap": 'round' }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#2a2a2a', "stroke-width": 7, "stroke-linecap": 'round' }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#141414', "stroke-width": 5, "stroke-linecap": 'round' }} />
 
 <path d={d} id={"c_" + String(c.id)} class="audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+
+<circle cx={start.x} cy={start.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
+<circle cx={start.x} cy={start.y} r="2.2" fill="#090909" class="pointer-events-none" />
+<circle cx={end.x} cy={end.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
+<circle cx={end.x} cy={end.y} r="2.2" fill="#090909" class="pointer-events-none" />
 
 <g class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
 <circle cx={(start.x+end.x)/2} cy={(start.y+end.y)/2} r="14" fill="#ef4444" class="drop-shadow-md" />
@@ -235,15 +245,22 @@ const coords = getJackCoords(node, false, port);
 return (
 <div 
 key={"in-" + port}
-class="absolute right-full mr-1 w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
-style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
+class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
+style={{ left: String(coords.x - node.x) + "px", top: String(coords.y - node.y) + "px", transform: "translate(-50%, -50%)" }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
 title={"Patch In: " + port.toUpperCase()}
 >
-<div class="w-4 h-6 bg-gradient-to-r from-zinc-400 to-zinc-600 rounded-sm border border-zinc-700 shadow-[2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
-<div class="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
-</div>
-{ports["in"].length > 1 && <span class="absolute -left-6 text-[10px] font-black text-white/50">{port.toUpperCase()}</span>}
+<svg width="28" height="28" viewBox="0 0 28 28" class="jack-svg">
+<circle cx="14" cy="14" r="13.5" fill="#0c0c0c" stroke="#000" style={{ "stroke-width": 0.5 }}/>
+<circle cx="14" cy="14" r="11.5" fill="url(#jack-metal)"/>
+<circle cx="14" cy="14" r="8.5" fill="#111"/>
+<circle cx="14" cy="14" r="6.8" fill="#1e1e1e" stroke="#3a3a3a" style={{ "stroke-width": 0.5 }}/>
+<circle cx="14" cy="14" r="4.8" fill="url(#jack-socket)"/>
+<circle cx="14" cy="14" r="2" fill="#030303"/>
+<circle cx="14" cy="14" r="3.8" fill="none" stroke="#666" style={{ "stroke-width": 0.6, opacity: 0.4 }}/>
+<path d="M 7 9 A 8.5 8.5 0 0 1 15 5.5" stroke="rgba(255,255,255,0.28)" style={{ "stroke-width": 1.5, "stroke-linecap": "round" }} fill="none"/>
+</svg>
+{ports["in"].length > 1 && <span class="jack-label">{port.toUpperCase()}</span>}
 </div>
 );
 })}
@@ -254,15 +271,22 @@ const coords = getJackCoords(node, true, port);
 return (
 <div 
 key={"out-" + port}
-class="absolute left-full ml-1 w-8 h-16 bg-transparent z-10 cursor-crosshair hover:scale-110 transition-transform flex items-center justify-center group"
-style={{ top: String(coords.y - node.y) + "px", transform: "translateY(-50%)" }}
+class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
+style={{ left: String(coords.x - node.x) + "px", top: String(coords.y - node.y) + "px", transform: "translate(-50%, -50%)" }}
 onPointerDown={(e) => startWire(e, node.id, port)}
 title={"Drag out from: " + port.toUpperCase()}
 >
-<div class="w-4 h-6 bg-gradient-to-r from-zinc-600 to-zinc-400 rounded-sm border border-zinc-700 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:brightness-150">
-<div class="w-2 h-4 bg-black rounded-sm shadow-inner"></div>
-</div>
-{ports["out"].length > 1 && <span class="absolute -right-10 text-[10px] font-black text-white/50">{port.toUpperCase()}</span>}
+<svg width="28" height="28" viewBox="0 0 28 28" class="jack-svg">
+<circle cx="14" cy="14" r="13.5" fill="#0c0c0c" stroke="#000" style={{ "stroke-width": 0.5 }}/>
+<circle cx="14" cy="14" r="11.5" fill="url(#jack-metal)"/>
+<circle cx="14" cy="14" r="8.5" fill="#111"/>
+<circle cx="14" cy="14" r="6.8" fill="#1e1e1e" stroke="#3a3a3a" style={{ "stroke-width": 0.5 }}/>
+<circle cx="14" cy="14" r="4.8" fill="url(#jack-socket)"/>
+<circle cx="14" cy="14" r="2" fill="#030303"/>
+<circle cx="14" cy="14" r="3.8" fill="none" stroke="#666" style={{ "stroke-width": 0.6, opacity: 0.4 }}/>
+<path d="M 7 9 A 8.5 8.5 0 0 1 15 5.5" stroke="rgba(255,255,255,0.28)" style={{ "stroke-width": 1.5, "stroke-linecap": "round" }} fill="none"/>
+</svg>
+{ports["out"].length > 1 && <span class="jack-label">{port.toUpperCase()}</span>}
 </div>
 );
 })}

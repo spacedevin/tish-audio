@@ -3,6 +3,17 @@
 //! `cpal::Stream` is not `Send` on macOS, so it cannot live in `tauri::State`. The stream is owned
 //! on a dedicated thread; we only keep stop-channel + join handle in state.
 
+// In recent Rust builds, log_safe! panics when stderr is closed (e.g. packaged macOS app).
+// Use this instead: discards the I/O error so the app never aborts from a log line.
+macro_rules! log_safe {
+    ($($arg:tt)*) => {
+        let _ = std::io::Write::write_fmt(
+            &mut std::io::stderr(),
+            format_args!("{}\n", format_args!($($arg)*)),
+        );
+    };
+}
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamError, StreamConfig, SupportedStreamConfig};
 use serde::{Deserialize, Serialize};
@@ -78,7 +89,7 @@ fn parse_native_index(device_id: &str) -> Option<usize> {
 }
 
 fn log_cpal_stream_error(e: StreamError) {
-    eprintln!(
+    log_safe!(
         "[ToneFrame:native-audio] cpal stream error (mic permission denied, device unplugged, or driver): {:?}",
         e
     );
@@ -102,13 +113,13 @@ fn push_mono_emit_chunks(
             samples: chunk,
         };
         if !logged_first_emit.swap(true, Ordering::Relaxed) {
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] first PCM chunk emitted ({} samples @ {} Hz, device_id={})",
                 CHUNK_SAMPLES, sample_rate, device_id
             );
         }
         if let Err(e) = app.emit("native-audio-chunk", payload) {
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] emit(native-audio-chunk) failed — is the webview listening? IPC/event: {}",
                 e
             );
@@ -132,7 +143,7 @@ pub fn list_audio_inputs() -> Result<Vec<ListedInput>, String> {
         Ok(iter) => iter,
         Err(e) => {
             let msg = e.to_string();
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] list_audio_inputs: input_devices() failed — {} (on macOS: microphone entitlement + Info.plist NSMicrophoneUsageDescription; allow app in System Settings → Privacy)",
                 msg
             );
@@ -142,7 +153,7 @@ pub fn list_audio_inputs() -> Result<Vec<ListedInput>, String> {
     for (i, device) in input_iter.enumerate() {
         let name = device.name().map_err(|e| {
             let msg = e.to_string();
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] list_audio_inputs: device.name() failed for index {}: {}",
                 i, msg
             );
@@ -154,12 +165,12 @@ pub fn list_audio_inputs() -> Result<Vec<ListedInput>, String> {
         });
     }
     if out.is_empty() {
-        eprintln!(
+        log_safe!(
             "[ToneFrame:native-audio] list_audio_inputs: host returned zero input devices (empty enumeration — often permission or no hardware)"
         );
         return Err("no audio input devices found".into());
     }
-    eprintln!(
+    log_safe!(
         "[ToneFrame:native-audio] list_audio_inputs: ok ({} devices)",
         out.len()
     );
@@ -567,13 +578,13 @@ fn build_stream_for_format(
 
     stream.play().map_err(|e| {
         let msg = e.to_string();
-        eprintln!(
+        log_safe!(
             "[ToneFrame:native-audio] stream.play() failed — {} (device may be in use or access denied)",
             msg
         );
         msg
     })?;
-    eprintln!(
+    log_safe!(
         "[ToneFrame:native-audio] capture stream running (sample_rate={}, format={:?})",
         sample_rate, format
     );
@@ -592,7 +603,7 @@ fn run_capture_thread(
     let device = match nth_input_device(idx) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] run_capture_thread: nth_input_device failed: {}",
                 e
             );
@@ -604,7 +615,7 @@ fn run_capture_thread(
         Ok(c) => c,
         Err(e) => {
             let msg = format!("default_input_config: {}", e);
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] run_capture_thread: {} (often permission or invalid device)",
                 msg
             );
@@ -615,7 +626,7 @@ fn run_capture_thread(
     let (stream, sample_rate) = match build_stream_for_format(&device, supported, app, device_id) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] run_capture_thread: build_stream_for_format failed: {}",
                 e
             );
@@ -654,7 +665,7 @@ pub fn start_native_input(
     let sample_rate = match ready_rx.recv() {
         Ok(Ok(sr)) => sr,
         Ok(Err(e)) => {
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] start_native_input: capture thread reported error: {}",
                 e
             );
@@ -662,7 +673,7 @@ pub fn start_native_input(
             return Err(e);
         }
         Err(_) => {
-            eprintln!(
+            log_safe!(
                 "[ToneFrame:native-audio] start_native_input: ready channel closed before capture reported status"
             );
             let _ = join.join();
@@ -675,7 +686,7 @@ pub fn start_native_input(
     let mut g = ctrl.inner.lock().expect("audio input mutex poisoned");
     *g = Some((stop_tx, join));
 
-    eprintln!(
+    log_safe!(
         "[ToneFrame:native-audio] start_native_input: ok device_id={} sample_rate={}",
         device_id, sample_rate
     );
