@@ -103,18 +103,6 @@ if (ad <= SNAP_PEER_PX && ad < bestDy) { bestDy = ad; ny = ry + d; }
 return { x: Math.round(nx), y: Math.round(ny) };
 };
 
-const applyDraftWirePaths = (boardEl, d) => {
-if (!boardEl) return;
-const draftRoot = boardEl.querySelector("#tf_draft_cable");
-if (!draftRoot) return;
-const paths = draftRoot.querySelectorAll("path");
-let pi = 0;
-while (pi < paths.length) {
-paths[pi].setAttribute("d", d);
-pi = pi + 1;
-}
-};
-
 const applyPlacedCablePaths = (boardEl, connId, d) => {
 if (!boardEl) return;
 const g = boardEl.querySelector("[id=\"tf_placed_" + String(connId) + "\"]");
@@ -174,15 +162,38 @@ let patchActive = props.patchActive !== undefined && props.patchActive !== null 
 
   const boardRef = useRef(null);
 const dragLiveRef = useRef(null);
+const wireFromNodeRef = useRef(null);
+const wireMouseRef = useRef({ x: 0, y: 0 });
+const wireDraftPathsRef = useRef(null);
+const wireDraftRafRef = useRef(null);
+const wiringSnapRef = useRef(null);
 let [wiring, setWiring] = useState(null);
+
+const cancelWireDraftRaf = () => {
+if (wireDraftRafRef.current !== null && typeof cancelAnimationFrame !== "undefined") {
+cancelAnimationFrame(wireDraftRafRef.current);
+}
+wireDraftRafRef.current = null;
+};
+
+const resetWireDraftDomCache = () => {
+cancelWireDraftRaf();
+wireDraftPathsRef.current = null;
+wireFromNodeRef.current = null;
+};
 
 const grabCable = (e, conn) => {
 e.stopPropagation();
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
+const fromN = nodes.find(n => n.id === conn.from);
+wireFromNodeRef.current = fromN;
+wireMouseRef.current.x = e.clientX - rect.left;
+wireMouseRef.current.y = e.clientY - rect.top;
+wireDraftPathsRef.current = null;
 runBatched(() => {
 removeConnection(conn.id);
-setWiring({ fromId: conn.from, fromPort: conn.fromPort, x: e.clientX - rect.left, y: e.clientY - rect.top });
+setWiring({ fromId: conn.from, fromPort: conn.fromPort });
 });
 };
 
@@ -192,6 +203,7 @@ setWiring(prev => {
 if (prev && prev.fromId !== toNodeId) {
 addConnection(prev.fromId, prev.fromPort, toNodeId, toPortId);
 }
+resetWireDraftDomCache();
 return null;
 });
 };
@@ -200,7 +212,12 @@ const startWire = (e, nodeId, portId) => {
 e.stopPropagation();
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
-setWiring({ fromId: nodeId, fromPort: portId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+const fromN = nodes.find(n => n.id === nodeId);
+wireFromNodeRef.current = fromN;
+wireMouseRef.current.x = e.clientX - rect.left;
+wireMouseRef.current.y = e.clientY - rect.top;
+wireDraftPathsRef.current = null;
+setWiring({ fromId: nodeId, fromPort: portId });
 };
 
 const startDragNode = (e, node) => {
@@ -264,6 +281,8 @@ return { nodeMap: m, cableBlocks: cableBlocks };
 const nodeMap = graphMemo.nodeMap;
 const cableBlocks = graphMemo.cableBlocks;
 
+wiringSnapRef.current = wiring;
+
 const handlePointerMove = (e) => {
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
@@ -311,12 +330,34 @@ applyPlacedCablePaths(boardRef.current, c.id, d);
 }
 }
 } else if (wiring) {
-const w = { ...wiring, x: ex, y: ey };
-const fromNode = nodes.find(n => n.id === wiring.fromId);
-if (fromNode && boardRef.current) {
-const d = draftWireD(fromNode, w);
-applyDraftWirePaths(boardRef.current, d);
+wireMouseRef.current.x = ex;
+wireMouseRef.current.y = ey;
+if (wireDraftRafRef.current !== null) return;
+wireDraftRafRef.current = requestAnimationFrame(() => {
+wireDraftRafRef.current = null;
+const wr = wiringSnapRef.current;
+if (!wr) return;
+const fromNode = wireFromNodeRef.current;
+const board = boardRef.current;
+if (!fromNode || !board) return;
+let paths = wireDraftPathsRef.current;
+if (!paths || paths.length === 0 || (paths[0] && paths[0].isConnected === false)) {
+const root = board.querySelector("#tf_draft_cable");
+if (!root) return;
+const nl = root.querySelectorAll("path");
+paths = [];
+let pi = 0;
+while (pi < nl.length) {
+paths.push(nl[pi]);
+pi = pi + 1;
 }
+wireDraftPathsRef.current = paths;
+}
+const wm = wireMouseRef.current;
+const wModel = { fromId: wr.fromId, fromPort: wr.fromPort, x: wm.x, y: wm.y };
+const d = draftWireD(fromNode, wModel);
+applyDToPathList(paths, d);
+});
 }
 };
 
@@ -334,15 +375,18 @@ dlv.el.style.transform = "translate(" + String(fx) + "px, " + String(fy) + "px)"
 dlv.el.style.willChange = "";
 dragLiveRef.current = null;
 }
+resetWireDraftDomCache();
 setWiring(null);
 if (onAudioUiBump) onAudioUiBump();
 };
 
 let draftCableGroup = null;
 if (wiring) {
-const fromNode = nodes.find(n => n.id === wiring.fromId);
-if (fromNode) {
-const d = draftWireD(fromNode, wiring);
+const fromNode = wireFromNodeRef.current ? wireFromNodeRef.current : nodes.find(n => n.id === wiring.fromId);
+const wm = wireMouseRef.current;
+if (fromNode && wm) {
+const wModel = { fromId: wiring.fromId, fromPort: wiring.fromPort, x: wm.x, y: wm.y };
+const d = draftWireD(fromNode, wModel);
 draftCableGroup = (
 <g id="tf_draft_cable">
 <path d={d} filter="url(#cable-shadow)" class="transition-colors duration-150" style={{ fill: 'none', stroke: '#6b21a8', "stroke-width": 10, "stroke-linecap": 'round', opacity: 0.7 }} />
