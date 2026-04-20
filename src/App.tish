@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, h } from "lattish"
+import { useState, useEffect, useLayoutEffect, useRef, h, runBatched, useMemo } from "lattish"
 import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2 } from "./icons.tish"
 import { PEDAL_LIBRARY } from "./modules/registry.tish"
 import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
@@ -365,6 +365,7 @@ pitchAnalyserRef.current = pitchA;
 }
 
 const newInId = "sys_in_" + deviceId.split(":").join("_").slice(0, 14);
+runBatched(() => {
 setNodes(prev => [...prev, {
 id: newInId,
 type: 'SYS_IN',
@@ -382,6 +383,7 @@ return [...prev, { id: Math.random().toString(36).substr(2, 9), from: newInId, f
 
 setAudioReady(true);
 setShowDeviceMenu(false);
+});
 log("connectDevice: done — SYS_IN added, audioReady=true");
 } catch (err) {
 console.error("[TishAudio:input] connectDevice failed:", err);
@@ -421,10 +423,12 @@ if (audioCtxRef.current) audioCtxRef.current.close();
 useEffect(() => {
 if (!audioReady) return;
 let frame = 0;
+let cableVisTick = 0;
 const loop = () => {
 try { tickSmartGates(nodeAudioMapRef, nodesRef.current); } catch (eTick) { console.error(eTick); }
 
-if (nodeAudioMapRef.current) {
+cableVisTick = cableVisTick + 1;
+if (nodeAudioMapRef.current && cableVisTick % 2 === 0) {
   const els = document.querySelectorAll('.audio-cable-path');
   const SILENCE_DB = -58;
   let i = 0;
@@ -532,8 +536,10 @@ sourcesRef.current = nextSources
 }
 
 const applyRemove = () => {
+runBatched(() => {
 setNodes(prev => prev.filter(n => n.id !== id));
 setConnections(prev => prev.filter(c => c.from !== id && c.to !== id));
+});
 };
 if (typeof queueMicrotask === "function") {
 queueMicrotask(applyRemove);
@@ -543,8 +549,10 @@ setTimeout(applyRemove, 0);
 };
 
 const clearBoard = () => {
+runBatched(() => {
 setNodes(prev => prev.filter(n => n.isSystem));
 setConnections([]);
+});
 };
 
 const updateNodeParam = (id, param, value) => {
@@ -575,6 +583,41 @@ setConnections(prev => prev.filter(c => c.id !== id));
 
 // Lattish uses one global hook stack per App() flush; NodeGraphView runs O(nodes) FC hooks.
 // Keep Patch (NodeGraphView) after Jam / Arcade / Tuning / Chords in <main> so adding SYS_IN never shifts their useState slots.
+
+const tabBar = useMemo(() => (
+<div class="flex items-center gap-1 sm:gap-2 flex-wrap justify-center">
+{[
+{ id: 'pedalboard', icon: Sliders, label: 'Patch' },
+{ id: 'jam', icon: Play, label: 'Jam' },
+{ id: 'game', icon: Gamepad2, label: 'Arcade' },
+{ id: 'tuning', icon: TuningFork, label: 'Tuning' },
+{ id: 'chords', icon: Music2, label: 'Chords' }
+].map(tab => (
+<button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-950")}>
+{tab.icon({ class: "w-4 h-4 sm:w-5 sm:h-5" })} {tab.label}
+</button>
+))}
+</div>
+), [activeTab]);
+
+const patchBoardTab = useMemo(() => (
+<div class={activeTab === 'pedalboard' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
+<NodeGraphView 
+nodes={nodes} 
+connections={connections}
+nodeAudioMapRef={nodeAudioMapRef}
+audioGraphTick={nodeGraphMeterTick}
+patchActive={activeTab === 'pedalboard'}
+onAudioUiBump={() => setAudioGraphTick(t => t + 1)}
+removeNode={removeNode} 
+updateNodeParam={updateNodeParam} 
+updateNodePos={updateNodePos}
+toggleNodeBypass={toggleNodeBypass}
+addConnection={addConnection}
+removeConnection={removeConnection}
+/>
+</div>
+), [activeTab, nodes, connections, nodeGraphMeterTick, removeNode, updateNodeParam, updateNodePos, toggleNodeBypass, addConnection, removeConnection]);
 
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans">
@@ -653,19 +696,7 @@ title="Preview all modules in a chain (layout only)"
 ) : null}
 </div>
 
-<div class="flex items-center gap-1 sm:gap-2 flex-wrap justify-center">
-{[
-{ id: 'pedalboard', icon: Sliders, label: 'Patch' },
-{ id: 'jam', icon: Play, label: 'Jam' },
-{ id: 'game', icon: Gamepad2, label: 'Arcade' },
-{ id: 'tuning', icon: TuningFork, label: 'Tuning' },
-{ id: 'chords', icon: Music2, label: 'Chords' }
-].map(tab => (
-<button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-950")}>
-{tab.icon({ class: "w-4 h-4 sm:w-5 sm:h-5" })} {tab.label}
-</button>
-))}
-</div>
+{tabBar}
 
 <HeaderMeterReadout inactive={!audioReady} />
 
@@ -719,21 +750,7 @@ audioReady={audioReady}
 audioCtx={audioCtxRef.current}
 />
 </div>
-<div class={activeTab === 'pedalboard' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
-<NodeGraphView 
-nodes={nodes} 
-connections={connections}
-nodeAudioMapRef={nodeAudioMapRef}
-audioGraphTick={nodeGraphMeterTick}
-onAudioUiBump={() => setAudioGraphTick(t => t + 1)}
-removeNode={removeNode} 
-updateNodeParam={updateNodeParam} 
-updateNodePos={updateNodePos}
-toggleNodeBypass={toggleNodeBypass}
-addConnection={addConnection}
-removeConnection={removeConnection}
-/>
-</div>
+{patchBoardTab}
 </main>
 </AudioMeterProvider>
 

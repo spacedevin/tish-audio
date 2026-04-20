@@ -3,7 +3,7 @@
 // Reordering nodes or changing the type at a given index shifts hook slots for everything after that point until Lattish gains per-FC stacks.
 // App-level fixes (stable HeaderMeterReadout, always-mounted tab roots) keep the prefix before this subtree stable.
 
-import { h, useState, useRef } from "lattish"
+import { h, useState, useRef, useMemo, runBatched } from "lattish"
 import { X } from "../icons.tish"
 import { getNodePorts } from "../modules/registry.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
@@ -31,6 +31,42 @@ else if (node.type === 'graphic_eq') { w = 640; h = 216; }
 else if (node.type === 'vu_meter') { w = 120; h = 200; }
 else if (node.type === 'console_mixer') { w = 640; h = 216; }
 return { w, h };
+};
+
+const getJackCoords = (node, isOutput, portId) => {
+const sz = getNodeSize(node);
+let w = sz.w; let h = sz.h;
+
+const ports = getNodePorts(node)[isOutput ? 'out' : 'in'];
+const portIdx = Math.max(0, ports.indexOf(portId));
+const totalPorts = ports.length;
+
+const yOffset = ((portIdx + 1) * h) / (totalPorts + 1);
+
+return {
+x: node.x + (isOutput ? w + JACK_PROTRUDE : -JACK_PROTRUDE),
+y: node.y + yOffset
+};
+};
+
+const placedCableD = (fromNode, toNode, c, livePos) => {
+let fromN = fromNode;
+let tn = toNode;
+if (livePos) {
+if (livePos.id === fromNode.id) { fromN = { ...fromNode, x: livePos.x, y: livePos.y }; }
+if (livePos.id === toNode.id) { tn = { ...toNode, x: livePos.x, y: livePos.y }; }
+}
+const start = getJackCoords(fromN, true, c.fromPort);
+const end = getJackCoords(tn, false, c.toPort);
+const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
+return "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
+};
+
+const draftWireD = (fromNode, wiring) => {
+const start = getJackCoords(fromNode, true, wiring.fromPort);
+const end = { x: wiring.x, y: wiring.y };
+const dist = Math.abs(end.x - start.x) * 0.6;
+return "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
 };
 
 const snapPosToPeers = (rx, ry, dragId, dragW, dragH, allNodes) => {
@@ -67,6 +103,61 @@ if (ad <= SNAP_PEER_PX && ad < bestDy) { bestDy = ad; ny = ry + d; }
 return { x: Math.round(nx), y: Math.round(ny) };
 };
 
+const applyDraftWirePaths = (boardEl, d) => {
+if (!boardEl) return;
+const draftRoot = boardEl.querySelector("#tf_draft_cable");
+if (!draftRoot) return;
+const paths = draftRoot.querySelectorAll("path");
+let pi = 0;
+while (pi < paths.length) {
+paths[pi].setAttribute("d", d);
+pi = pi + 1;
+}
+};
+
+const applyPlacedCablePaths = (boardEl, connId, d) => {
+if (!boardEl) return;
+const g = boardEl.querySelector("[id=\"tf_placed_" + String(connId) + "\"]");
+if (!g) return;
+const paths = g.querySelectorAll("path");
+let pi = 0;
+while (pi < paths.length) {
+paths[pi].setAttribute("d", d);
+pi = pi + 1;
+}
+};
+
+const applyDToPathList = (pathList, d) => {
+if (!pathList) return;
+let pi = 0;
+while (pi < pathList.length) {
+pathList[pi].setAttribute("d", d);
+pi = pi + 1;
+}
+};
+
+const collectIncidentCablePathRefs = (boardEl, connections, nodeId) => {
+const out = [];
+if (!boardEl) return out;
+let ci = 0;
+while (ci < connections.length) {
+const c = connections[ci];
+ci = ci + 1;
+if (c.from !== nodeId && c.to !== nodeId) continue;
+const g = boardEl.querySelector("[id=\"tf_placed_" + String(c.id) + "\"]");
+if (!g) continue;
+const nl = g.querySelectorAll("path");
+const paths = [];
+let pi = 0;
+while (pi < nl.length) {
+paths.push(nl[pi]);
+pi = pi + 1;
+}
+out.push({ c: c, paths: paths });
+}
+return out;
+};
+
 export fn NodeGraphView(props) {
 let nodes = props.nodes;
 let connections = props.connections;
@@ -79,73 +170,20 @@ let removeConnection = props.removeConnection;
 let nodeAudioMapRef = props.nodeAudioMapRef;
 let audioGraphTick = props.audioGraphTick !== undefined && props.audioGraphTick !== null ? props.audioGraphTick : 0;
   let onAudioUiBump = props.onAudioUiBump;
+let patchActive = props.patchActive !== undefined && props.patchActive !== null ? props.patchActive : true;
 
   const boardRef = useRef(null);
+const dragLiveRef = useRef(null);
 let [wiring, setWiring] = useState(null);
-let [draggingNode, setDraggingNode] = useState(null);
 
-const getJackCoords = (node, isOutput, portId = 'main') => {
-const sz = getNodeSize(node);
-let w = sz.w; let h = sz.h;
-
-const ports = getNodePorts(node)[isOutput ? 'out' : 'in'];
-const portIdx = Math.max(0, ports.indexOf(portId));
-const totalPorts = ports.length;
-
-const yOffset = ((portIdx + 1) * h) / (totalPorts + 1);
-
-return {
-x: node.x + (isOutput ? w + JACK_PROTRUDE : -JACK_PROTRUDE),
-y: node.y + yOffset
-};
-};
-
-const handlePointerMove = (e) => {
-if (!boardRef.current) return;
-const rect = boardRef.current.getBoundingClientRect();
-const ex = e.clientX - rect.left;
-const ey = e.clientY - rect.top;
-
-if (draggingNode) {
-const dx = ex - draggingNode.startMouseX;
-const dy = ey - draggingNode.startMouseY;
-const rawX = draggingNode.startNodeX + dx;
-const rawY = draggingNode.startNodeY + dy;
-const dragNode = nodes.find(n => n.id === draggingNode.id);
-if (dragNode) {
-const dsz = getNodeSize(dragNode);
-const snapped = snapPosToPeers(rawX, rawY, draggingNode.id, dsz.w, dsz.h, nodes);
-updateNodePos(draggingNode.id, snapped.x, snapped.y);
-} else {
-updateNodePos(draggingNode.id, Math.round(rawX), Math.round(rawY));
-}
-} else if (wiring) {
-setWiring({ ...wiring, x: ex, y: ey });
-}
-};
-
-const handlePointerUp = () => {
-if (wiring === null && draggingNode === null) {
-if (onAudioUiBump) onAudioUiBump();
-return;
-}
-setWiring(null);
-setDraggingNode(null);
-if (onAudioUiBump) onAudioUiBump();
-};
-
-const startDragNode = (e, node) => {
+const grabCable = (e, conn) => {
 e.stopPropagation();
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
-setDraggingNode({ id: node.id, startMouseX: e.clientX - rect.left, startMouseY: e.clientY - rect.top, startNodeX: node.x, startNodeY: node.y });
-};
-
-const startWire = (e, nodeId, portId) => {
-e.stopPropagation();
-if (!boardRef.current) return;
-const rect = boardRef.current.getBoundingClientRect();
-setWiring({ fromId: nodeId, fromPort: portId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+runBatched(() => {
+removeConnection(conn.id);
+setWiring({ fromId: conn.from, fromPort: conn.fromPort, x: e.clientX - rect.left, y: e.clientY - rect.top });
+});
 };
 
 const dropWire = (e, toNodeId, toPortId) => {
@@ -158,29 +196,160 @@ return null;
 });
 };
 
-const grabCable = (e, conn) => {
+const startWire = (e, nodeId, portId) => {
 e.stopPropagation();
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
-removeConnection(conn.id);
-setWiring({ fromId: conn.from, fromPort: conn.fromPort, x: e.clientX - rect.left, y: e.clientY - rect.top });
+setWiring({ fromId: nodeId, fromPort: portId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+};
+
+const startDragNode = (e, node) => {
+e.stopPropagation();
+if (!boardRef.current) return;
+const rect = boardRef.current.getBoundingClientRect();
+const el = e.currentTarget.closest(".tf-node-root");
+if (!el) return;
+el.style.willChange = "transform";
+const cablePathRefs = collectIncidentCablePathRefs(boardRef.current, connections, node.id);
+dragLiveRef.current = {
+id: node.id,
+dragNode: node,
+cablePathRefs: cablePathRefs,
+startMouseX: e.clientX - rect.left,
+startMouseY: e.clientY - rect.top,
+startNodeX: node.x,
+startNodeY: node.y,
+el: el,
+lastSnapX: node.x,
+lastSnapY: node.y
+};
+};
+
+const graphMemo = useMemo(() => {
+const m = {};
+let i = 0;
+while (i < nodes.length) {
+m[nodes[i].id] = nodes[i];
+i = i + 1;
+}
+const cableBlocks = connections.filter(c => m[c.from] && m[c.to]).map(c => {
+const fromNode = m[c.from];
+const toNode = m[c.to];
+const start = getJackCoords(fromNode, true, c.fromPort);
+const end = getJackCoords(toNode, false, c.toPort);
+const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
+const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
+return (
+<g key={c.id} class="pointer-events-auto group tf-placed-conn" id={"tf_placed_" + String(c.id)}>
+<path d={d} class="cursor-grab active:cursor-grabbing pointer-events-auto" onPointerDown={(e) => grabCable(e, c)} style={{ fill: 'none', stroke: 'transparent', "stroke-width": 24 }} />
+<path d={d} transform="translate(0,6)" class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.75)', "stroke-width": 16 }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#0d0d0d', "stroke-width": 12, "stroke-linecap": 'round' }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#2a2a2a', "stroke-width": 7, "stroke-linecap": 'round' }} />
+<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#141414', "stroke-width": 5, "stroke-linecap": 'round' }} />
+<path d={d} id={"c_" + String(c.id)} class="audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+<circle cx={start.x} cy={start.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
+<circle cx={start.x} cy={start.y} r="2.2" fill="#090909" class="pointer-events-none" />
+<circle cx={end.x} cy={end.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
+<circle cx={end.x} cy={end.y} r="2.2" fill="#090909" class="pointer-events-none" />
+<g class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
+<circle cx={(start.x+end.x)/2} cy={(start.y+end.y)/2} r="14" fill="#ef4444" class="drop-shadow-md" />
+<text x={(start.x+end.x)/2} y={(start.y+end.y)/2 + 4} style={{ fill: 'white', fontSize: '14px', fontWeight: 'bold', "text-anchor": 'middle' }}>X</text>
+</g>
+</g>
+);
+});
+return { nodeMap: m, cableBlocks: cableBlocks };
+}, [nodes, connections]);
+
+const nodeMap = graphMemo.nodeMap;
+const cableBlocks = graphMemo.cableBlocks;
+
+const handlePointerMove = (e) => {
+if (!boardRef.current) return;
+const rect = boardRef.current.getBoundingClientRect();
+const ex = e.clientX - rect.left;
+const ey = e.clientY - rect.top;
+
+const dlv = dragLiveRef.current;
+if (dlv) {
+const dx = ex - dlv.startMouseX;
+const dy = ey - dlv.startMouseY;
+const rawX = dlv.startNodeX + dx;
+const rawY = dlv.startNodeY + dy;
+const dragNode = dlv.dragNode ? dlv.dragNode : nodes.find(n => n.id === dlv.id);
+if (dragNode && dlv.el) {
+const dsz = getNodeSize(dragNode);
+const snapped = snapPosToPeers(rawX, rawY, dlv.id, dsz.w, dsz.h, nodes);
+dlv.lastSnapX = snapped.x;
+dlv.lastSnapY = snapped.y;
+dlv.el.style.transform = "translate(" + String(snapped.x) + "px, " + String(snapped.y) + "px)";
+const live = { id: dlv.id, x: snapped.x, y: snapped.y };
+const cpr = dlv.cablePathRefs;
+if (cpr && cpr.length > 0) {
+let ri = 0;
+while (ri < cpr.length) {
+const row = cpr[ri];
+ri = ri + 1;
+const fromN = nodeMap[row.c.from];
+const toN = nodeMap[row.c.to];
+if (!fromN || !toN) continue;
+const d = placedCableD(fromN, toN, row.c, live);
+applyDToPathList(row.paths, d);
+}
+} else {
+let ci = 0;
+while (ci < connections.length) {
+const c = connections[ci];
+ci = ci + 1;
+if (c.from !== dlv.id && c.to !== dlv.id) continue;
+const fromN = nodeMap[c.from];
+const toN = nodeMap[c.to];
+if (!fromN || !toN) continue;
+const d = placedCableD(fromN, toN, c, live);
+applyPlacedCablePaths(boardRef.current, c.id, d);
+}
+}
+}
+} else if (wiring) {
+const w = { ...wiring, x: ex, y: ey };
+const fromNode = nodes.find(n => n.id === wiring.fromId);
+if (fromNode && boardRef.current) {
+const d = draftWireD(fromNode, w);
+applyDraftWirePaths(boardRef.current, d);
+}
+}
+};
+
+const handlePointerUp = () => {
+const dlv = dragLiveRef.current;
+if (wiring === null && dlv === null) {
+if (onAudioUiBump) onAudioUiBump();
+return;
+}
+if (dlv && dlv.el) {
+const fx = dlv.lastSnapX !== undefined && dlv.lastSnapX !== null ? dlv.lastSnapX : dlv.startNodeX;
+const fy = dlv.lastSnapY !== undefined && dlv.lastSnapY !== null ? dlv.lastSnapY : dlv.startNodeY;
+updateNodePos(dlv.id, fx, fy);
+dlv.el.style.transform = "translate(" + String(fx) + "px, " + String(fy) + "px)";
+dlv.el.style.willChange = "";
+dragLiveRef.current = null;
+}
+setWiring(null);
+if (onAudioUiBump) onAudioUiBump();
 };
 
 let draftCableGroup = null;
 if (wiring) {
 const fromNode = nodes.find(n => n.id === wiring.fromId);
 if (fromNode) {
-const start = getJackCoords(fromNode, true, wiring.fromPort);
-const end = { x: wiring.x, y: wiring.y };
-const dist = Math.abs(end.x - start.x) * 0.6;
-const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
+const d = draftWireD(fromNode, wiring);
 draftCableGroup = (
-<g>
+<g id="tf_draft_cable">
 <path d={d} filter="url(#cable-shadow)" class="transition-colors duration-150" style={{ fill: 'none', stroke: '#6b21a8', "stroke-width": 10, "stroke-linecap": 'round', opacity: 0.7 }} />
 <path d={d} class="transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
 <path d={d} class="animate-dash-flow pointer-events-none" style={{ fill: 'none', stroke: '#ffffff', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
-<circle cx={start.x} cy={start.y} r="5" fill="#4c1d95" stroke="#a855f7" style={{ "stroke-width": 1 }} class="pointer-events-none" />
-<circle cx={start.x} cy={start.y} r="2" fill="#1a0a2e" class="pointer-events-none" />
+<circle cx={getJackCoords(fromNode, true, wiring.fromPort).x} cy={getJackCoords(fromNode, true, wiring.fromPort).y} r="5" fill="#4c1d95" stroke="#a855f7" style={{ "stroke-width": 1 }} class="pointer-events-none" />
+<circle cx={getJackCoords(fromNode, true, wiring.fromPort).x} cy={getJackCoords(fromNode, true, wiring.fromPort).y} r="2" fill="#1a0a2e" class="pointer-events-none" />
 </g>
 );
 }
@@ -195,58 +364,29 @@ onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
 onPointerLeave={(e) => { if (e.buttons === 0) handlePointerUp(); }}
 >
-<WebGLBackground />
+<WebGLBackground active={patchActive} />
 
 <svg xmlns="http://www.w3.org/2000/svg" class="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
 {draftCableGroup}
-
-{connections.filter(c => nodes.find(n => n.id === c.from) && nodes.find(n => n.id === c.to)).map(c => {
-const fromNode = nodes.find(n => n.id === c.from);
-const toNode = nodes.find(n => n.id === c.to);
-
-const start = getJackCoords(fromNode, true, c.fromPort);
-const end = getJackCoords(toNode, false, c.toPort);
-const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
-const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
-
-return (
-<g key={c.id} class="pointer-events-auto group">
-<path d={d} class="cursor-grab active:cursor-grabbing pointer-events-auto" onPointerDown={(e) => grabCable(e, c)} style={{ fill: 'none', stroke: 'transparent', "stroke-width": 24 }} />
-<path d={d} transform="translate(0,6)" class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.75)', "stroke-width": 16 }} />
-<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#0d0d0d', "stroke-width": 12, "stroke-linecap": 'round' }} />
-<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#2a2a2a', "stroke-width": 7, "stroke-linecap": 'round' }} />
-<path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#141414', "stroke-width": 5, "stroke-linecap": 'round' }} />
-
-<path d={d} id={"c_" + String(c.id)} class="audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
-
-<circle cx={start.x} cy={start.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
-<circle cx={start.x} cy={start.y} r="2.2" fill="#090909" class="pointer-events-none" />
-<circle cx={end.x} cy={end.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
-<circle cx={end.x} cy={end.y} r="2.2" fill="#090909" class="pointer-events-none" />
-
-<g class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto" onPointerDown={(e) => { e.stopPropagation(); removeConnection(c.id); }}>
-<circle cx={(start.x+end.x)/2} cy={(start.y+end.y)/2} r="14" fill="#ef4444" class="drop-shadow-md" />
-<text x={(start.x+end.x)/2} y={(start.y+end.y)/2 + 4} style={{ fill: 'white', fontSize: '14px', fontWeight: 'bold', "text-anchor": 'middle' }}>X</text>
-</g>
-</g>
-);
-})}
+{cableBlocks}
 </svg>
 
 {nodes.map(node => {
 const ports = getNodePorts(node);
 
 return (
-<div key={node.id} class="absolute z-20 pointer-events-auto" style={{ transform: "translate(" + String(node.x) + "px, " + String(node.y) + "px)" }}>
+<div key={node.id} class="tf-node-root absolute z-20 pointer-events-auto" style={{ transform: "translate(" + String(node.x) + "px, " + String(node.y) + "px)" }}>
 
 
 {node.type !== 'SYS_IN' && ports["in"].map(port => {
 const coords = getJackCoords(node, false, port);
+const leftPx = coords.x - node.x;
+const topPx = coords.y - node.y;
 return (
 <div 
 key={"in-" + port}
 class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
-style={{ left: String(coords.x - node.x) + "px", top: String(coords.y - node.y) + "px", transform: "translate(-50%, -50%)" }}
+style={{ left: String(leftPx) + "px", top: String(topPx) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
 title={"Patch In: " + port.toUpperCase()}
 >
@@ -268,11 +408,13 @@ title={"Patch In: " + port.toUpperCase()}
 
 {node.type !== 'SYS_OUT' && ports["out"].map(port => {
 const coords = getJackCoords(node, true, port);
+const leftPxOut = coords.x - node.x;
+const topPxOut = coords.y - node.y;
 return (
 <div 
 key={"out-" + port}
 class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
-style={{ left: String(coords.x - node.x) + "px", top: String(coords.y - node.y) + "px", transform: "translate(-50%, -50%)" }}
+style={{ left: String(leftPxOut) + "px", top: String(topPxOut) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerDown={(e) => startWire(e, node.id, port)}
 title={"Drag out from: " + port.toUpperCase()}
 >

@@ -2,19 +2,31 @@ import { useEffect, useRef, h } from "lattish"
 
 export fn LedMeter(props) { let analyser = props.analyser; let width = props.width ?? 6; let height = props.height ?? 96;
 let rev = props.rev;
+let compact = props.compact === true;
 const canvasRef = useRef(null);
+const ctxRef = useRef(null);
+const skipRef = useRef(0);
 
 useEffect(() => {
 if (!analyser) return;
 let animationId;
 const dataArray = new Float32Array(analyser.fftSize);
+const canvas = canvasRef.current;
+if (canvas) {
+ctxRef.current = canvas.getContext('2d');
+} else {
+ctxRef.current = null;
+}
 
 const draw = () => {
 animationId = requestAnimationFrame(draw);
 if (!analyser || !canvasRef.current) return;
-const canvas = canvasRef.current;
-const ctx2 = canvas.getContext('2d');
+const ctx2 = ctxRef.current;
 if (!ctx2) return;
+if (compact) {
+skipRef.current = skipRef.current + 1;
+if (skipRef.current % 2 === 1) return;
+}
 try {
 analyser.getFloatTimeDomainData(dataArray);
 } catch (err) {
@@ -49,8 +61,9 @@ ctx2.fillRect(0, i * segmentHeight, canvas.width, segmentHeight - gap);
 draw();
 return () => {
 if (animationId) cancelAnimationFrame(animationId);
+ctxRef.current = null;
 };
-}, [analyser, rev]);
+}, [analyser, compact]);
 
 return <canvas ref={canvasRef} width={width} height={height} class="rounded-[1px] bg-black border border-neutral-900 shadow-inner pointer-events-none" />;
 }
@@ -153,7 +166,7 @@ ref={dragSurfaceRef}
 onPointerDown={handlePointerDown}
 class="absolute inset-0 z-20 cursor-ns-resize touch-none"
 />
-<LedMeter analyser={analyser} width={ledW} height={ledH} rev={meterSync} />
+<LedMeter analyser={analyser} width={ledW} height={ledH} rev={meterSync} compact={rackSlot} />
 <div class={troughClass + " pointer-events-none"}>
 
 <div class="absolute w-8 h-full flex flex-col justify-between py-1 pointer-events-none opacity-30">

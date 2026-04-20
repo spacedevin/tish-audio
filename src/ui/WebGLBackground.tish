@@ -1,6 +1,7 @@
 import { useEffect, useRef, h } from "lattish"
 
-export fn WebGLBackground() {
+export fn WebGLBackground(props) {
+let active = props.active === undefined || props.active === null ? true : !!props.active;
 const canvasRef = useRef(null);
 
 useEffect(() => {
@@ -80,33 +81,50 @@ gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 const timeLocation = gl.getUniformLocation(program, "u_time");
 const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
 
-let animationId;
+let animationId = null;
 const startTime = performance.now();
-let lastBufW = 0;
-let lastBufH = 0;
 
-const render = () => {
+const resizeToCanvas = () => {
 const dw = Math.max(1, Math.round(canvas.clientWidth));
 const dh = Math.max(1, Math.round(canvas.clientHeight));
-if (dw !== lastBufW || dh !== lastBufH) {
-lastBufW = dw;
-lastBufH = dh;
+if (canvas.width !== dw || canvas.height !== dh) {
 canvas.width = dw;
 canvas.height = dh;
 gl.viewport(0, 0, dw, dh);
 }
+};
 
+const render = () => {
+if (!active) {
+animationId = null;
+return;
+}
+resizeToCanvas();
 gl.useProgram(program);
 gl.uniform2f(resolutionLocation, gl.canvas.width, gl.canvas.height);
 gl.uniform1f(timeLocation, (performance.now() - startTime) / 1000.0);
-
 gl.drawArrays(gl.TRIANGLES, 0, 6);
 animationId = requestAnimationFrame(render);
 };
 
+const ro = new ResizeObserver(() => {
+resizeToCanvas();
+});
+ro.observe(canvas);
+resizeToCanvas();
+
+if (active) {
 render();
-return () => cancelAnimationFrame(animationId);
-}, []);
+}
+
+return () => {
+ro.disconnect();
+if (animationId !== null) {
+cancelAnimationFrame(animationId);
+animationId = null;
+}
+};
+}, [active]);
 
 return <canvas ref={canvasRef} class="absolute inset-0 w-full h-full pointer-events-none opacity-30" />;
 }

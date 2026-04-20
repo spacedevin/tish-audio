@@ -186,6 +186,8 @@ const isBypassed = node.bypassed;
 const analysers = audioDataMap[node.id]?.analysers || {};
 const masterAnalyser = audioDataMap[node.id]?.analyser;
 const canvasRef = useRef(null);
+const meterSyncRef = useRef(meterSync);
+meterSyncRef.current = meterSync;
 
 useEffect(() => {
 const canvas = canvasRef.current;
@@ -222,7 +224,7 @@ x = x + (barWidth);
 };
 draw();
 return () => cancelAnimationFrame(animationId);
-}, [masterAnalyser, node.bypassed, meterSync]);
+}, [masterAnalyser, node.bypassed]);
 
 return (
 <div class={"relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-all duration-300 " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
