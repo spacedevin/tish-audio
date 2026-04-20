@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "identifier": "com.tish.audio",
   "build": {
-    "beforeDevCommand": "npm --prefix .. run build",
+    "beforeDevCommand": "npm --prefix .. run build && npm --prefix .. run dev",
     "beforeBuildCommand": "npm --prefix .. run build",
+    "devUrl": "http://localhost:8080",
     "frontendDist": "../../dist"
   },
   "app": {

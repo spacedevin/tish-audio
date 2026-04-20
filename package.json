@@ -6,8 +6,8 @@
   "scripts": {
     "build:css": "tailwindcss -c tish-tailwind/tailwind.config.cjs -i tish-tailwind/src/tailwind-input.css -o dist/assets/tish-tailwind.css --minify",
     "build:bridge": "npx esbuild src/ota/bridge.js --bundle --minify --outfile=dist/assets/ota-bridge.js",
-    "build": "mkdir -p dist/assets && npm run build:css && npm run build:bridge && tish build --target js src/main.tish -o dist/main && cp index.html dist/index.html",
-    "dev": "mkdir -p dist/assets && npm run build:css && npm run build:bridge && tish run --feature full dev-server.tish",
+    "build": "mkdir -p dist/assets && npm run build:css && npm run build:bridge && cp src/audio/nativeAudioIn.worklet.js dist/assets/native-audio-in.worklet.js && tish build --target js src/main.tish -o dist/main && cp index.html dist/index.html",
+    "dev": "mkdir -p dist/assets && npm run build:css && npm run build:bridge && cp src/audio/nativeAudioIn.worklet.js dist/assets/native-audio-in.worklet.js && tish run --feature full dev-server.tish",
     "desktop:dev": "npm --prefix desktop run dev",
     "desktop:build": "npm --prefix desktop run build"
   },

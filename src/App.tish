@@ -23,6 +23,7 @@ let [showModuleLibrary, setShowModuleLibrary] = useState(false);
 let [showModuleDebug, setShowModuleDebug] = useState(false);
 let [audioGraphTick, setAudioGraphTick] = useState(0);
 let [inputFlowBusy, setInputFlowBusy] = useState(false);
+let [micDenied, setMicDenied] = useState(false);
 
 // NODE GRAPH STATE
 let [nodes, setNodes] = useState([
@@ -79,10 +80,23 @@ setInputFlowBusy(false);
 return;
 }
 if (ota.ensureMicPermission) {
+let micGranted = false;
 try {
-await ota.ensureMicPermission();
-log("getDevices: ensureMicPermission invoke finished (macOS: also read terminal for [ToneFrame:mic-permission])", {});
-} catch (eWarm) { console.warn("[TishAudio:input] ensureMicPermission invoke failed:", eWarm); }
+micGranted = await ota.ensureMicPermission();
+log("getDevices: ensureMicPermission result", { micGranted });
+} catch (eMic) {
+const msg = eMic && eMic.message ? eMic.message : String(eMic);
+log("getDevices: ensureMicPermission denied/error", { msg });
+setInputFlowBusy(false);
+setMicDenied(true);
+return;
+}
+if (!micGranted) {
+setInputFlowBusy(false);
+setMicDenied(true);
+return;
+}
+setMicDenied(false);
 }
 if (!audioCtxRef.current) {
 audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
@@ -202,8 +216,6 @@ try { await nativeChunkUnlistenRef.current(); } catch (eU) { console.warn(eU); }
 nativeChunkUnlistenRef.current = null;
 }
 try { await ota.invoke("stop_native_input"); } catch (eStop0) {}
-const q = [];
-let readPos = 0;
 let pendingNativeUnlisten = null;
 if (nativeCaptureDiagRef.current.stallTimer != null) {
 clearTimeout(nativeCaptureDiagRef.current.stallTimer);
@@ -212,6 +224,32 @@ nativeCaptureDiagRef.current.stallTimer = null;
 nativeCaptureDiagRef.current.chunkEvents = 0;
 nativeCaptureDiagRef.current.totalSamples = 0;
 try {
+const workletHref = new URL("assets/native-audio-in.worklet.js", window.location.href).href;
+if (!ctx._nativeWorkletRegistered) {
+try {
+await ctx.audioWorklet.addModule(workletHref);
+ctx._nativeWorkletRegistered = true;
+} catch (eWm) {
+console.error("[TishAudio:input] audioWorklet.addModule failed:", eWm);
+alert("Could not load native audio worklet (check dist/assets/native-audio-in.worklet.js and CSP). " + (eWm && eWm.message ? eWm.message : String(eWm)));
+return;
+}
+}
+const workletNode = new AudioWorkletNode(ctx, "native-audio-in", {
+numberOfInputs: 0,
+numberOfOutputs: 1,
+outputChannelCount: [1]
+});
+workletNode.port.onmessage = (ev) => {
+const m = ev.data;
+if (m == null || m.type == null) return;
+if (m.type === "diagChunkMaxAbs") {
+log("connectDevice: diag native chunk maxAbs (worklet)", { maxAbs: m.maxAbs });
+}
+if (m.type === "diagFirstProcess") {
+log("connectDevice: diag first AudioWorklet process tick", {});
+}
+};
 pendingNativeUnlisten = await ota.listenNativeAudioChunk((payload) => {
 if (payload == null) return;
 let p = payload;
@@ -228,83 +266,37 @@ diag.chunkEvents = diag.chunkEvents + 1;
 diag.totalSamples = diag.totalSamples + len;
 if (diag.chunkEvents === 1) {
 log("connectDevice: first native PCM chunk received in JS", { samples: len, deviceId });
+let maxAbs = 0;
+let ix = 0;
+while (ix < len) {
+const a = Math.abs(s[ix]);
+if (a > maxAbs) {
+maxAbs = a;
 }
-let ii = 0;
-while (ii < len) {
-q.push(s[ii]);
-ii = ii + 1;
+ix = ix + 1;
 }
-while (q.length > 120000) {
-q.splice(0, 8192);
+log("connectDevice: diag first chunk maxAbs (main)", { maxAbs, samples: len });
 }
+const f32 = new Float32Array(len);
+let j = 0;
+while (j < len) {
+f32[j] = s[j];
+j = j + 1;
+}
+workletNode.port.postMessage({ type: "chunk", samples: f32 }, [f32.buffer]);
 });
 const meta = await ota.invoke("start_native_input", { args: { deviceId: deviceId, targetSampleRate: ctx.sampleRate } });
 const rawSr = meta && (meta.sampleRate != null ? meta.sampleRate : meta.sample_rate);
 const nativeSr = typeof rawSr === "number" && rawSr > 0 ? rawSr : 48000;
 const ratio = nativeSr / ctx.sampleRate;
-const processor = ctx.createScriptProcessor(2048, 1, 1);
-// WebKit often will not run ScriptProcessor unless its input graph advances each render quantum.
-// ConstantSourceNode (DC 0) advances every quantum; a 0 Hz Oscillator does not.
-let pumpStop = () => {};
-let pumpDisconnect = () => {};
-let pumpNodeForRef = null;
-if (typeof ctx.createConstantSource === "function") {
-const c = ctx.createConstantSource();
-c.offset.value = 0;
-c.connect(processor);
-c.start(0);
-pumpNodeForRef = c;
-pumpStop = () => { try { c.stop(); } catch (e0) {} };
-pumpDisconnect = () => { try { c.disconnect(); } catch (e1) {} };
-} else {
-const buf = ctx.createBuffer(1, 2, ctx.sampleRate);
-buf.getChannelData(0).fill(0);
-const bs = ctx.createBufferSource();
-bs.buffer = buf;
-bs.loop = true;
-bs.connect(processor);
-bs.start(0);
-pumpNodeForRef = bs;
-pumpStop = () => { try { bs.stop(); } catch (e2) {} };
-pumpDisconnect = () => { try { bs.disconnect(); } catch (e3) {} };
-}
-processor._nativePumpNode = pumpNodeForRef;
-processor.onaudioprocess = (e) => {
-const out = e.outputBuffer.getChannelData(0);
-let k = 0;
-while (k < out.length) {
-if (q.length < 2) {
-out[k] = 0;
-} else {
-const maxIdx = q.length - 2;
-if (readPos > maxIdx) {
-out[k] = 0;
-} else {
-const ri = Math.floor(readPos);
-const rf = readPos - ri;
-out[k] = q[ri] * (1 - rf) + q[ri + 1] * rf;
-readPos = readPos + ratio;
-}
-}
-k = k + 1;
-}
-if (readPos > 6000) {
-const di = Math.floor(readPos) - 2000;
-if (di > 0) {
-q.splice(0, di);
-readPos = readPos - di;
-}
-}
-};
-processor._nativeTearDown = () => {
+workletNode.port.postMessage({ type: "config", ratio: ratio });
+workletNode._nativeTearDown = () => {
 if (nativeCaptureDiagRef.current.stallTimer != null) {
 clearTimeout(nativeCaptureDiagRef.current.stallTimer);
 nativeCaptureDiagRef.current.stallTimer = null;
 }
-pumpStop();
-pumpDisconnect();
-processor._nativePumpNode = null;
-try { processor.disconnect(); } catch (eP) {}
+try { workletNode.port.postMessage({ type: "reset" }); } catch (eR) {}
+try { workletNode.disconnect(); } catch (eP) {}
 if (nativeChunkUnlistenRef.current) {
 const u = nativeChunkUnlistenRef.current;
 nativeChunkUnlistenRef.current = null;
@@ -312,7 +304,7 @@ try { u(); } catch (eL) {}
 }
 void ota.invoke("stop_native_input");
 };
-source = processor;
+source = workletNode;
 nativeMic = true;
 nativeChunkUnlistenRef.current = pendingNativeUnlisten;
 pendingNativeUnlisten = null;

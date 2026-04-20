@@ -2,37 +2,65 @@ mod audio_input;
 
 use audio_input::{AudioInputController, list_audio_inputs, start_native_input, stop_native_input};
 
-/// Request microphone access via AVFoundation. Call from the UI when the user starts the input
-/// flow (e.g. Connect Input), not at cold boot: macOS shows the prompt more reliably after a
-/// gesture, and this must run on every invoke — a previous `std::sync::Once` + `setup()` call
-/// made later `invoke("ensure_mic_permission")` calls no-ops so dev never showed TCC.
+/// Request microphone access via AVFoundation and WAIT for the user's answer before returning.
+/// Returns Ok(true) when granted, Err("denied") when denied/restricted, so callers can refuse
+/// to start capture instead of silently streaming zeros.
 #[tauri::command]
-fn ensure_mic_permission() {
+fn ensure_mic_permission() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         use objc2::runtime::Bool;
-        use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
+        use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
         unsafe {
             let Some(media_type) = AVMediaTypeAudio else {
-                eprintln!(
-                    "[ToneFrame:mic-permission] AVMediaTypeAudio is unavailable; cannot request AVFoundation access"
-                );
-                return;
+                return Err("AVMediaTypeAudio constant unavailable".into());
             };
-            eprintln!(
-                "[ToneFrame:mic-permission] requesting AVFoundation microphone access (async; check System Settings → Privacy if denied)"
-            );
-            let handler = block2::RcBlock::new(|granted: Bool| {
+
+            let status = AVCaptureDevice::authorizationStatusForMediaType(media_type);
+
+            if status == AVAuthorizationStatus::Authorized {
+                eprintln!("[ToneFrame:mic-permission] already authorized");
+                return Ok(true);
+            }
+
+            if status == AVAuthorizationStatus::Denied
+                || status == AVAuthorizationStatus::Restricted
+            {
+                eprintln!("[ToneFrame:mic-permission] denied — opening System Settings");
+                // Open the macOS Privacy → Microphone pane so the user can re-enable without
+                // hunting through menus.
+                let _ = std::process::Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                    .spawn();
+                return Err("denied".into());
+            }
+
+            // NotDetermined: show the system dialog and block until the user responds.
+            eprintln!("[ToneFrame:mic-permission] requesting microphone access…");
+            let (tx, rx) = mpsc::channel::<bool>();
+            let handler = block2::RcBlock::new(move |granted: Bool| {
                 eprintln!(
-                    "[ToneFrame:mic-permission] AVFoundation audio access response: granted={}",
+                    "[ToneFrame:mic-permission] user response: granted={}",
                     granted.as_bool()
                 );
+                let _ = tx.send(granted.as_bool());
             });
-            AVCaptureDevice::requestAccessForMediaType_completionHandler(
-                media_type,
-                &handler,
-            );
+            AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
+
+            match rx.recv_timeout(Duration::from_secs(60)) {
+                Ok(true) => Ok(true),
+                Ok(false) => Err("denied".into()),
+                Err(_) => Err("permission request timed out".into()),
+            }
         }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(true)
     }
 }
 
