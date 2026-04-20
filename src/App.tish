@@ -578,6 +578,41 @@ setConnections(prev => prev.filter(c => c.id !== id));
 
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans">
+{micDenied && (
+<div class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+<div class="bg-neutral-900 border border-red-500/60 rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 flex flex-col gap-5">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
+<Mic class="w-5 h-5 text-red-400" />
+</div>
+<h2 class="text-lg font-bold text-white">Microphone Access Denied</h2>
+</div>
+<p class="text-neutral-300 text-sm leading-relaxed">
+ToneFrame needs microphone access to capture audio. macOS has denied it.
+</p>
+<p class="text-neutral-300 text-sm leading-relaxed">
+System Settings should be open now. Go to <span class="text-orange-400 font-semibold">Privacy &amp; Security → Microphone</span>, find <span class="text-orange-400 font-semibold">tish-audio-desktop</span> or <span class="text-orange-400 font-semibold">ToneFrame</span>, toggle it on, then click Retry below.
+</p>
+<div class="bg-neutral-800 rounded-lg px-4 py-3 text-xs text-neutral-400 font-mono leading-relaxed">
+If the app is not listed, run in your terminal:<br />
+<span class="text-orange-300 select-all">tccutil reset Microphone</span><br />
+Then restart ToneFrame.
+</div>
+<div class="flex gap-3 justify-end">
+<button
+type="button"
+onClick={() => setMicDenied(false)}
+class="px-4 py-2 rounded-lg text-sm font-semibold bg-neutral-700 hover:bg-neutral-600 text-neutral-200 transition-colors"
+>Dismiss</button>
+<button
+type="button"
+onClick={() => { setMicDenied(false); void getDevices(); }}
+class="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-400 text-black transition-colors"
+>Retry</button>
+</div>
+</div>
+</div>
+)}
 <AudioMeterProvider analyserRef={analyserRef} pitchAnalyserRef={pitchAnalyserRef} audioCtxRef={audioCtxRef} audioReady={audioReady}>
 <header class="relative z-50 bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
 <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
