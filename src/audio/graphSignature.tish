@@ -16,6 +16,10 @@ let ni = 0;
 while (ni < nodes.length) {
 const n = nodes[ni];
 const stamp = { id: n.id, type: n.type, bypassed: n.bypassed, isSystem: n.isSystem, label: n.label };
+if (n.type === 'SYS_IN') {
+stamp.deviceId = n.params && n.params.deviceId != null ? n.params.deviceId : "";
+stamp.nativeMic = !!(n.params && n.params.nativeMic);
+}
 if (n.type === 'console_mixer') stamp.channels = n.params.channels || 4;
 // Audio params must not enter the signature unless they truly require reconnecting the WebAudio graph.
 stamps.push(stamp);

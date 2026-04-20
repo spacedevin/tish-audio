@@ -12,6 +12,7 @@ import { JamMode } from "./ui/JamMode.tish"
 import { Guitarcade } from "./ui/Guitarcade.tish"
 import { TuningMode } from "./ui/TuningMode.tish"
 import { AudioMeterProvider, HeaderMeterReadout } from "./ui/AudioMeterContext.tish"
+import { isTauriApp } from "./platform/tauriEnv.tish"
 
 export fn App() {
 let [activeTab, setActiveTab] = useState('pedalboard');
@@ -21,6 +22,7 @@ let [showDeviceMenu, setShowDeviceMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
 let [showModuleDebug, setShowModuleDebug] = useState(false);
 let [audioGraphTick, setAudioGraphTick] = useState(0);
+let [inputFlowBusy, setInputFlowBusy] = useState(false);
 
 // NODE GRAPH STATE
 let [nodes, setNodes] = useState([
@@ -30,6 +32,8 @@ let [connections, setConnections] = useState([]);
 
 const audioCtxRef = useRef(null);
 const sourcesRef = useRef({}); 
+const nativeChunkUnlistenRef = useRef(null);
+const nativeCaptureDiagRef = useRef({ chunkEvents: 0, totalSamples: 0, stallTimer: null });
 const analyserRef = useRef(null);
 const pitchAnalyserRef = useRef(null);
 const outGainRef = useRef(null);
@@ -46,42 +50,309 @@ patchBoardMeterTickRef.current = audioGraphTick;
 const nodeGraphMeterTick = activeTab === 'pedalboard' ? audioGraphTick : patchBoardMeterTickRef.current;
 
 async fn getDevices() {
-if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-const port = window.location.port;
-const localhostUrl = "http://localhost" + (port ? ":" + port : "");
-alert("Use " + localhostUrl + " in the address bar instead of " + window.location.host + " so the microphone can work.");
+const log = (m, x) => {
+if (x !== undefined) {
+console.log("[TishAudio:input] " + m, x);
+} else {
+console.log("[TishAudio:input] " + m);
+}
+};
+log("getDevices: click / start", {
+href: typeof window !== "undefined" && window.location ? window.location.href : "",
+isSecureContext: typeof window !== "undefined" ? window.isSecureContext : false,
+isTauriApp: isTauriApp(),
+hasMediaDevices: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+});
+setInputFlowBusy(true);
+// In `tauri dev` the UI often loads from http://localhost; WKWebView may still define
+// `navigator.mediaDevices`, which would send us down the browser getUserMedia path and
+// diverge from production (custom protocol / asset, where mediaDevices is absent). Always
+// use cpal + events for input when running inside the desktop shell.
+let mediaOk = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+if (isTauriApp()) {
+try {
+log("getDevices: Tauri desktop — cpal native inputs (mediaDevices present: " + String(!!mediaOk) + ")", { href: typeof window !== "undefined" && window.location ? window.location.href : "" });
+const ota = window.__OTA_BRIDGE__;
+if (!ota || !ota.invoke) {
+alert("Native input requires the OTA bridge (invoke). Rebuild ota-bridge.js.");
+setInputFlowBusy(false);
 return;
 }
+if (ota.ensureMicPermission) {
 try {
+await ota.ensureMicPermission();
+log("getDevices: ensureMicPermission invoke finished (macOS: also read terminal for [ToneFrame:mic-permission])", {});
+} catch (eWarm) { console.warn("[TishAudio:input] ensureMicPermission invoke failed:", eWarm); }
+}
 if (!audioCtxRef.current) {
 audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
 }
-await navigator.mediaDevices.getUserMedia({ audio: true });
-try { await audioCtxRef.current.resume(); } catch (e0) {}
+try { await audioCtxRef.current.resume(); } catch (eR) {}
+const list = await ota.invoke("list_audio_inputs");
+const mapped = list.map((row) => ({ deviceId: row.id, label: row.name, kind: "audioinput" }));
+setDevices(mapped);
+setShowModuleLibrary(false);
+setShowDeviceMenu(true);
+log("getDevices: native device menu", { count: mapped.length });
+} catch (eNative) {
+console.error("[TishAudio:input] list_audio_inputs failed:", eNative);
+alert("Could not list native microphones: " + (eNative && eNative.message ? eNative.message : String(eNative)));
+} finally {
+setInputFlowBusy(false);
+}
+return;
+}
+if (!mediaOk) {
+log("getDevices: abort — no mediaDevices.getUserMedia", {
+hasMediaDevicesObj: !!navigator.mediaDevices,
+hasGum: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+origin: typeof window !== "undefined" && window.location ? window.location.origin : ""
+});
+alert("This environment does not expose microphone access (mediaDevices / getUserMedia).");
+setInputFlowBusy(false);
+return;
+}
+if (!window.isSecureContext && !isTauriApp()) {
+log("getDevices: abort — insecure context and not Tauri", { host: window.location.host });
+const port = window.location.port;
+const localhostUrl = "http://localhost" + (port ? ":" + port : "");
+alert("Use " + localhostUrl + " in the address bar instead of " + window.location.host + " so the microphone can work.");
+setInputFlowBusy(false);
+return;
+}
+try {
+if (isTauriApp()) {
+log("getDevices: Tauri — calling ensureMicPermission if bridge present");
+const ota = window.__OTA_BRIDGE__;
+if (ota && ota.ensureMicPermission) {
+try { await ota.ensureMicPermission(); log("getDevices: ensureMicPermission resolved"); } catch (eWarm) { console.warn("[TishAudio:input] ensureMicPermission:", eWarm); }
+} else {
+log("getDevices: no __OTA_BRIDGE__.ensureMicPermission (OTA bridge missing?)", { hasOta: !!ota });
+}
+}
+if (!audioCtxRef.current) {
+log("getDevices: creating AudioContext");
+audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+}
+log("getDevices: AudioContext state", audioCtxRef.current && audioCtxRef.current.state);
+const micMs = 20000;
+log("getDevices: awaiting getUserMedia (race " + micMs + "ms timeout)…");
+const gUM = navigator.mediaDevices.getUserMedia({ audio: true });
+const timeout = new Promise((_, rej) => {
+window.setTimeout(() => rej(new Error("getUserMedia timed out")), micMs);
+});
+await Promise.race([gUM, timeout]);
+log("getDevices: getUserMedia resolved");
+try { await audioCtxRef.current.resume(); } catch (e0) { log("getDevices: resume() threw (ignored)", e0); }
 const devs = await navigator.mediaDevices.enumerateDevices();
 const audioDevs = devs.filter(d => d.kind === 'audioinput');
+log("getDevices: enumerateDevices", { total: devs.length, audioInputs: audioDevs.length, sample: audioDevs.slice(0, 3).map(d => ({ idLen: (d.deviceId || "").length, label: d.label })) });
 setDevices(audioDevs);
 setShowModuleLibrary(false);
 setShowDeviceMenu(true);
+log("getDevices: opened device menu");
 } catch (e) {
-console.error("Error enumerating devices:", e);
-alert("Could not access audio interface. Please check permissions.");
+console.error("[TishAudio:input] getDevices failed:", e);
+if (e && (e.name || e.message)) {
+console.warn("[TishAudio:input] getDevices failure detail", { name: e.name, message: e.message, code: e.code });
+}
+let msg = "Could not access audio interface. Please check permissions.";
+if (e && e.message && String(e.message).indexOf("timed out") >= 0) {
+msg = "Microphone access did not respond in time. On macOS, open System Settings → Privacy & Security → Microphone and allow this app, then try again.";
+}
+if (e && (e.name === "NotAllowedError" || e.name === "PermissionDeniedError")) {
+msg = "Microphone permission was denied. On macOS: System Settings → Privacy & Security → Microphone → enable this app.";
+}
+if (isTauriApp() && window.location.hostname === "localhost") {
+msg += " In Tauri dev, the app bundle name may differ from production; grant mic to the dev host if prompted.";
+}
+alert(msg);
+} finally {
+setInputFlowBusy(false);
 }
 };
 
 async fn connectDevice(deviceId, label) {
+const log = (m, x) => {
+if (x !== undefined) {
+console.log("[TishAudio:input] " + m, x);
+} else {
+console.log("[TishAudio:input] " + m);
+}
+};
+log("connectDevice: click", { deviceIdLen: (deviceId || "").length, label: label || "" });
 try {
-if (!audioCtxRef.current) return;
+if (!audioCtxRef.current) {
+console.error("[TishAudio:input] connectDevice: no AudioContext — use Connect Input first (getDevices never completed).");
+alert("Audio is not initialized yet. Tap Connect Input and wait for the input list, then choose a device.");
+return;
+}
 const ctx = audioCtxRef.current;
-
-const stream = await navigator.mediaDevices.getUserMedia({ 
-audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false, latency: 0 } 
+let source = null;
+let nativeMic = false;
+if (deviceId.indexOf("native:") === 0) {
+log("connectDevice: native cpal path", { deviceId, ctxState: ctx.state });
+const ota = window.__OTA_BRIDGE__;
+if (!ota || !ota.invoke || !ota.listenNativeAudioChunk) {
+alert("Native microphone bridge is missing. Rebuild ota-bridge.js.");
+return;
+}
+if (nativeChunkUnlistenRef.current) {
+try { await nativeChunkUnlistenRef.current(); } catch (eU) { console.warn(eU); }
+nativeChunkUnlistenRef.current = null;
+}
+try { await ota.invoke("stop_native_input"); } catch (eStop0) {}
+const q = [];
+let readPos = 0;
+let pendingNativeUnlisten = null;
+if (nativeCaptureDiagRef.current.stallTimer != null) {
+clearTimeout(nativeCaptureDiagRef.current.stallTimer);
+nativeCaptureDiagRef.current.stallTimer = null;
+}
+nativeCaptureDiagRef.current.chunkEvents = 0;
+nativeCaptureDiagRef.current.totalSamples = 0;
+try {
+pendingNativeUnlisten = await ota.listenNativeAudioChunk((payload) => {
+if (payload == null) return;
+let p = payload;
+if (typeof p === "string") {
+try { p = JSON.parse(p); } catch (eParse) { return; }
+}
+const pid = p.deviceId != null ? p.deviceId : p.device_id;
+if (pid !== deviceId) return;
+const s = p.samples != null ? p.samples : p.Samples;
+const len = s && s.length != null ? s.length : 0;
+if (!len) return;
+const diag = nativeCaptureDiagRef.current;
+diag.chunkEvents = diag.chunkEvents + 1;
+diag.totalSamples = diag.totalSamples + len;
+if (diag.chunkEvents === 1) {
+log("connectDevice: first native PCM chunk received in JS", { samples: len, deviceId });
+}
+let ii = 0;
+while (ii < len) {
+q.push(s[ii]);
+ii = ii + 1;
+}
+while (q.length > 120000) {
+q.splice(0, 8192);
+}
 });
+const meta = await ota.invoke("start_native_input", { args: { deviceId: deviceId, targetSampleRate: ctx.sampleRate } });
+const rawSr = meta && (meta.sampleRate != null ? meta.sampleRate : meta.sample_rate);
+const nativeSr = typeof rawSr === "number" && rawSr > 0 ? rawSr : 48000;
+const ratio = nativeSr / ctx.sampleRate;
+const processor = ctx.createScriptProcessor(2048, 1, 1);
+// WebKit often will not run ScriptProcessor unless its input graph advances each render quantum.
+// ConstantSourceNode (DC 0) advances every quantum; a 0 Hz Oscillator does not.
+let pumpStop = () => {};
+let pumpDisconnect = () => {};
+let pumpNodeForRef = null;
+if (typeof ctx.createConstantSource === "function") {
+const c = ctx.createConstantSource();
+c.offset.value = 0;
+c.connect(processor);
+c.start(0);
+pumpNodeForRef = c;
+pumpStop = () => { try { c.stop(); } catch (e0) {} };
+pumpDisconnect = () => { try { c.disconnect(); } catch (e1) {} };
+} else {
+const buf = ctx.createBuffer(1, 2, ctx.sampleRate);
+buf.getChannelData(0).fill(0);
+const bs = ctx.createBufferSource();
+bs.buffer = buf;
+bs.loop = true;
+bs.connect(processor);
+bs.start(0);
+pumpNodeForRef = bs;
+pumpStop = () => { try { bs.stop(); } catch (e2) {} };
+pumpDisconnect = () => { try { bs.disconnect(); } catch (e3) {} };
+}
+processor._nativePumpNode = pumpNodeForRef;
+processor.onaudioprocess = (e) => {
+const out = e.outputBuffer.getChannelData(0);
+let k = 0;
+while (k < out.length) {
+if (q.length < 2) {
+out[k] = 0;
+} else {
+const maxIdx = q.length - 2;
+if (readPos > maxIdx) {
+out[k] = 0;
+} else {
+const ri = Math.floor(readPos);
+const rf = readPos - ri;
+out[k] = q[ri] * (1 - rf) + q[ri + 1] * rf;
+readPos = readPos + ratio;
+}
+}
+k = k + 1;
+}
+if (readPos > 6000) {
+const di = Math.floor(readPos) - 2000;
+if (di > 0) {
+q.splice(0, di);
+readPos = readPos - di;
+}
+}
+};
+processor._nativeTearDown = () => {
+if (nativeCaptureDiagRef.current.stallTimer != null) {
+clearTimeout(nativeCaptureDiagRef.current.stallTimer);
+nativeCaptureDiagRef.current.stallTimer = null;
+}
+pumpStop();
+pumpDisconnect();
+processor._nativePumpNode = null;
+try { processor.disconnect(); } catch (eP) {}
+if (nativeChunkUnlistenRef.current) {
+const u = nativeChunkUnlistenRef.current;
+nativeChunkUnlistenRef.current = null;
+try { u(); } catch (eL) {}
+}
+void ota.invoke("stop_native_input");
+};
+source = processor;
+nativeMic = true;
+nativeChunkUnlistenRef.current = pendingNativeUnlisten;
+pendingNativeUnlisten = null;
+log("connectDevice: native stream started", { nativeSr, ctxSr: ctx.sampleRate, ratio });
+if (nativeCaptureDiagRef.current.stallTimer != null) {
+clearTimeout(nativeCaptureDiagRef.current.stallTimer);
+}
+nativeCaptureDiagRef.current.stallTimer = window.setTimeout(() => {
+nativeCaptureDiagRef.current.stallTimer = null;
+const d = nativeCaptureDiagRef.current;
+if (d.chunkEvents === 0) {
+console.warn("[TishAudio:input] No native PCM chunks received after 2.5s — capture or IPC may be blocked.", {
+deviceId,
+hint: "Terminal: [ToneFrame:native-audio] first PCM chunk / emit errors; [ToneFrame:mic-permission] granted=false. macOS: System Settings → Privacy & Security → Microphone; dev needs src-tauri/Info.plist NSMicrophoneUsageDescription."
+});
+} else {
+log("connectDevice: native chunk watchdog ok", { chunkEvents: d.chunkEvents, totalSamples: d.totalSamples });
+}
+}, 2500);
+} finally {
+if (pendingNativeUnlisten != null) {
+try { await pendingNativeUnlisten(); } catch (eUl) { console.warn(eUl); }
+}
+}
+} else {
+if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+alert("Web microphone API is not available. Use a native input from the list (Connect Input in Tauri).");
+return;
+}
+log("connectDevice: getUserMedia (exact deviceId)…", { ctxState: ctx.state });
+const stream = await navigator.mediaDevices.getUserMedia({
+audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false, latency: 0 }
+});
+log("connectDevice: got stream", { tracks: stream.getTracks().map(t => t.kind + ":" + t.label) });
+source = ctx.createMediaStreamSource(stream);
+}
 
-const source = ctx.createMediaStreamSource(stream);
 sourcesRef.current[deviceId] = source;
 
-try { await ctx.resume(); } catch (eResume) {}
+try { await ctx.resume(); } catch (eResume) { log("connectDevice: resume threw", eResume); }
 
 if (!analyserRef.current) {
 const analyser = ctx.createAnalyser();
@@ -101,7 +372,7 @@ pitchA.smoothingTimeConstant = 0.25;
 pitchAnalyserRef.current = pitchA;
 }
 
-const newInId = "sys_in_" + deviceId.slice(0, 6);
+const newInId = "sys_in_" + deviceId.split(":").join("_").slice(0, 14);
 setNodes(prev => [...prev, {
 id: newInId,
 type: 'SYS_IN',
@@ -109,7 +380,7 @@ x: 50,
 y: 200 + (Object.keys(sourcesRef.current).length * 150),
 label: (label || 'INPUT').substring(0, 15),
 isSystem: true,
-params: { deviceId }
+params: { deviceId, nativeMic: nativeMic }
 }]);
 
 setConnections(prev => {
@@ -119,8 +390,13 @@ return [...prev, { id: Math.random().toString(36).substr(2, 9), from: newInId, f
 
 setAudioReady(true);
 setShowDeviceMenu(false);
+log("connectDevice: done — SYS_IN added, audioReady=true");
 } catch (err) {
-console.error("Error connecting specific device:", err);
+console.error("[TishAudio:input] connectDevice failed:", err);
+if (err && (err.name || err.message)) {
+console.warn("[TishAudio:input] connectDevice failure detail", { name: err.name, message: err.message });
+}
+alert("Could not open that input: " + (err && err.message ? err.message : String(err)));
 }
 };
 
@@ -241,9 +517,14 @@ const removeNode = (id) => {
 const nodeToRemove = nodes.find(n => n.id === id);
 if (nodeToRemove && nodeToRemove.type === 'SYS_IN' && nodeToRemove.params?.deviceId) {
 const deviceId = nodeToRemove.params.deviceId;
-if (sourcesRef.current[deviceId]) {
-const track = sourcesRef.current[deviceId].mediaStream.getTracks()[0];
+const src = sourcesRef.current[deviceId];
+if (src) {
+if (nodeToRemove.params.nativeMic && typeof src._nativeTearDown === "function") {
+try { src._nativeTearDown(); } catch (eNt) { console.warn("[TishAudio:input] native tearDown:", eNt); }
+} else if (src.mediaStream && src.mediaStream.getTracks) {
+const track = src.mediaStream.getTracks()[0];
 if (track) track.stop();
+}
 let nextSources = {}
 let sk = Object.keys(sourcesRef.current)
 let si = 0
@@ -306,18 +587,20 @@ setConnections(prev => prev.filter(c => c.id !== id));
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans">
 <AudioMeterProvider analyserRef={analyserRef} pitchAnalyserRef={pitchAnalyserRef} audioCtxRef={audioCtxRef} audioReady={audioReady}>
-<header class="bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
+<header class="relative z-50 bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
 <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
 <div class="flex flex-wrap items-center gap-3 min-w-0">
 <Activity class="text-orange-500 w-7 h-7 shrink-0" />
 <h1 class="text-lg sm:text-2xl font-black tracking-tighter text-white shrink-0">TONE<span class="text-orange-500">FRAME</span></h1>
 <button 
-onClick={getDevices} 
-class="bg-orange-500 hover:bg-orange-400 text-black font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(249,115,22,0.4)] text-xs sm:text-sm shrink-0"
+type="button"
+disabled={inputFlowBusy}
+onClick={() => { console.log("[TishAudio:input] Connect Input button onClick"); void getDevices(); }} 
+class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 " + (inputFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait shadow-none" : "bg-orange-500 hover:bg-orange-400 text-black shadow-[0_0_15px_rgba(249,115,22,0.4)]")}
 >
 <Mic class="w-4 h-4" /> 
-<span class="hidden sm:inline">{Object.keys(sourcesRef.current).length === 0 ? 'Connect Input' : 'Add Input'}</span>
-<span class="sm:hidden">Input</span>
+<span class="hidden sm:inline">{inputFlowBusy ? "Requesting mic…" : (Object.keys(sourcesRef.current).length === 0 ? 'Connect Input' : 'Add Input')}</span>
+<span class="sm:hidden">{inputFlowBusy ? "…" : "Input"}</span>
 </button>
 {activeTab === 'pedalboard' ? (
 <div class="flex items-center gap-2 shrink-0">
@@ -358,6 +641,37 @@ title="Preview all modules in a chain (layout only)"
 </div>
 
 <HeaderMeterReadout inactive={!audioReady} />
+
+{showDeviceMenu ? (
+<div class="absolute left-3 sm:left-4 top-full mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-[60] flex flex-col" style={{ maxHeight: "min(24rem, calc(100vh - 6rem))" }}>
+<div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center shrink-0">
+<span class="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
+<button type="button" onClick={() => setShowDeviceMenu(false)}><X class="w-4 h-4 text-neutral-500 hover:text-white" /></button>
+</div>
+<div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+{devices.length === 0 ? (
+<div class="p-4 text-center text-sm text-neutral-500">No audio inputs found. Check permissions.</div>
+) : (
+devices.map(d => (
+<button 
+type="button"
+key={d.deviceId} 
+onClick={() => { console.log("[TishAudio:input] device row click", d.deviceId ? (d.deviceId.slice(0, 8) + "…") : "(empty id)", d.label); void connectDevice(d.deviceId, d.label); }} 
+class="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
+title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
+>
+{d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
+</button>
+))
+)}
+</div>
+</div>
+) : null}
+{showModuleLibrary ? (
+<div class="absolute left-3 sm:left-4 top-full mt-1.5 z-[60] max-w-[calc(100vw-1.5rem)] bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden" style={{ width: "min(800px, calc(100vw - 2rem))", maxHeight: "min(36rem, calc(100vh - 6rem))" }}>
+<ModuleLibraryPanel onClose={() => setShowModuleLibrary(false)} addNode={addNode} />
+</div>
+) : null}
 </div>
 </header>
 
@@ -397,35 +711,6 @@ removeConnection={removeConnection}
 </AudioMeterProvider>
 
 <div>
-{showDeviceMenu ? (
-<div class="w-72 bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-[20000] fixed" style={{ left: "1rem", top: "4.75rem", maxHeight: "calc(100vh - 5.5rem)" }}>
-<div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center">
-<span class="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
-<button onClick={() => setShowDeviceMenu(false)}><X class="w-4 h-4 text-neutral-500 hover:text-white" /></button>
-</div>
-<div class="max-h-64 overflow-y-auto custom-scrollbar">
-{devices.length === 0 ? (
-<div class="p-4 text-center text-sm text-neutral-500">No audio inputs found. Check permissions.</div>
-) : (
-devices.map(d => (
-<button 
-key={d.deviceId} 
-onClick={() => connectDevice(d.deviceId, d.label)} 
-class="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
-title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
->
-{d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
-</button>
-))
-)}
-</div>
-</div>
-) : null}
-{showModuleLibrary ? (
-<div class="bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden z-[20000] fixed" style={{ left: "1rem", top: "4.75rem", width: "min(800px, calc(100vw - 2rem))", maxHeight: "calc(100vh - 5.5rem)" }}>
-<ModuleLibraryPanel onClose={() => setShowModuleLibrary(false)} addNode={addNode} />
-</div>
-) : null}
 {showModuleDebug ? (
 <ModuleDebugPanel onClose={() => setShowModuleDebug(false)} addNode={addNode} />
 ) : null}

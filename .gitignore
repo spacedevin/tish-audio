@@ -6,3 +6,4 @@ src/mains/
 .DS_Store
 debug-*
 test-*
+target

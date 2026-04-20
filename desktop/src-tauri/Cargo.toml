@@ -1,0 +1,28 @@
+[package]
+name = "tish-audio-desktop"
+version = "1.0.0"
+description = "ToneFrame by Tish"
+authors = ["Tish"]
+edition = "2021"
+
+[lib]
+name = "tish_audio_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0", features = [] }
+tauri-plugin-opener = "2.0.0"
+tauri-plugin-fs = "2.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+cpal = "0.15"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Must match objc2 used by block2 0.6 + objc2-av-foundation 0.3 (0.6.x), or RcBlock/IntoBlock breaks on Bool.
+objc2 = "0.6.2"
+objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat"] }
+objc2-foundation = "0.3.2"
+block2 = "0.6"

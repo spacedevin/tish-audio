@@ -37,8 +37,12 @@ inNode = ctx.createGain();
 outNode = inNode; 
 } 
 else if (node.type === 'SYS_IN') {
+// Web: MediaStreamAudioSourceNode. Tauri fallback: ScriptProcessorNode (native cpal → events → ring buffer).
 inNode = sourcesRef.current[node.params?.deviceId];
-if (!inNode) inNode = ctx.createGain(); 
+if (!inNode) {
+console.warn("[TishAudio:rebuild] SYS_IN: no AudioNode in sourcesRef for deviceId — using silent gain (check native connect vs graph rebuild order).", node.params?.deviceId);
+inNode = ctx.createGain();
+}
 outNode = inNode;
 if (pitchAnalyserRef && pitchAnalyserRef.current && inNode && typeof inNode.connect === 'function') {
 try { inNode.connect(pitchAnalyserRef.current); } catch (ePitchTap) {}
@@ -697,6 +701,21 @@ outAudioNode.connect(inAudioNode);
 }
 }
 });
+
+// Native SYS_IN uses ScriptProcessorNode fed by a ConstantSource/BufferSource "pump".
+// rebuildAudioGraph disconnect() on the processor removes that input wire; reconnect so onaudioprocess keeps running.
+let npi = 0;
+while (npi < currentNodes.length) {
+const nIn = currentNodes[npi];
+npi = npi + 1;
+if (nIn.type !== 'SYS_IN' || !nIn.params || !nIn.params.nativeMic) continue;
+const did = nIn.params.deviceId;
+const srcNode = sourcesRef.current[did];
+if (srcNode && srcNode._nativePumpNode) {
+try { srcNode._nativePumpNode.disconnect(); } catch (eDisc) {}
+try { srcNode._nativePumpNode.connect(srcNode); } catch (ePump) {}
+}
+}
 
 let ni = 0;
 while (ni < currentNodes.length) {

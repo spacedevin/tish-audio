@@ -1,0 +1,172 @@
+import { __TISH_AUDIO_VERSION__ } from "./buildVersion.tish"
+import { isTauriApp, shouldRunOtaNetworkCheck, getOtaManifestUrl } from "../platform/tauriEnv.tish"
+
+// Compare semver: returns 1 if a > b, -1 if a < b, 0 if equal
+fn compareVersions(a, b) {
+  let pa = a.split('.');
+  let pb = b.split('.');
+  let i = 0;
+  while (i < 3) {
+    let na = parseInt(pa[i] || '0', 10);
+    let nb = parseInt(pb[i] || '0', 10);
+    if (na > nb) return 1;
+    if (nb > na) return -1;
+    i = i + 1;
+  }
+  return 0;
+}
+
+export async fn getActiveBundleVersion() {
+  try {
+    let bridge = window.__OTA_BRIDGE__;
+    if (!bridge) {
+      return __TISH_AUDIO_VERSION__;
+    }
+    let hasManifest = await bridge.exists("active-bundle.json", { baseDir: bridge.BaseDirectory.AppData });
+    if (hasManifest) {
+      let content = await bridge.readTextFile("active-bundle.json", { baseDir: bridge.BaseDirectory.AppData });
+      let data = JSON.parse(content);
+      return data.version || __TISH_AUDIO_VERSION__;
+    }
+  } catch (e) {
+    console.error("Error reading active bundle version", e);
+  }
+  return __TISH_AUDIO_VERSION__;
+}
+
+export async fn checkForUpdates() {
+  if (!shouldRunOtaNetworkCheck()) {
+    return;
+  }
+  try {
+    let activeVer = await getActiveBundleVersion();
+    let url = getOtaManifestUrl();
+    let res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      return;
+    }
+    let manifest = await res.json();
+    
+    if (compareVersions(manifest.version, activeVer) > 0) {
+      console.log("Update available:", manifest.version);
+      await applyOtaUpdate(manifest);
+    }
+  } catch (e) {
+    // CORS / offline / missing manifest — expected in dev; avoid noisy console in production builds.
+    if (typeof console !== "undefined" && console.debug) {
+      console.debug("OTA check skipped or failed:", e);
+    }
+  }
+}
+
+async fn applyOtaUpdate(manifest) {
+  let bridge = window.__OTA_BRIDGE__;
+  if (!bridge) {
+    return;
+  }
+  try {
+    let res = await fetch(manifest.distUrl);
+    if (!res.ok) throw new Error("Failed to fetch dist.zip");
+    
+    let buffer = await res.arrayBuffer();
+    
+    // verify SHA256
+    let hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    let hashArray = Array.from(new Uint8Array(hashBuffer));
+    let hashHex = "";
+    let hi = 0;
+    while (hi < hashArray.length) {
+      let b = hashArray[hi];
+      hashHex = hashHex + b.toString(16).padStart(2, "0");
+      hi = hi + 1;
+    }
+    
+    if (hashHex !== manifest.distSha256) {
+      throw new Error("SHA256 mismatch!");
+    }
+    
+    let unzipped = bridge.unzipSync(new Uint8Array(buffer));
+    let targetDir = "bundle_" + manifest.version;
+    
+    let hasAppDir = await bridge.exists("", { baseDir: bridge.BaseDirectory.AppData });
+    if (!hasAppDir) {
+      await bridge.mkdir("", { baseDir: bridge.BaseDirectory.AppData });
+    }
+    
+    if (await bridge.exists(targetDir, { baseDir: bridge.BaseDirectory.AppData })) {
+      await bridge.remove(targetDir, { baseDir: bridge.BaseDirectory.AppData, recursive: true });
+    }
+    
+    await bridge.mkdir(targetDir, { baseDir: bridge.BaseDirectory.AppData });
+    
+    // Write files
+    let keys = Object.keys(unzipped);
+    let i = 0;
+    while (i < keys.length) {
+      let path = keys[i];
+      let data = unzipped[path];
+      if (path.endsWith("/")) {
+        await bridge.mkdir(targetDir + "/" + path, { baseDir: bridge.BaseDirectory.AppData, recursive: true });
+      } else {
+        let parts = path.split("/");
+        parts.pop();
+        if (parts.length > 0) {
+          let parent = parts.join("/");
+          if (!(await bridge.exists(targetDir + "/" + parent, { baseDir: bridge.BaseDirectory.AppData }))) {
+            await bridge.mkdir(targetDir + "/" + parent, { baseDir: bridge.BaseDirectory.AppData, recursive: true });
+          }
+        }
+        await bridge.writeFile(targetDir + "/" + path, data, { baseDir: bridge.BaseDirectory.AppData });
+      }
+      i = i + 1;
+    }
+    
+    // update active bundle
+    let bundleData = { version: manifest.version, dir: targetDir };
+    await bridge.writeTextFile("active-bundle.json", JSON.stringify(bundleData), { baseDir: bridge.BaseDirectory.AppData });
+    
+    console.log("OTA update applied successfully. Reloading...");
+    await bootActiveBundle();
+    
+  } catch (e) {
+    console.error("Failed to apply OTA update", e);
+  }
+}
+
+export async fn bootActiveBundle() {
+  if (!isTauriApp()) return false;
+  let bridge = window.__OTA_BRIDGE__;
+  if (!bridge) {
+    return false;
+  }
+  
+  try {
+    let hasManifest = await bridge.exists("active-bundle.json", { baseDir: bridge.BaseDirectory.AppData });
+    if (!hasManifest) return false;
+    
+    let content = await bridge.readTextFile("active-bundle.json", { baseDir: bridge.BaseDirectory.AppData });
+    let data = JSON.parse(content);
+    
+    if (data.version === __TISH_AUDIO_VERSION__) {
+      return false;
+    }
+    if (compareVersions(__TISH_AUDIO_VERSION__, data.version) > 0) {
+      return false;
+    }
+    
+    let indexPath = data.dir + "/index.html";
+    if (await bridge.exists(indexPath, { baseDir: bridge.BaseDirectory.AppData })) {
+      let base = await bridge.appDataDir();
+      let absPath = await bridge.join(base, indexPath);
+      let assetUrl = bridge.convertFileSrc(absPath);
+      
+      if (!window.location.href.includes(data.dir)) {
+        window.location.replace(assetUrl);
+        return true;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to boot active bundle", e);
+  }
+  return false;
+}

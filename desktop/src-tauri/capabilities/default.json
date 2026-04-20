@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "opener:default",
+    "core:path:default",
+    "core:window:allow-start-dragging",
+    {
+      "identifier": "fs:default",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCACHE/**" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,258 @@
+name: Release Build
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  version:
+    name: Get version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set_version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Next version (semantic-release dry-run, main push only)
+        id: semantic
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          dry_run: true
+          semantic_version: 24
+          working_directory: npm/tish-audio-release
+          extra_plugins: |
+            @semantic-release/commit-analyzer@^13.0.0
+            @semantic-release/release-notes-generator@^14.1.0
+        env:
+          TISH_AUDIO_SEMANTIC_RELEASE_CI: "1"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version
+        id: set_version
+        run: |
+          VER="${{ steps.semantic.outputs.new_release_version }}"
+          if [ -z "$VER" ]; then
+            VER=$(grep '^version' package.json | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+            echo "Using package.json version: $VER"
+          else
+            echo "Using semantic-release version: $VER"
+          fi
+          echo "version=$VER" >> $GITHUB_OUTPUT
+
+  release_check:
+    name: Release check (semantic-release dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Dry-run (read-only config)
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          dry_run: true
+          semantic_version: 24
+          working_directory: npm/tish-audio-release
+          extra_plugins: |
+            @semantic-release/commit-analyzer@^13.0.0
+            @semantic-release/release-notes-generator@^14.1.0
+        env:
+          TISH_AUDIO_SEMANTIC_RELEASE_CI: "1"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Require incremental release
+        run: |
+          if [ "${{ steps.semantic.outputs.new_release_published }}" != "true" ]; then
+            echo "No incremental release would be triggered. Push commits that trigger a release (feat/fix/perf/BREAKING CHANGE per conventional commits)."
+            exit 1
+          fi
+          echo "Release would be triggered - check passed."
+
+  build:
+    needs: [version, release_check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: npm ci
+        run: npm ci
+
+      - name: sync version
+        run: |
+          # Sync version into package.json and desktop/src-tauri/tauri.conf.json
+          VERSION="${{ needs.version.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const p = require('./package.json');
+            p.version = process.env.VERSION;
+            fs.writeFileSync('./package.json', JSON.stringify(p, null, 2));
+            const t = require('./desktop/src-tauri/tauri.conf.json');
+            t.version = process.env.VERSION;
+            fs.writeFileSync('./desktop/src-tauri/tauri.conf.json', JSON.stringify(t, null, 2));
+          "
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+
+      - name: Write build version module
+        run: |
+          echo "export const __TISH_AUDIO_VERSION__ = \"${{ needs.version.outputs.version }}\";" > src/ota/buildVersion.tish
+          mkdir -p src/ota
+
+      - name: build
+        run: npm run build
+
+      - name: Generate dist.zip and app-manifest.json
+        run: |
+          cd dist && zip -r ../dist.zip * && cd ..
+          DIST_SHA256=$(shasum -a 256 dist.zip | awk '{print $1}')
+          VERSION="${{ needs.version.outputs.version }}"
+          REPO_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}"
+          
+          node -e "
+            const fs = require('fs');
+            const manifest = {
+              version: process.env.VERSION,
+              distSha256: process.env.DIST_SHA256,
+              distUrl: \`\${process.env.REPO_URL}/dist.zip\`
+            };
+            fs.writeFileSync('app-manifest.json', JSON.stringify(manifest, null, 2));
+          "
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          DIST_SHA256: $(shasum -a 256 dist.zip | awk '{print $1}')
+          REPO_URL: "https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}"
+
+      - name: Upload dist.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist.zip
+
+      - name: Upload app-manifest.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest
+          path: app-manifest.json
+
+  release:
+    name: Release (prerelease branch + GitHub API)
+    needs: [build, version, release_check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download dist.zip
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+
+      - name: Download app-manifest.json
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest
+
+      - name: Create or update release branch and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="release/v${{ needs.version.outputs.version }}"
+          git checkout -B "$BRANCH"
+          git push origin "$BRANCH" --force
+
+      - name: Generate release notes from commits
+        id: changelog
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            CHANGELOG=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s (%h)" --no-merges 2>/dev/null || echo "")
+          else
+            CHANGELOG=$(git log -30 --pretty=format:"- %s (%h)" --no-merges 2>/dev/null || echo "")
+          fi
+          [ -z "$CHANGELOG" ] && CHANGELOG="- No commits to list"
+          {
+            echo "## Changes"
+            echo ""
+            echo "$CHANGELOG"
+            echo ""
+          } > release-body.md
+
+      - name: Create or update GitHub prerelease via API
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          BRANCH="release/v${VERSION}"
+          BODY=$(cat release-body.md)
+          RESP=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" \
+            -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$BRANCH\",\"name\":\"$TAG\",\"body\":$(echo "$BODY" | jq -Rs .),\"prerelease\":true}")
+          HTTP_CODE=$(echo "$RESP" | tail -n1)
+          BODY_RESP=$(echo "$RESP" | sed '$d')
+          if [ "$HTTP_CODE" = "201" ]; then
+            RELEASE_ID=$(echo "$BODY_RESP" | jq -r .id)
+          elif [ "$HTTP_CODE" = "422" ]; then
+            RELEASE_ID=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" | jq -r .id)
+            if [ "$RELEASE_ID" != "null" ] && [ -n "$RELEASE_ID" ]; then
+              curl -s -X PATCH \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" \
+                -d "{\"target_commitish\":\"$BRANCH\",\"body\":$(echo "$BODY" | jq -Rs .),\"prerelease\":true}"
+            else
+              echo "Release creation failed" && exit 1
+            fi
+          else
+            echo "Unexpected response: $HTTP_CODE" && exit 1
+          fi
+          echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+
+      - name: Upload platform binaries to prerelease
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID="${{ steps.create_release.outputs.release_id }}"
+          REPO="${{ github.repository }}"
+          UPLOAD_URL="https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets"
+          AUTH="Authorization: Bearer $GITHUB_TOKEN"
+          ACCEPT="Accept: application/vnd.github+json"
+          API_VER="X-GitHub-Api-Version: 2022-11-28"
+          
+          upload_asset() {
+            local path="$1" name="$2" label="$3" ctype="$4"
+            local label_enc
+            label_enc=$(printf %s "$label" | jq -sRr @uri)
+            curl -s -X POST -H "$AUTH" -H "$ACCEPT" -H "$API_VER" \
+              -H "Content-Type: $ctype" \
+              --data-binary @"$path" \
+              "${UPLOAD_URL}?name=${name}&label=${label_enc}"
+          }
+          
+          upload_asset dist.zip "dist.zip" "Web Bundle (dist.zip)" "application/zip"
+          upload_asset app-manifest.json "app-manifest.json" "App Manifest" "application/json"

@@ -1,0 +1,44 @@
+// True when running inside the Tauri desktop shell (custom URL may not report isSecureContext).
+// Dev loads devUrl (e.g. http://localhost:8080); IPC still injects internals. Also accept global Tauri when enabled.
+export fn isTauriApp() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  if (window.__TAURI_INTERNALS__ !== undefined) {
+    return true;
+  }
+  if (window.__TAURI__ !== undefined && window.__TAURI__ !== null) {
+    return true;
+  }
+  return false;
+}
+
+// `tauri dev` loads devUrl (e.g. http://localhost:8080). Cross-origin fetch to GitHub Pages is blocked by CORS there.
+export fn isLocalhostOrigin() {
+  if (typeof window === "undefined" || !window.location) {
+    return false;
+  }
+  let h = window.location.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+}
+
+// Remote OTA manifest check (skip in web browser and on localhost unless explicitly overridden).
+export fn shouldRunOtaNetworkCheck() {
+  if (!isTauriApp()) {
+    return false;
+  }
+  if (typeof window !== "undefined" && window.__TISH_AUDIO_OTA_MANIFEST_URL__) {
+    return true;
+  }
+  if (isLocalhostOrigin()) {
+    return false;
+  }
+  return true;
+}
+
+export fn getOtaManifestUrl() {
+  if (typeof window !== "undefined" && window.__TISH_AUDIO_OTA_MANIFEST_URL__) {
+    return String(window.__TISH_AUDIO_OTA_MANIFEST_URL__).trim();
+  }
+  return "https://tishlang.github.io/tish-audio/app-manifest.json";
+}

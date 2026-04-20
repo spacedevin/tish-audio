@@ -1,7 +1,18 @@
 import { createRoot } from "lattish"
 import { App } from "./App.tish"
+import { bootActiveBundle, checkForUpdates } from "./ota/bootstrap.tish"
 
-let rootEl = document.getElementById("root");
-if (rootEl !== null) {
-  createRoot(rootEl).render(App);
+async fn main() {
+  let bootedOta = await bootActiveBundle();
+  if (bootedOta) return; // We are redirecting to the OTA bundle
+
+  // We are running the active bundle, check for updates in background
+  checkForUpdates();
+
+  let rootEl = document.getElementById("root");
+  if (rootEl !== null) {
+    createRoot(rootEl).render(App);
+  }
 }
+
+main();

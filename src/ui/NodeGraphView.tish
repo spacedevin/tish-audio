@@ -196,10 +196,9 @@ onPointerLeave={(e) => { if (e.buttons === 0) handlePointerUp(); }}
 <svg xmlns="http://www.w3.org/2000/svg" class="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
 {draftCableGroup}
 
-{connections.map(c => {
+{connections.filter(c => nodes.find(n => n.id === c.from) && nodes.find(n => n.id === c.to)).map(c => {
 const fromNode = nodes.find(n => n.id === c.from);
 const toNode = nodes.find(n => n.id === c.to);
-if (!fromNode || !toNode) return null;
 
 const start = getJackCoords(fromNode, true, c.fromPort);
 const end = getJackCoords(toNode, false, c.toPort);
