@@ -360,7 +360,7 @@ return (
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#0d0d0d', "stroke-width": 12, "stroke-linecap": 'round' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#2a2a2a', "stroke-width": 7, "stroke-linecap": 'round' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#141414', "stroke-width": 5, "stroke-linecap": 'round' }} />
-<path d={d} id={"c_" + String(c.id)} class={"audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150 " + (isMidiCable ? "midi-cable-path" : "")} style={{ fill: 'none', stroke: accentStroke, "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+<path d={d} id={"c_" + String(c.id)} class={(isMidiCable ? "midi-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150 " : "audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150 ")} style={{ fill: 'none', stroke: accentStroke, "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
 <circle cx={start.x} cy={start.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
 <circle cx={start.x} cy={start.y} r="2.2" fill="#090909" class="pointer-events-none" />
 <circle cx={end.x} cy={end.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
@@ -506,6 +506,7 @@ draftCableGroup = (
 return (
 <div class="flex-1 min-h-0 w-full min-w-0 flex flex-col relative">
 <div 
+id="tf-patch-board"
 ref={boardRef}
 class="flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none select-none"
 onPointerMove={handlePointerMove}

@@ -431,8 +431,20 @@ const loop = () => {
 try { tickSmartGates(nodeAudioMapRef, nodesRef.current); } catch (eTick) { console.error(eTick); }
 
 cableVisTick = cableVisTick + 1;
-if (nodeAudioMapRef.current && cableVisTick % 2 === 0) {
-  const els = document.querySelectorAll('.audio-cable-path');
+const patchBoard = typeof document !== "undefined" ? document.getElementById("tf-patch-board") : null;
+if (nodeAudioMapRef.current && patchBoard) {
+  const els = patchBoard.querySelectorAll(".audio-cable-path");
+  const nMetered = els.length;
+  const stride = nMetered > 28 ? 8 : (nMetered > 14 ? 4 : 2);
+  if (cableVisTick % stride === 0 && nMetered > 0) {
+  const conns = connectionsRef.current;
+  const connById = {};
+  let cj = 0;
+  while (cj < conns.length) {
+    const row = conns[cj];
+    connById[row.id] = row;
+    cj = cj + 1;
+  }
   const SILENCE_DB = -58;
   let i = 0;
   while (i < els.length) {
@@ -442,17 +454,13 @@ if (nodeAudioMapRef.current && cableVisTick % 2 === 0) {
     let from = '';
     let port = 'main';
     if (idStr.startsWith('c_')) {
-      const connId = idStr.slice(2);
-      const conns = connectionsRef.current;
-      let ci = 0;
-      while (ci < conns.length) {
-        const c = conns[ci];
-        if (c.id === connId) {
-          from = c.from;
-          port = c.fromPort || 'main';
-          break;
-        }
-        ci = ci + 1;
+      const c = connById[idStr.slice(2)];
+      if (c && (c.fromPort === 'midi' || c.toPort === 'midi')) {
+        continue;
+      }
+      if (c) {
+        from = c.from;
+        port = c.fromPort || 'main';
       }
     }
     const mapNode = from ? nodeAudioMapRef.current[from] : null;
@@ -489,6 +497,7 @@ if (nodeAudioMapRef.current && cableVisTick % 2 === 0) {
     }
     const dashState = hasSignal ? 'running' : 'paused';
     if (el.style.animationPlayState !== dashState) el.style.animationPlayState = dashState;
+  }
   }
 }
 
