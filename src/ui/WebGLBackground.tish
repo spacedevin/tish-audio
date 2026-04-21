@@ -1,7 +1,7 @@
 import { useEffect, useRef, h } from "lattish"
 
 export fn WebGLBackground(props) {
-let active = props.active === undefined || props.active === null ? true : !!props.active;
+let panelActive = props["active"] === undefined || props["active"] === null ? true : !!props["active"];
 const canvasRef = useRef(null);
 
 useEffect(() => {
@@ -48,8 +48,8 @@ gl_FragColor = vec4(color * vignette + horizonColor + vec3(0.02, 0.02, 0.03), 1.
 }
 ";
 
-const compileShader = (type, source) => {
-const shader = gl.createShader(type);
+const compileShader = (shaderKind, source) => {
+const shader = gl.createShader(shaderKind);
 gl.shaderSource(shader, source);
 gl.compileShader(shader);
 if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
@@ -95,7 +95,7 @@ gl.viewport(0, 0, dw, dh);
 };
 
 const render = () => {
-if (!active) {
+if (!panelActive) {
 animationId = null;
 return;
 }
@@ -113,7 +113,7 @@ resizeToCanvas();
 ro.observe(canvas);
 resizeToCanvas();
 
-if (active) {
+if (panelActive) {
 render();
 }
 
@@ -124,7 +124,7 @@ cancelAnimationFrame(animationId);
 animationId = null;
 }
 };
-}, [active]);
+}, [panelActive]);
 
-return <canvas ref={canvasRef} class="absolute inset-0 w-full h-full pointer-events-none opacity-30" />;
+return h("canvas", { ref: canvasRef, class: "absolute inset-0 w-full h-full pointer-events-none opacity-30" });
 }

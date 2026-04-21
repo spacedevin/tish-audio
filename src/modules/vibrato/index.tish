@@ -54,20 +54,20 @@ export fn vibrato_buildAudio(ctx, node) {
 
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delay = ctx.createDelay(5.0); 
-delay.delayTime.value = node.type === 'chorus' ? 0.03 : node.type === 'flanger' ? 0.005 : node.type === 'vibrato' ? 0.02 : (node.params.time ?? 0.0);
+delay.delayTime.value = node["type"] === 'chorus' ? 0.03 : node["type"] === 'flanger' ? 0.005 : node["type"] === 'vibrato' ? 0.02 : (node.params.time ?? 0.0);
 let lfoDepthMod = null;
 let feedbackGain = null;
 let wetMixGain = null;
 
-if (node.type !== 'delay' && node.type !== 'slapback') {
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 1.0;
-lfoDepthMod = ctx.createGain(); lfoDepthMod.gain.value = node.type === 'chorus' ? (node.params.depth ?? 1.0) * 0.01 : (node.params.depth ?? 0.005);
+if (node["type"] !== 'delay' && node["type"] !== 'slapback') {
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = node.params.rate ?? 1.0;
+lfoDepthMod = ctx.createGain(); lfoDepthMod.gain.value = node["type"] === 'chorus' ? (node.params.depth ?? 1.0) * 0.01 : (node.params.depth ?? 0.005);
 lfo.connect(lfoDepthMod); lfoDepthMod.connect(delay.delayTime); lfo.start();
 }
 
-if (node.type === 'rotary') {
+if (node["type"] === 'rotary') {
 const tremoloGain = ctx.createGain();
-const tremLfo = ctx.createOscillator(); tremLfo.type = 'sine'; tremLfo.frequency.value = node.params.rate ?? 6.0;
+const tremLfo = ctx.createOscillator(); tremLfo["type"] = 'sine'; tremLfo.frequency.value = node.params.rate ?? 6.0;
 const tremDepth = ctx.createGain(); tremDepth.gain.value = 0.5;
 tremLfo.connect(tremDepth); tremDepth.connect(tremoloGain.gain); tremLfo.start();
 delay.connect(tremoloGain);
@@ -76,10 +76,10 @@ tremoloGain.connect(outNode);
 delay.connect(outNode);
 }
 
-if (node.type !== 'vibrato') inNode.connect(outNode); 
+if (node["type"] !== 'vibrato') inNode.connect(outNode); 
 inNode.connect(delay); 
 
-if (node.type === 'flanger' || node.type === 'delay' || node.type === 'slapback') {
+if (node["type"] === 'flanger' || node["type"] === 'delay' || node["type"] === 'slapback') {
 feedbackGain = ctx.createGain(); feedbackGain.gain.value = node.params.feedback ?? 0.5;
 delay.connect(feedbackGain); feedbackGain.connect(delay);
 if (node.params.mix !== undefined) {
@@ -90,7 +90,7 @@ delay.connect(wetMixGain); wetMixGain.connect(outNode);
 }
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 if (typ === 'delay' || typ === 'slapback') smoothAudioParam(delay.delayTime, p.time ?? 0, ctx);
 if (lfo) smoothAudioParam(lfo.frequency, p.rate ?? 1.0, ctx);
 if (lfoDepthMod) {

@@ -36,8 +36,8 @@ export fn u87_sim_View(props) {
 }
 
 export fn u87_sim_buildAudio(ctx, node) {
-  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 40;
-  const hs = ctx.createBiquadFilter(); hs.type = 'highshelf'; hs.frequency.value = 8000; hs.gain.value = 3;
+  const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 40;
+  const hs = ctx.createBiquadFilter(); hs["type"] = 'highshelf'; hs.frequency.value = 8000; hs.gain.value = 3;
   const outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
   hp.connect(hs); hs.connect(outNode);
   const inNode = hp;

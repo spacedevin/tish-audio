@@ -1,0 +1,281 @@
+import { h, useEffect, useState } from "lattish"
+import { hzFromMidi } from "../../guitar/instrumentSpec.tish"
+import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
+
+export const midi_poly_type = "midi_poly";
+export const midi_poly_category = "UTILITY";
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+export fn midiNoteLabel(n) {
+  const nn = Math.floor(Number(n));
+  if (!Number.isFinite(nn)) {
+    return "-";
+  }
+  const pc = ((nn % 12) + 12) % 12;
+  const oct = Math.floor(nn / 12) - 1;
+  return NOTE_NAMES[pc] + String(oct);
+}
+
+export const midi_poly_metadata = {
+  label: "MIDI Poly",
+  color: "from-violet-600 to-indigo-900",
+  theme: "dark",
+  defaultParams: { level: 0.35, waveform: 0, brightness: 0.5 }
+};
+
+export const midi_poly_layout = { width: 200, height: 340 };
+
+export fn midi_poly_View(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const audioDataMap = props.audioDataMap;
+  const meterSync = props.meterSync;
+
+  let [actRev, setActRev] = useState(0);
+  useEffect(() => {
+    let t = window.setInterval(() => {
+      setActRev((r) => r + 1);
+    }, 50);
+    return () => {
+      window.clearInterval(t);
+    };
+  }, []);
+
+  let activity = { last: "-", vel: 0 };
+  const box = audioDataMap && audioDataMap[node.id];
+  const sink = box && box.midiSink;
+  if (sink && typeof sink.getActivity === "function") {
+    activity = sink.getActivity();
+  }
+  void actRev;
+  void meterSync;
+
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={props.previewOnly}
+      panelW={midi_poly_layout.width}
+      panelH={midi_poly_layout.height}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <div class="flex flex-col gap-2 px-1 w-full" dataMeterSync={meterSync}>
+        <div class="text-[10px] font-mono text-center text-violet-200/90 border border-violet-800/60 rounded bg-black/40 py-2">
+          <div class="text-[8px] uppercase tracking-widest text-violet-400/80">Last note</div>
+          <div class="text-lg font-black tabular-nums">{activity.last}</div>
+          <div class="text-[9px] text-neutral-500">vel {String(Math.round(activity.vel))}</div>
+        </div>
+        <RotaryKnob
+          label={formatKnobLabel("level")}
+          min={0}
+          max={1}
+          value={node.params.level}
+          theme={node.theme}
+          onChange={(v) => onChange("level", v)}
+          resetValue={midi_poly_metadata.defaultParams.level}
+        />
+        <RotaryKnob
+          label="WAVE"
+          min={0}
+          max={2}
+          value={node.params.waveform}
+          theme={node.theme}
+          onChange={(v) => onChange("waveform", v)}
+          resetValue={midi_poly_metadata.defaultParams.waveform}
+        />
+        <RotaryKnob
+          label="BRITE"
+          min={0}
+          max={1}
+          value={node.params.brightness}
+          theme={node.theme}
+          onChange={(v) => onChange("brightness", v)}
+          resetValue={midi_poly_metadata.defaultParams.brightness}
+        />
+      </div>
+    </PedalChassis>
+  );
+}
+
+const waveTypeFromParam = (w) => {
+  const v = Number(w);
+  if (!Number.isFinite(v)) {
+    return "triangle";
+  }
+  if (v < 0.66) {
+    return "sine";
+  }
+  if (v < 1.33) {
+    return "triangle";
+  }
+  return "square";
+};
+
+export fn midi_poly_buildAudio(ctx, node) {
+  const inNode = ctx.createGain();
+  inNode.gain.value = 0;
+  const outNode = ctx.createGain();
+  outNode.gain.value = node.params.level ?? 0.35;
+  inNode.connect(outNode);
+
+  const paramsRef = { current: { ...node.params } };
+
+  const maxVoices = 8;
+  const pool = [];
+  let pi = 0;
+  while (pi < maxVoices) {
+    pool.push({ osc: null, gainNode: null, note: -1, startedAt: 0 });
+    pi = pi + 1;
+  }
+
+  let activity = { last: "-", vel: 0 };
+
+  const findVoiceForNote = (note) => {
+    let i = 0;
+    while (i < pool.length) {
+      if (pool[i].note === note && pool[i].osc) {
+        return pool[i];
+      }
+      i = i + 1;
+    }
+    return null;
+  };
+
+  const stealVoice = () => {
+    let best = pool[0];
+    let i = 1;
+    while (i < pool.length) {
+      if (pool[i].startedAt < best.startedAt) {
+        best = pool[i];
+      }
+      i = i + 1;
+    }
+    return best;
+  };
+
+  const releaseVoice = (v) => {
+    if (!v || !v.osc) {
+      return;
+    }
+    try {
+      v.osc.stop();
+    } catch (eStop) {}
+    try {
+      v.osc.disconnect();
+    } catch (eD) {}
+    try {
+      v.gainNode.disconnect();
+    } catch (eD2) {}
+    v.osc = null;
+    v.gainNode = null;
+    v.note = -1;
+  };
+
+  const noteOn = (ctx2, note, vel) => {
+    const hz = hzFromMidi(note);
+    if (!Number.isFinite(hz) || hz <= 0) {
+      return;
+    }
+    let v = findVoiceForNote(note);
+    if (!v) {
+      v = stealVoice();
+      releaseVoice(v);
+    } else {
+      releaseVoice(v);
+    }
+    const g = ctx2.createGain();
+    const t0 = ctx2.currentTime;
+    const velScale = Math.max(0, Math.min(1, vel / 127)) * 0.6;
+    g.gain.value = 0;
+    g.gain.linearRampToValueAtTime(velScale, t0 + 0.012);
+    const osc = ctx2.createOscillator();
+    const p = paramsRef.current;
+    osc["type"] = waveTypeFromParam(p.waveform);
+    const br = p.brightness ?? 0.5;
+    const det = (br - 0.5) * 6;
+    osc.frequency.setValueAtTime(hz * Math.pow(2, det / 1200), t0);
+    osc.connect(g);
+    g.connect(outNode);
+    osc.start(t0);
+    v.osc = osc;
+    v.gainNode = g;
+    v.note = note;
+    v.startedAt = t0;
+    activity = { last: midiNoteLabel(note), vel: vel };
+  };
+
+  const noteOff = (ctx2, note) => {
+    const v = findVoiceForNote(note);
+    if (!v || !v.osc || !v.gainNode) {
+      return;
+    }
+    const t0 = ctx2.currentTime;
+    try {
+      v.gainNode.gain.cancelScheduledValues(t0);
+      v.gainNode.gain.setValueAtTime(v.gainNode.gain.value, t0);
+      v.gainNode.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
+    } catch (eG) {}
+    const oscToStop = v.osc;
+    window.setTimeout(() => {
+      try {
+        oscToStop.stop();
+      } catch (eS) {}
+      try {
+        oscToStop.disconnect();
+      } catch (eD) {}
+    }, 120);
+    v.osc = null;
+    v.gainNode = null;
+    v.note = -1;
+  };
+
+  const midiSink = {
+    handleEvent: (ev, ctx2) => {
+      if (!ev || !ctx2) {
+        return;
+      }
+      if (ev.kind === "noteOn") {
+        noteOn(ctx2, ev.note, ev.velocity != null ? ev.velocity : 100);
+        return;
+      }
+      if (ev.kind === "noteOff") {
+        noteOff(ctx2, ev.note);
+      }
+    },
+    getActivity: () => activity,
+    dispose: () => {
+      let j = 0;
+      while (j < pool.length) {
+        releaseVoice(pool[j]);
+        j = j + 1;
+      }
+    }
+  };
+
+  const nodeParamSync = (ctx2, n) => {
+    paramsRef.current = { ...n.params };
+    smoothAudioParam(outNode.gain, n.params.level ?? 0.35, ctx2);
+  };
+
+  return {
+    "in": inNode,
+    "out": outNode,
+    lfo: null,
+    nodeAnalyser: null,
+    inPorts: null,
+    outPorts: null,
+    analysers: {},
+    nodeParamSync: nodeParamSync,
+    smartGateRuntime: null,
+    midiSink: midiSink
+  };
+}

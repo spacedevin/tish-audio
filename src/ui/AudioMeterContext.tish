@@ -114,7 +114,7 @@ return (
 <span ref={hzRef} class="text-[10px] text-neutral-500 w-10">0Hz</span>
 </div>
 <div class="flex items-center gap-2">
-<Volume2 class="w-4 h-4 text-neutral-500" />
+{h(Volume2, { "class": "w-4 h-4 text-neutral-500" })}
 <div class="w-24 sm:w-32 h-2.5 sm:h-3 bg-neutral-800 rounded-full overflow-hidden border border-neutral-700 shadow-inner">
 <div ref={levelFillRef} class="h-full bg-green-500 transition-all duration-75" style={{ width: "0%" }} />
 </div>

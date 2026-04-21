@@ -59,8 +59,8 @@ export fn tape_echo_buildAudio(ctx, node) {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delay = ctx.createDelay(5.0); delay.delayTime.value = node.params.time ?? 0.4;
 const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.6;
-const lowpass = ctx.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 4000 - ((node.params.age ?? 0.5) * 3000);
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 1.2;
+const lowpass = ctx.createBiquadFilter(); lowpass["type"] = 'lowpass'; lowpass.frequency.value = 4000 - ((node.params.age ?? 0.5) * 3000);
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = 1.2;
 const lfoDepth = ctx.createGain(); lfoDepth.gain.value = (node.params.age ?? 0.5) * 0.008;
 lfo.connect(lfoDepth); lfoDepth.connect(delay.delayTime); lfo.start();
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.5;

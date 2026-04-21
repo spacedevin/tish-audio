@@ -45,8 +45,8 @@ export fn crossover_buildAudio(ctx, node) {
 
 
 inNode = ctx.createGain();
-const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = node.params.freq ?? 800;
-const high = ctx.createBiquadFilter(); high.type = 'highpass'; high.frequency.value = node.params.freq ?? 800;
+const low = ctx.createBiquadFilter(); low["type"] = 'lowpass'; low.frequency.value = node.params.freq ?? 800;
+const high = ctx.createBiquadFilter(); high["type"] = 'highpass'; high.frequency.value = node.params.freq ?? 800;
 inNode.connect(low); inNode.connect(high);
 outPorts = { low, high };
 nodeParamSync = (ctx, n) => {

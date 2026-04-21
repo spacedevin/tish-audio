@@ -47,12 +47,12 @@ export fn tron_buildAudio(ctx, node) {
 
 
 inNode = ctx.createBiquadFilter();
-inNode.type = 'bandpass';
+inNode["type"] = 'bandpass';
 inNode.frequency.value = node.params.baseFreq ?? 400;
-inNode.Q.value = node.type === 'tron' ? 8.0 : 4.0; 
+inNode.Q.value = node["type"] === 'tron' ? 8.0 : 4.0; 
 
 lfo = ctx.createOscillator();
-lfo.type = node.type === 'tron' ? 'sawtooth' : 'sine';
+lfo["type"] = node["type"] === 'tron' ? 'sawtooth' : 'sine';
 lfo.frequency.value = node.params.rate ?? 2.0;
 
 const lfoDepth = ctx.createGain();

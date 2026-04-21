@@ -46,11 +46,11 @@ export fn octa_fuzz_buildAudio(ctx, node) {
   let smartGateRuntime = null;
 
 
-inNode = ctx.createBiquadFilter(); inNode.type = 'highpass'; inNode.frequency.value = 100; 
+inNode = ctx.createBiquadFilter(); inNode["type"] = 'highpass'; inNode.frequency.value = 100; 
 const rect = ctx.createWaveShaper(); rect.curve = makeRectifierCurve();
-const dcBlocker = ctx.createBiquadFilter(); dcBlocker.type = 'highpass'; dcBlocker.frequency.value = 80; 
+const dcBlocker = ctx.createBiquadFilter(); dcBlocker["type"] = 'highpass'; dcBlocker.frequency.value = 80; 
 const fuzz = ctx.createWaveShaper(); fuzz.curve = makeDistortionCurve(node.params.drive ?? 600);
-const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = node.params.tone ?? 3000;
+const tone = ctx.createBiquadFilter(); tone["type"] = 'lowpass'; tone.frequency.value = node.params.tone ?? 3000;
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
 inNode.connect(rect); rect.connect(dcBlocker); dcBlocker.connect(fuzz); fuzz.connect(tone); tone.connect(outNode);
 nodeParamSync = (ctx, n) => {

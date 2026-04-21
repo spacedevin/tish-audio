@@ -103,10 +103,10 @@ const playEvents = (events) => {
 let ei = 0;
 while (ei < events.length) {
 const e = events[ei];
-if (e.type === 'hit') playPhraseHit(ac, e.phraseIndex, e.kind);
-else if (e.type === 'phraseClear') playPhraseClearFanfare(ac);
-else if (e.type === 'miss') playMissThud(ac);
-else if (e.type === 'win') {
+if (e["type"] === 'hit') playPhraseHit(ac, e.phraseIndex, e.kind);
+else if (e["type"] === 'phraseClear') playPhraseClearFanfare(ac);
+else if (e["type"] === 'miss') playMissThud(ac);
+else if (e["type"] === 'win') {
 playWinFanfare(ac);
 const vo = victoryOverlayRef.current;
 if (vo) vo.classList.remove('hidden');
@@ -297,7 +297,6 @@ const on = profileId === pid;
 return (
 <button
 key={pid}
-type="button"
 onClick={() => setProfileId(pid)}
 class={"rounded-lg px-3 py-2 text-xs font-bold border transition-colors " + (on ? "border-orange-500 bg-orange-950/60 text-orange-200" : "border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-500 hover:text-white")}
 >
@@ -321,7 +320,7 @@ class={"rounded-lg px-3 py-2 text-xs font-bold border transition-colors " + (on 
 <div ref={victoryOverlayRef} class="hidden absolute inset-0 flex flex-col items-center justify-center gap-4 rounded-xl bg-black/80 border-4 border-emerald-600/60 pointer-events-auto">
 <p class="text-2xl sm:text-3xl font-black text-emerald-300 tracking-tight text-center px-4">You finished!</p>
 <p class="text-neutral-300 text-sm text-center max-w-sm px-4">{'You won ' + String(PHRASES_TO_WIN_SESSION) + ' streak-rounds (' + String(PHRASE_NOTE_COUNT) + ' hits each, no miss). Play again to beat your score.'}</p>
-<button type="button" onClick={handleReplay} class="rounded-full bg-orange-500 hover:bg-orange-400 text-black font-bold px-8 py-3 text-sm">Play again</button>
+<button onClick={handleReplay} class="rounded-full bg-orange-500 hover:bg-orange-400 text-black font-bold px-8 py-3 text-sm">Play again</button>
 </div>
 </div>
 </div>

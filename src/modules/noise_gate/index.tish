@@ -47,7 +47,7 @@ export fn noise_gate_buildAudio(ctx, node) {
 
 inNode = ctx.createDynamicsCompressor();
 inNode.threshold.value = node.params.threshold ?? -24;
-inNode.ratio.value = node.type === 'noise_gate' ? 20 : (node.params.ratio ?? 4); 
+inNode.ratio.value = node["type"] === 'noise_gate' ? 20 : (node.params.ratio ?? 4); 
 inNode.attack.value = 0.005; 
 inNode.release.value = node.params.decay ?? 0.1;
 outNode = ctx.createGain(); 
@@ -57,7 +57,7 @@ nodeParamSync = (ctx, n) => {
 const p = n.params;
 const dyn = inNode;
 smoothAudioParam(dyn.threshold, p.threshold ?? -24, ctx);
-smoothAudioParam(dyn.ratio, n.type === 'noise_gate' ? 20 : (p.ratio ?? 4), ctx);
+smoothAudioParam(dyn.ratio, n["type"] === 'noise_gate' ? 20 : (p.ratio ?? 4), ctx);
 smoothAudioParam(dyn.release, p.decay ?? 0.1, ctx);
 smoothAudioParam(outNode.gain, p.makeup ?? 1.0, ctx);
 };

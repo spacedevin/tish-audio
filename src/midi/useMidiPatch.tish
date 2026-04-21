@@ -1,0 +1,347 @@
+// MIDI capture + bindings + dispatch. Called from App as a single hook.
+
+import { useState, useEffect, useRef, runBatched } from "lattish"
+import { isTauriApp } from "../platform/tauriEnv.tish"
+import { subscribeMidiDispatch, attachWebMidiInput, detachWebMidiInput, requestWebMidiAccess, feedNativeMidiPayload } from "./router.tish"
+import { applyMidiLikeToGeneratorSink } from "./voiceApi.tish"
+
+const randomBindingId = () => Math.random().toString(36).substr(2, 11);
+
+/** Lattish / batched updates may pass a non-array `prev`; never spread a non-iterable. */
+const asArray = (v) => Array.isArray(v) ? v : [];
+
+export fn useMidiPatch(
+  audioReady,
+  nodeAudioMapRef,
+  audioCtxRef,
+  analyserRef,
+  pitchAnalyserRef,
+  outGainRef,
+  setNodes,
+  setAudioReady,
+  setShowDeviceMenu,
+  setShowModuleLibrary
+) {
+  let [midiDevices, setMidiDevices] = useState([]);
+  let [showMidiDeviceMenu, setShowMidiDeviceMenu] = useState(false);
+  let [midiFlowBusy, setMidiFlowBusy] = useState(false);
+  let [midiBindings, setMidiBindings] = useState([]);
+  let [midiCaptureUiTick, setMidiCaptureUiTick] = useState(0);
+
+  const midiBindingsRef = useRef(midiBindings);
+  midiBindingsRef.current = midiBindings;
+  const midiAccessRef = useRef(null);
+  const midiCaptureRef = useRef({});
+  const midiCaptureDisplayBumpAtRef = useRef(0);
+  const nativeMidiUnlistenRef = useRef(null);
+
+  async fn ensureAudioEngineShell() {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+    }
+    const ctx = audioCtxRef.current;
+    if (!analyserRef.current) {
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyserRef.current = analyser;
+      const outGain = ctx.createGain();
+      outGain.gain.value = 1.0;
+      outGainRef.current = outGain;
+      analyser.connect(outGain);
+      outGain.connect(ctx.destination);
+    }
+    if (!pitchAnalyserRef.current) {
+      const pitchA = ctx.createAnalyser();
+      pitchA.fftSize = 4096;
+      pitchA.smoothingTimeConstant = 0.25;
+      pitchAnalyserRef.current = pitchA;
+    }
+    try {
+      await ctx.resume();
+    } catch (eR) {}
+  };
+
+  async fn ensureNativeMidiListener() {
+    if (nativeMidiUnlistenRef.current) {
+      return;
+    }
+    const ota = window.__OTA_BRIDGE__;
+    if (!ota || !ota.listenNativeMidiChunk) {
+      return;
+    }
+    try {
+      const un = await ota.listenNativeMidiChunk((payload) => {
+        feedNativeMidiPayload(payload);
+      });
+      nativeMidiUnlistenRef.current = un;
+    } catch (eL) {
+      console.warn("[TishAudio:midi] native listen failed", eL);
+    }
+  };
+
+  async fn openMidiDeviceMenuInner() {
+    setShowDeviceMenu(false);
+    setShowModuleLibrary(false);
+    setMidiFlowBusy(true);
+    try {
+      if (isTauriApp()) {
+        const ota = window.__OTA_BRIDGE__;
+        if (!ota || !ota.invoke) {
+          alert("Native MIDI requires the OTA bridge (invoke). Rebuild ota-bridge.js.");
+          return;
+        }
+        await ensureNativeMidiListener();
+        const list = await ota.invoke("list_midi_inputs");
+        const rows = [];
+        const rawList = list && list.length != null ? list : [];
+        let li = 0;
+        while (li < rawList.length) {
+          const it = rawList[li];
+          const idx = it.index != null ? it.index : it.Index;
+          const nm = it.name != null ? it.name : it.Name;
+          rows.push({ "native": true, "index": idx, "label": typeof nm === "string" ? nm : ("MIDI " + String(idx)) });
+          li = li + 1;
+        }
+        setMidiDevices(rows);
+        setShowMidiDeviceMenu(true);
+      } else {
+        if (typeof window !== "undefined" && window.isSecureContext === false) {
+          alert("Web MIDI needs a secure context (https or localhost).");
+          return;
+        }
+        const access = await requestWebMidiAccess();
+        midiAccessRef.current = access;
+        const rows = [];
+        access.inputs.forEach((inp) => {
+          rows.push({ "native": false, "deviceId": inp.id, "label": inp.name && inp.name.length ? inp.name : inp.id });
+        });
+        setMidiDevices(rows);
+        setShowMidiDeviceMenu(true);
+      }
+    } catch (e) {
+      console.error("[TishAudio:midi] open menu", e);
+      alert("MIDI: " + (e && e.message ? e.message : String(e)));
+    } finally {
+      setMidiFlowBusy(false);
+    }
+  };
+
+  async fn connectMidiChoiceInner(row) {
+    try {
+      await ensureAudioEngineShell();
+      const bindingId = randomBindingId();
+      let midiInputId = "";
+      let portKey = "";
+      let nativeMidi = false;
+      let label = row.label || "MIDI";
+
+      if (isTauriApp() && row["native"] === true) {
+        nativeMidi = true;
+        portKey = String(row.index);
+        midiInputId = "native:" + portKey + ":" + bindingId.slice(0, 8);
+        const ota = window.__OTA_BRIDGE__;
+        if (!ota || !ota.invoke) {
+          alert("Native MIDI requires the OTA bridge.");
+          return;
+        }
+        await ensureNativeMidiListener();
+        await ota.invoke("start_native_midi_input", { args: { deviceIndex: row.index, inputId: midiInputId } });
+      } else {
+        const access = midiAccessRef.current;
+        const inp = access && access.inputs.get(row.deviceId);
+        if (!inp) {
+          alert("MIDI input not found. Open Connect MIDI again.");
+          return;
+        }
+        portKey = String(row.deviceId);
+        midiInputId = "web:" + portKey;
+        attachWebMidiInput(midiInputId, inp);
+      }
+
+      runBatched(() => {
+        setMidiBindings((prev) => [...asArray(prev), { id: bindingId, midiInputId: midiInputId, targetNodeId: null, channelMask: -1, capture: false }]);
+        setNodes((prev) => {
+          const prevList = asArray(prev);
+          let nMidi = 0;
+          let pi = 0;
+          while (pi < prevList.length) {
+            const rowN = prevList[pi];
+            if (rowN["type"] === "MIDI_IN") {
+              nMidi = nMidi + 1;
+            }
+            pi = pi + 1;
+          }
+          return [
+            ...prevList,
+            {
+              id: "midi_in_" + bindingId,
+              "type": "MIDI_IN",
+              x: 50,
+              y: 360 + nMidi * 72,
+              label: label.substring(0, 22),
+              isSystem: true,
+              params: { midiInputId: midiInputId, midiBindingId: bindingId, portKey: portKey, nativeMidi: nativeMidi }
+            }
+          ];
+        });
+        setAudioReady(true);
+        setShowMidiDeviceMenu(false);
+      });
+    } catch (eConn) {
+      console.error("[TishAudio:midi] connect", eConn);
+      alert("Could not open MIDI: " + (eConn && eConn.message ? eConn.message : String(eConn)));
+    }
+  };
+
+  const updateMidiBindingTarget = (bindingId, targetNodeId) => {
+    const tid = targetNodeId && String(targetNodeId).length ? String(targetNodeId) : null;
+    setMidiBindings((prev) =>
+      asArray(prev).map((b) => {
+        if (b.id !== bindingId) {
+          return b;
+        }
+        return { ...b, targetNodeId: tid };
+      })
+    );
+  };
+
+  const toggleMidiBindingCapture = (bindingId) => {
+    setMidiBindings((prev) =>
+      asArray(prev).map((b) => {
+        if (b.id !== bindingId) {
+          return b;
+        }
+        const nextCap = !b.capture;
+        if (nextCap) {
+          midiCaptureRef.current[bindingId] = [];
+        } else {
+          Reflect.deleteProperty(midiCaptureRef.current, bindingId);
+        }
+        return { ...b, capture: nextCap };
+      })
+    );
+    runBatched(() => {
+      setMidiCaptureUiTick((x) => x + 1);
+    });
+  };
+
+  const onRemoveMidiNode = (node) => {
+    if (!node || node["type"] !== "MIDI_IN" || !node.params) {
+      return;
+    }
+    const p = node.params;
+    const mid = p.midiInputId;
+    if (p.nativeMidi === true && isTauriApp()) {
+      const otaM = window.__OTA_BRIDGE__;
+      if (otaM && otaM.invoke) {
+        void otaM.invoke("stop_native_midi_input", { args: { inputId: mid } });
+      }
+    } else if (mid) {
+      detachWebMidiInput(mid);
+    }
+    if (p.midiBindingId) {
+      Reflect.deleteProperty(midiCaptureRef.current, p.midiBindingId);
+      setMidiBindings((prev) => asArray(prev).filter((b) => b.id !== p.midiBindingId));
+    }
+  };
+
+  const exportMidiBindingCapture = (bindingId) => {
+    const buf = midiCaptureRef.current[bindingId];
+    if (!buf || buf.length === 0) {
+      alert("No captured MIDI for this input. Arm, play, then export.");
+      return;
+    }
+    const blob = new Blob([JSON.stringify(buf, null, 2)], { "type": "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "midi-capture-" + bindingId + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (!audioReady) {
+      return;
+    }
+    const unsub = subscribeMidiDispatch((ev) => {
+      const bindings = midiBindingsRef.current;
+      const ctx = audioCtxRef.current;
+      let bi = 0;
+      while (bi < bindings.length) {
+        const b = bindings[bi];
+        if (!b || b.midiInputId !== ev.inputId) {
+          bi = bi + 1;
+          continue;
+        }
+        if (b.channelMask != null && b.channelMask >= 0 && b.channelMask !== ev.channel) {
+          bi = bi + 1;
+          continue;
+        }
+        if (b.targetNodeId) {
+          const box = nodeAudioMapRef.current[b.targetNodeId];
+          const sink = box && box.midiSink;
+          if (sink && ctx) {
+            applyMidiLikeToGeneratorSink(sink, ctx, ev);
+          }
+        }
+        if (b.capture && midiCaptureRef.current[b.id]) {
+          const t = ctx && ctx.currentTime != null ? ctx.currentTime : 0;
+          const rec = { t: t, "kind": ev.kind, channel: ev.channel };
+          if (ev.note != null) {
+            rec["note"] = ev.note;
+          }
+          if (ev.velocity != null) {
+            rec["velocity"] = ev.velocity;
+          }
+          midiCaptureRef.current[b.id].push(rec);
+          const nowMs = Date.now();
+          if (nowMs - midiCaptureDisplayBumpAtRef.current > 120) {
+            midiCaptureDisplayBumpAtRef.current = nowMs;
+            setMidiCaptureUiTick((x) => x + 1);
+          }
+        }
+        bi = bi + 1;
+      }
+    });
+    return unsub;
+  }, [audioReady]);
+
+  useEffect(() => {
+    return () => {
+      if (nativeMidiUnlistenRef.current) {
+        try {
+          nativeMidiUnlistenRef.current();
+        } catch (eU) {}
+        nativeMidiUnlistenRef.current = null;
+      }
+    };
+  }, []);
+
+  const getMidiCaptureEventCount = (bindingId) => {
+    const a = midiCaptureRef.current[bindingId];
+    return Array.isArray(a) ? a.length : 0;
+  };
+
+  const midiDevicesSafe = Array.isArray(midiDevices) ? midiDevices : [];
+  return {
+    midiDevices: midiDevicesSafe,
+    midiCaptureUiTick: midiCaptureUiTick,
+    getMidiCaptureEventCount: getMidiCaptureEventCount,
+    showMidiDeviceMenu: showMidiDeviceMenu,
+    midiFlowBusy: midiFlowBusy,
+    midiBindings: midiBindings,
+    midiCaptureRef: midiCaptureRef,
+    openMidiDeviceMenu: () => {
+      void openMidiDeviceMenuInner();
+    },
+    connectMidiChoice: (row) => {
+      void connectMidiChoiceInner(row);
+    },
+    updateMidiBindingTarget: updateMidiBindingTarget,
+    toggleMidiBindingCapture: toggleMidiBindingCapture,
+    exportMidiBindingCapture: exportMidiBindingCapture,
+    setShowMidiDeviceMenu: setShowMidiDeviceMenu,
+    onRemoveMidiNode: onRemoveMidiNode
+  };
+}

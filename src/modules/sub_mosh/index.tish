@@ -46,9 +46,9 @@ export fn sub_mosh_buildAudio(ctx, node) {
   let smartGateRuntime = null;
 
 
-const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;
+const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 90;
 const rect = ctx.createWaveShaper(); rect.curve = makeRectifierCurve();
-const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = node.params.cut ?? 1400; lp.Q.value = 0.85;
+const lp = ctx.createBiquadFilter(); lp["type"] = 'lowpass'; lp.frequency.value = node.params.cut ?? 1400; lp.Q.value = 0.85;
 const wetGain = ctx.createGain(); wetGain.gain.value = (node.params.mix ?? 0.45) * 0.95;
 const dryGain = ctx.createGain(); dryGain.gain.value = 1.0 - (node.params.mix ?? 0.45) * 0.55;
 const sum = ctx.createGain();

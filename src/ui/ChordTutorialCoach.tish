@@ -1,4 +1,4 @@
-import { h, useState, useEffect, useRef } from "lattish"
+import { h, useState, useEffect, useLayoutEffect, useRef } from "lattish"
 import { LESSON_VOICINGS } from "../guitar/chordLessonVoicings.tish"
 import { analyzeLiveChord } from "../guitar/liveChordDetect.tish"
 import { gradeLessonShape } from "../guitar/chordShapeGrade.tish"
@@ -6,7 +6,7 @@ import { playVoicingOsc } from "../audio/playChordReference.tish"
 import { ChordShapeSvg } from "./ChordShapeSvg.tish"
 
 fn paintChordTutorialDom(rootEl, grade) {
-if (!rootEl) return;
+if (!rootEl || typeof rootEl.querySelector !== "function") return;
 const msgEl = rootEl.querySelector('[data-coach-msg="1"]');
 const ringEl = rootEl.querySelector('[data-coach-ring="1"]');
 
@@ -66,7 +66,11 @@ let [lessonId, setLessonId] = useState(LESSON_VOICINGS[0].id);
 
 const lastKeyRef = useRef('');
 const hearUntilRef = useRef(0);
-const heroRef = useRef(null);
+const heroHostIdRef = useRef(null);
+if (heroHostIdRef.current == null || heroHostIdRef.current === '') {
+heroHostIdRef.current = 'chord-coach-' + Math.random().toString(36).substr(2, 9);
+}
+const heroDomRef = useRef(null);
 
 let lesson = LESSON_VOICINGS[0];
 let i = 0;
@@ -76,6 +80,23 @@ i = i + 1;
 }
 
 const isValidSpec = spec && spec.openMidis && spec.openMidis.length === 6;
+
+const resolveHeroEl = () => {
+let el = heroDomRef.current;
+if (el && typeof el.querySelector === "function") return el;
+const byId = typeof document !== "undefined" && heroHostIdRef.current ? document.getElementById(heroHostIdRef.current) : null;
+if (byId && typeof byId.querySelector === "function") {
+heroDomRef.current = byId;
+return byId;
+}
+return null;
+};
+
+useLayoutEffect(() => {
+if (!isValidSpec) return;
+const el = typeof document !== "undefined" && heroHostIdRef.current ? document.getElementById(heroHostIdRef.current) : null;
+if (el && typeof el.querySelector === "function") heroDomRef.current = el;
+}, [isValidSpec, lessonId, lesson.displayName]);
 
 useEffect(() => {
 if (!isValidSpec || !analyserRef || !analyserRef.current) return;
@@ -96,9 +117,8 @@ const g = gradeLessonShape(lesson.frets, snap, { minConfidence: 0.15, minRms: 0.
 const k = String(g.ok) + '|' + String(g.message) + '|' + String(g.matchedStrings.join(',')) + '|' + String(g.wrongStrings.join(','));
 if (k !== lastKeyRef.current) {
 lastKeyRef.current = k;
-if (heroRef.current) {
-paintChordTutorialDom(heroRef.current, g);
-}
+const heroEl = resolveHeroEl();
+if (heroEl) paintChordTutorialDom(heroEl, g);
 }
 }
 }
@@ -122,8 +142,9 @@ if (audioCtx) {
 if (audioCtx.state === 'suspended') void audioCtx.resume();
 hearUntilRef.current = Date.now() + 600;
 playVoicingOsc(audioCtx, spec, lesson.frets);
-if (heroRef.current) {
-paintChordTutorialDom(heroRef.current, { ok: false, matchedStrings: [], wrongStrings: [], missingStrings: [], confidenceOk: false, message: 'Strum to check shape' });
+const heroElHear = resolveHeroEl();
+if (heroElHear) {
+paintChordTutorialDom(heroElHear, { ok: false, matchedStrings: [], wrongStrings: [], missingStrings: [], confidenceOk: false, message: 'Strum to check shape' });
 lastKeyRef.current = '';
 }
 }
@@ -144,7 +165,8 @@ class: 'shrink-0 snap-start rounded-lg border p-2 w-20 flex flex-col items-cente
 onClick: () => { 
 setLessonId(l.id); 
 lastKeyRef.current = ''; 
-if (heroRef.current) paintChordTutorialDom(heroRef.current, initialGrade);
+const heroElPick = resolveHeroEl();
+if (heroElPick) paintChordTutorialDom(heroElPick, initialGrade);
 }
 }, [
 h('span', { class: 'text-xs font-bold text-neutral-300' }, [l.id]),
@@ -155,7 +177,7 @@ h(ChordShapeSvg, { frets: l.frets })
 })
 ),
 
-h('div', { ref: heroRef, 'data-coach-ring': '1', class: 'flex items-center gap-6 rounded-xl border bg-neutral-950 p-5 transition-all duration-300 ' + ringClass }, [
+h('div', { id: heroHostIdRef.current, 'data-coach-ring': '1', class: 'flex items-center gap-6 rounded-xl border bg-neutral-950 p-5 transition-all duration-300 ' + ringClass }, [
 h('div', { class: 'w-24 h-32 shrink-0 bg-neutral-900 border border-neutral-800 rounded-lg p-1' }, [
 h(ChordShapeSvg, { frets: lesson.frets })
 ]),

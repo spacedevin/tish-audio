@@ -15,4 +15,8 @@ window.__OTA_BRIDGE__ = {
     listen("native-audio-chunk", (event) => {
       handler(event.payload);
     }),
+  listenNativeMidiChunk: (handler) =>
+    listen("native-midi-chunk", (event) => {
+      handler(event.payload);
+    }),
 };

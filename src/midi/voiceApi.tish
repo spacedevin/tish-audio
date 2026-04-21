@@ -1,0 +1,28 @@
+// Shared seam between **live capture** (hardware / Web MIDI) and **producer** (future: SMF,
+// piano roll, clips). Both should drive generators through the same normalized events and the
+// same `midiSink.handleEvent(ev, audioContext)` entry point — do not duplicate voice/oscillator
+// logic for timeline playback.
+
+/**
+ * Forward a normalized router event to a generator's sink (same path live + scheduled playback will use).
+ * `ev` shape matches `parseMidiBytes` / Web MIDI: `{ kind, channel, note?, velocity?, ... }`.
+ */
+export fn applyMidiLikeToGeneratorSink(sink, audioCtx, ev) {
+  if (!sink || typeof sink.handleEvent !== "function" || !audioCtx || !ev) {
+    return;
+  }
+  sink.handleEvent(ev, audioCtx);
+}
+
+/**
+ * Stub for future producer clock: convert clip time (seconds) to AudioContext time for scheduling.
+ * Live MIDI uses `audioCtx.currentTime` implicitly in handleEvent; producers will pass
+ * `audioCtx.currentTime + clipOffset` when scheduling from a timeline.
+ */
+export fn clipTimeToAudioTime(audioCtx, clipTimeSeconds) {
+  const t = Number(clipTimeSeconds);
+  if (!audioCtx || !Number.isFinite(t)) {
+    return 0;
+  }
+  return audioCtx.currentTime + Math.max(0, t);
+}

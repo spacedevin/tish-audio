@@ -18,6 +18,7 @@ import * as flanger from './flanger/index.tish';
 import * as fuzz from './fuzz/index.tish';
 import * as hall_verb from './hall_verb/index.tish';
 import * as metal from './metal/index.tish';
+import * as midi_poly from './midi_poly/index.tish';
 import * as muff from './muff/index.tish';
 import * as noise_gate from './noise_gate/index.tish';
 import * as octa_fuzz from './octa_fuzz/index.tish';
@@ -202,6 +203,16 @@ export const MODULE_REGISTRY = {
     layout: metal.metal_layout,
     View: metal.metal_View,
     buildAudio: metal.metal_buildAudio,
+  },
+  'midi_poly': {
+    type: midi_poly.midi_poly_type,
+    category: midi_poly.midi_poly_category,
+    metadata: midi_poly.midi_poly_metadata,
+    layout: midi_poly.midi_poly_layout,
+    View: midi_poly.midi_poly_View,
+    buildAudio: midi_poly.midi_poly_buildAudio,
+    /** Node audio box exposes `midiSink` — MIDI_IN bindings may route here. */
+    acceptsMidiInput: true,
   },
   'muff': {
     type: muff.muff_type,
@@ -459,6 +470,7 @@ const LEGACY_LIBRARY = {
   ],
   UTILITY: [
     { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
+    { type: 'midi_poly', label: 'MIDI Poly', color: 'from-violet-600 to-indigo-900', theme: 'dark', defaultParams: { level: 0.35, waveform: 0, brightness: 0.5 } },
     { type: 'crossover', label: 'Freq Split', color: 'from-blue-800 to-indigo-950', theme: 'dark', defaultParams: { freq: 800 } },
     { type: 'splitter', label: 'Splitter', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { output: 1.0 } }
   ]
@@ -468,17 +480,23 @@ export const PEDAL_LIBRARY = { ...LEGACY_LIBRARY };
 
 export const getNodePorts = (node) => {
   if (!node) return { "in": ['main'], "out": ['main'] };
-  
-  if (MODULE_REGISTRY[node.type]?.ports) {
-    if (typeof MODULE_REGISTRY[node.type].ports === 'function') {
-      return MODULE_REGISTRY[node.type].ports(node);
+  if (node["type"] === 'MIDI_IN') return { "in": [], "out": ['midi'] };
+  if (node["type"] === 'SYS_IN') return { "in": ['main'], "out": [] };
+  const regAccept = MODULE_REGISTRY[node["type"]];
+  if (regAccept && regAccept.acceptsMidiInput === true) {
+    return { "in": ['midi', 'main'], "out": ['main'] };
+  }
+
+  if (MODULE_REGISTRY[node["type"]]?.ports) {
+    if (typeof MODULE_REGISTRY[node["type"]].ports === 'function') {
+      return MODULE_REGISTRY[node["type"]].ports(node);
     }
-    return MODULE_REGISTRY[node.type].ports;
+    return MODULE_REGISTRY[node["type"]].ports;
   }
 
   // legacy fallback
-  if (node.type === 'crossover') return { "in": ['main'], "out": ['low', 'high'] };
-  if (node.type === 'console_mixer') {
+  if (node["type"] === 'crossover') return { "in": ['main'], "out": ['low', 'high'] };
+  if (node["type"] === 'console_mixer') {
     const numCh = node.params.channels || 4;
     const ins = [];
     for(let i=1; i<=numCh; i = i + 1) ins.push("ch" + String(i));

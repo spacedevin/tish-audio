@@ -48,7 +48,7 @@ export fn vocal_doubler_buildAudio(ctx, node) {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delayL = ctx.createDelay(1.0); delayL.delayTime.value = 0.02; 
 const delayR = ctx.createDelay(1.0); delayR.delayTime.value = 0.03; 
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 1.5;
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = 1.5;
 const lfoDepth = ctx.createGain(); lfoDepth.gain.value = (node.params.spread ?? 0.5) * 0.005;
 lfo.connect(lfoDepth); lfoDepth.connect(delayL.delayTime); lfoDepth.connect(delayR.delayTime); lfo.start();
 const wetMix = ctx.createGain(); wetMix.gain.value = node.params.mix ?? 0.5;

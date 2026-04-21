@@ -51,7 +51,7 @@ export fn overdrive_buildAudio(ctx, node) {
   inNode.oversample = '4x';
 
   const toneBp = ctx.createBiquadFilter(); 
-  toneBp.type = 'lowpass'; 
+  toneBp["type"] = 'lowpass'; 
   toneBp.frequency.value = node.params.tone ?? 3000;
   
   const gain = ctx.createGain(); 

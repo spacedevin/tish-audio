@@ -13,7 +13,7 @@ import { Guitarcade } from "./ui/Guitarcade.tish"
 import { TuningMode } from "./ui/TuningMode.tish"
 import { AudioMeterProvider, HeaderMeterReadout } from "./ui/AudioMeterContext.tish"
 import { isTauriApp } from "./platform/tauriEnv.tish"
-
+import { useMidiPatch } from "./midi/useMidiPatch.tish"
 export fn App() {
 let [activeTab, setActiveTab] = useState('pedalboard');
 let [audioReady, setAudioReady] = useState(false);
@@ -49,6 +49,9 @@ if (activeTab === 'pedalboard') {
 patchBoardMeterTickRef.current = audioGraphTick;
 }
 const nodeGraphMeterTick = activeTab === 'pedalboard' ? audioGraphTick : patchBoardMeterTickRef.current;
+
+let midi = useMidiPatch(audioReady, nodeAudioMapRef, audioCtxRef, analyserRef, pitchAnalyserRef, outGainRef, setNodes, setAudioReady, setShowDeviceMenu, setShowModuleLibrary);
+let midiDeviceRows = Array.isArray(midi.midiDevices) ? midi.midiDevices : [];
 
 async fn getDevices() {
 const log = (m, x) => {
@@ -242,11 +245,11 @@ outputChannelCount: [1]
 });
 workletNode.port.onmessage = (ev) => {
 const m = ev.data;
-if (m == null || m.type == null) return;
-if (m.type === "diagChunkMaxAbs") {
+if (m == null || m["type"] == null) return;
+if (m["type"] === "diagChunkMaxAbs") {
 log("connectDevice: diag native chunk maxAbs (worklet)", { maxAbs: m.maxAbs });
 }
-if (m.type === "diagFirstProcess") {
+if (m["type"] === "diagFirstProcess") {
 log("connectDevice: diag first AudioWorklet process tick", {});
 }
 };
@@ -407,7 +410,7 @@ rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
 // Bump meterSync only when topology/rebuild runs — not on every param tweak. Otherwise each knob
 // move schedules a second full flush right after layout, which races pointer capture + Lattish patch
 // and breaks the first control on pedals/racks (global hook order + DOM churn).
-setAudioGraphTick(t => t + 1);
+setAudioGraphTick((n) => n + 1);
 }
 syncAudioNodeParams(audioCtxRef.current, nodeAudioMapRef, nodes);
 const ac = audioCtxRef.current;
@@ -495,11 +498,11 @@ frame = requestAnimationFrame(loop);
 return () => { if (frame) cancelAnimationFrame(frame); };
 }, [audioReady]);
 
-const addNode = (category, type) => {
-const template = PEDAL_LIBRARY[category].find(p => p.type === type);
+const addNode = (category, moduleType) => {
+const template = PEDAL_LIBRARY[category].find((p) => p["type"] === moduleType);
 if (!template) return;
 
-const regMeta = MODULE_REGISTRY[type] && MODULE_REGISTRY[type].metadata ? MODULE_REGISTRY[type].metadata : null;
+const regMeta = MODULE_REGISTRY[moduleType] && MODULE_REGISTRY[moduleType].metadata ? MODULE_REGISTRY[moduleType].metadata : null;
 const vsFromReg = regMeta && regMeta.visualStyle ? regMeta.visualStyle : null;
 setNodes(prev => [...prev, { 
 id: Math.random().toString(36).substr(2, 9), 
@@ -514,7 +517,10 @@ y: 200 + Math.random() * 100
 
 const removeNode = (id) => {
 const nodeToRemove = nodes.find(n => n.id === id);
-if (nodeToRemove && nodeToRemove.type === 'SYS_IN' && nodeToRemove.params?.deviceId) {
+if (nodeToRemove && nodeToRemove["type"] === "MIDI_IN") {
+midi.onRemoveMidiNode(nodeToRemove);
+}
+if (nodeToRemove && nodeToRemove["type"] === 'SYS_IN' && nodeToRemove.params?.deviceId) {
 const deviceId = nodeToRemove.params.deviceId;
 const src = sourcesRef.current[deviceId];
 if (src) {
@@ -574,14 +580,44 @@ setNodes(prev => prev.map(n => n.id === id ? { ...n, bypassed: !n.bypassed } : n
 
 const addConnection = (fromId, fromPort, toId, toPort) => {
 if (fromId === toId) return;
+const fromIsMidi = fromPort === 'midi';
+const toIsMidi = toPort === 'midi';
+if (fromIsMidi !== toIsMidi) return;
+if (fromIsMidi && toIsMidi) {
+const fromN = nodesRef.current.find(n => n.id === fromId);
+const toN = nodesRef.current.find(n => n.id === toId);
+if (!fromN || fromN["type"] !== 'MIDI_IN' || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) return;
+const bid = fromN.params && fromN.params.midiBindingId;
+if (!bid) return;
+midi.updateMidiBindingTarget(bid, toId);
+}
 setConnections(prev => {
-if (prev.some(c => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) return prev;
-return [...prev, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort, to: toId, toPort }];
+let base = prev;
+if (fromIsMidi && toIsMidi) {
+base = prev.filter(c => !(c.from === fromId && c.fromPort === 'midi'));
+}
+if (base.some(c => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) return base;
+return [...base, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort, to: toId, toPort }];
 });
 };
 
 const removeConnection = (id) => {
-setConnections(prev => prev.filter(c => c.id !== id));
+setConnections(prev => {
+const hit = prev.find(c => c.id === id);
+if (hit && hit.fromPort === 'midi' && hit.toPort === 'midi') {
+const fromN = nodesRef.current.find(n => n.id === hit.from);
+const bid = fromN && fromN.params && fromN.params.midiBindingId;
+if (bid) midi.updateMidiBindingTarget(bid, null);
+}
+return prev.filter(c => c.id !== id);
+});
+};
+
+const clearMidiPatchFromInNode = (midiInNodeId) => {
+const node = nodesRef.current.find(n => n.id === midiInNodeId);
+const bid = node && node.params && node.params.midiBindingId;
+if (bid) midi.updateMidiBindingTarget(bid, null);
+setConnections(prev => prev.filter(c => !(c.from === midiInNodeId && c.fromPort === 'midi')));
 };
 
 // Lattish uses one global hook stack per App() flush; NodeGraphView runs O(nodes) FC hooks.
@@ -590,14 +626,14 @@ setConnections(prev => prev.filter(c => c.id !== id));
 const tabBar = useMemo(() => (
 <div class="flex items-center gap-1 sm:gap-2 flex-wrap justify-center">
 {[
-{ id: 'pedalboard', icon: Sliders, label: 'Patch' },
-{ id: 'jam', icon: Play, label: 'Jam' },
-{ id: 'game', icon: Gamepad2, label: 'Arcade' },
-{ id: 'tuning', icon: TuningFork, label: 'Tuning' },
-{ id: 'chords', icon: Music2, label: 'Chords' }
+{ id: 'pedalboard', Icon: Sliders, label: 'Patch' },
+{ id: 'jam', Icon: Play, label: 'Jam' },
+{ id: 'game', Icon: Gamepad2, label: 'Arcade' },
+{ id: 'tuning', Icon: TuningFork, label: 'Tuning' },
+{ id: 'chords', Icon: Music2, label: 'Chords' }
 ].map(tab => (
-<button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-950")}>
-{tab.icon({ class: "w-4 h-4 sm:w-5 sm:h-5" })} {tab.label}
+<button key={tab.id} onClick={() => setActiveTab(tab.id)} class={"flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all " + (activeTab === tab.id ? "bg-neutral-800 text-white border border-neutral-700" : "text-neutral-500 hover:text-white hover:bg-neutral-950")}>
+{h(tab.Icon, { "class": "w-4 h-4 sm:w-5 sm:h-5" })} {tab.label}
 </button>
 ))}
 </div>
@@ -605,31 +641,37 @@ const tabBar = useMemo(() => (
 
 const patchBoardTab = useMemo(() => (
 <div class={activeTab === 'pedalboard' ? "flex flex-1 min-h-0 flex-col relative overflow-hidden" : "hidden"}>
-<NodeGraphView 
-nodes={nodes} 
+<NodeGraphView
+nodes={nodes}
 connections={connections}
 nodeAudioMapRef={nodeAudioMapRef}
 audioGraphTick={nodeGraphMeterTick}
 patchActive={activeTab === 'pedalboard'}
-onAudioUiBump={() => setAudioGraphTick(t => t + 1)}
-removeNode={removeNode} 
-updateNodeParam={updateNodeParam} 
+onAudioUiBump={() => setAudioGraphTick((t) => t + 1)}
+removeNode={removeNode}
+updateNodeParam={updateNodeParam}
 updateNodePos={updateNodePos}
 toggleNodeBypass={toggleNodeBypass}
 addConnection={addConnection}
 removeConnection={removeConnection}
+midiBindings={midi.midiBindings}
+clearMidiPatchFromInNode={clearMidiPatchFromInNode}
+toggleMidiBindingCapture={midi.toggleMidiBindingCapture}
+exportMidiBindingCapture={midi.exportMidiBindingCapture}
+midiCaptureUiTick={midi.midiCaptureUiTick}
+getMidiCaptureEventCount={midi.getMidiCaptureEventCount}
 />
 </div>
-), [activeTab, nodes, connections, nodeGraphMeterTick, removeNode, updateNodeParam, updateNodePos, toggleNodeBypass, addConnection, removeConnection]);
+), [activeTab, nodes, connections, nodeGraphMeterTick, removeNode, updateNodeParam, updateNodePos, toggleNodeBypass, addConnection, removeConnection, midi.midiBindings, clearMidiPatchFromInNode, midi.toggleMidiBindingCapture, midi.exportMidiBindingCapture, midi.midiCaptureUiTick, midi.getMidiCaptureEventCount]);
 
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans select-none">
 {micDenied && (
-<div class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" style={{ zIndex: 9999 }}>
 <div class="bg-neutral-900 border border-red-500/60 rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 flex flex-col gap-5">
 <div class="flex items-center gap-3">
 <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
-<Mic class="w-5 h-5 text-red-400" />
+{h(Mic, { "class": "w-5 h-5 text-red-400" })}
 </div>
 <h2 class="text-lg font-bold text-white">Microphone Access Denied</h2>
 </div>
@@ -646,12 +688,10 @@ Then restart ToneFrame.
 </div>
 <div class="flex gap-3 justify-end">
 <button
-type="button"
 onClick={() => setMicDenied(false)}
 class="px-4 py-2 rounded-lg text-sm font-semibold bg-neutral-700 hover:bg-neutral-600 text-neutral-200 transition-colors"
 >Dismiss</button>
 <button
-type="button"
 onClick={() => { setMicDenied(false); void getDevices(); }}
 class="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-400 text-black transition-colors"
 >Retry</button>
@@ -663,37 +703,45 @@ class="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-
 <header class="relative z-50 bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
 <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
 <div class="flex flex-wrap items-center gap-3 min-w-0">
-<Activity class="text-orange-500 w-7 h-7 shrink-0" />
+{h(Activity, { "class": "text-orange-500 w-7 h-7 shrink-0" })}
 <h1 class="text-lg sm:text-2xl font-black tracking-tighter text-white shrink-0">TONE<span class="text-orange-500">FRAME</span></h1>
 <button 
-type="button"
 disabled={inputFlowBusy}
 onClick={() => { console.log("[TishAudio:input] Connect Input button onClick"); void getDevices(); }} 
-class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 " + (inputFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait shadow-none" : "bg-orange-500 hover:bg-orange-400 text-black shadow-[0_0_15px_rgba(249,115,22,0.4)]")}
+class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 " + (inputFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait shadow-none" : "bg-orange-500 hover:bg-orange-400 text-black shadow-lg")}
 >
-<Mic class="w-4 h-4" /> 
+{h(Mic, { "class": "w-4 h-4" })} 
 <span class="hidden sm:inline">{inputFlowBusy ? "Requesting mic…" : (Object.keys(sourcesRef.current).length === 0 ? 'Connect Input' : 'Add Input')}</span>
 <span class="sm:hidden">{inputFlowBusy ? "…" : "Input"}</span>
 </button>
 {activeTab === 'pedalboard' ? (
+<button
+disabled={midi.midiFlowBusy}
+onClick={() => { void midi.openMidiDeviceMenu(); }}
+class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 border border-violet-600/50 " + (midi.midiFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait" : "bg-violet-950/70 hover:bg-violet-900 text-violet-100")}
+>
+{h(Music2, { "class": "w-4 h-4" })}
+<span class="hidden sm:inline">{midi.midiFlowBusy ? "MIDI…" : "Connect MIDI"}</span>
+<span class="sm:hidden">MIDI</span>
+</button>
+) : null}
+{activeTab === 'pedalboard' ? (
 <div class="flex items-center gap-2 shrink-0">
 <button 
-type="button"
 onClick={() => { setShowDeviceMenu(false); setShowModuleLibrary(prev => !prev); }} 
 class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-orange-500/50 bg-gradient-to-b from-orange-900/30 to-neutral-900 hover:from-orange-800/40 font-bold tracking-wide text-xs text-orange-400"
 >
-<Plus class="w-3.5 h-3.5" /> <span class="hidden sm:inline">MODULES</span><ChevronDown class="w-3.5 h-3.5 opacity-50" />
+{h(Plus, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">MODULES</span>{h(ChevronDown, { "class": "w-3.5 h-3.5 opacity-50" })}
 </button>
-<button type="button" onClick={clearBoard} class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-900/80 bg-red-950/30 hover:bg-red-900/50 text-red-400 text-xs font-bold">
-<Trash2 class="w-3.5 h-3.5" /> <span class="hidden sm:inline">CLEAR</span>
+<button  onClick={clearBoard} class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-900/80 bg-red-950/30 hover:bg-red-900/50 text-red-400 text-xs font-bold">
+{h(Trash2, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">CLEAR</span>
 </button>
 <button 
-type="button"
 onClick={() => { setShowModuleLibrary(false); setShowModuleDebug(prev => !prev); }} 
 class={"flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-bold transition-colors " + (showModuleDebug ? "border-amber-500 bg-amber-950/50 text-amber-300" : "border-neutral-600 bg-neutral-900/80 text-neutral-400 hover:text-amber-200 hover:border-amber-600/50")}
 title="Preview all modules in a chain (layout only)"
 >
-<Bug class="w-3.5 h-3.5" /> <span class="hidden sm:inline">DEBUG</span>
+{h(Bug, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">DEBUG</span>
 </button>
 </div>
 ) : null}
@@ -704,10 +752,10 @@ title="Preview all modules in a chain (layout only)"
 <HeaderMeterReadout inactive={!audioReady} />
 
 {showDeviceMenu ? (
-<div class="absolute left-3 sm:left-4 top-full mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-[60] flex flex-col" style={{ maxHeight: "min(24rem, calc(100vh - 6rem))" }}>
+<div class="absolute left-3 sm:left-4 top-full mt-1.5 w-72 max-w-lg bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-50 flex flex-col" style={{ maxHeight: "min(24rem, calc(100vh - 6rem))" }}>
 <div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center shrink-0">
 <span class="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
-<button type="button" onClick={() => setShowDeviceMenu(false)}><X class="w-4 h-4 text-neutral-500 hover:text-white" /></button>
+<button  onClick={() => setShowDeviceMenu(false)}>{h(X, { "class": "w-4 h-4 text-neutral-500 hover:text-white" })}</button>
 </div>
 <div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
 {devices.length === 0 ? (
@@ -715,7 +763,6 @@ title="Preview all modules in a chain (layout only)"
 ) : (
 devices.map(d => (
 <button 
-type="button"
 key={d.deviceId} 
 onClick={() => { console.log("[TishAudio:input] device row click", d.deviceId ? (d.deviceId.slice(0, 8) + "…") : "(empty id)", d.label); void connectDevice(d.deviceId, d.label); }} 
 class="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
@@ -728,8 +775,31 @@ title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 </div>
 </div>
 ) : null}
+{midi.showMidiDeviceMenu ? (
+<div class="absolute left-3 sm:left-4 top-full mt-1.5 w-72 max-w-lg bg-neutral-800 border border-violet-700 rounded-lg shadow-2xl overflow-hidden z-50 flex flex-col" style={{ maxHeight: "min(24rem, calc(100vh - 6rem))" }}>
+<div class="p-3 bg-neutral-900 border-b border-violet-800 flex justify-between items-center shrink-0">
+<span class="text-xs font-bold text-violet-300 tracking-widest">SELECT MIDI</span>
+<button onClick={() => midi.setShowMidiDeviceMenu(false)}>{h(X, { "class": "w-4 h-4 text-neutral-500 hover:text-white" })}</button>
+</div>
+<div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+{midiDeviceRows.length === 0 ? (
+<div class="p-4 text-center text-sm text-neutral-500">No MIDI inputs found.</div>
+) : (
+midiDeviceRows.map((row, ri) => (
+<button
+key={String(ri) + "-" + (row.label || "")}
+onClick={() => { void midi.connectMidiChoice(row); }}
+class="w-full text-left px-4 py-3 hover:bg-violet-950/40 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
+>
+{row.label || "MIDI device"}
+</button>
+))
+)}
+</div>
+</div>
+) : null}
 {showModuleLibrary ? (
-<div class="absolute left-3 sm:left-4 top-full mt-1.5 z-[60] max-w-[calc(100vw-1.5rem)] bg-neutral-900 border border-neutral-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-y-auto custom-scrollbar" style={{ width: "min(800px, calc(100vw - 2rem))", maxHeight: "min(44rem, calc(100vh - 6rem))" }}>
+<div class="absolute left-3 sm:left-4 top-full mt-1.5 z-50 max-w-lg bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-y-auto custom-scrollbar" style={{ width: "min(800px, calc(100vw - 2rem))", maxHeight: "min(44rem, calc(100vh - 6rem))" }}>
 <ModuleLibraryPanel onClose={() => setShowModuleLibrary(false)} addNode={addNode} />
 </div>
 ) : null}

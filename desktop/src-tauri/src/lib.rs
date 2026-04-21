@@ -1,6 +1,10 @@
 mod audio_input;
+mod midi_input;
 
 use audio_input::{AudioInputController, list_audio_inputs, start_native_input, stop_native_input};
+use midi_input::{
+    list_midi_inputs, start_native_midi_input, stop_native_midi_input, MidiInputController,
+};
 
 /// Write a log line to stderr, discarding any I/O error so we never panic in a
 /// packaged macOS app where stderr is closed (recent Rust eprintln! panics on
@@ -80,6 +84,7 @@ fn ensure_mic_permission() -> Result<bool, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AudioInputController::default())
+        .manage(MidiInputController::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
@@ -87,6 +92,9 @@ pub fn run() {
             list_audio_inputs,
             start_native_input,
             stop_native_input,
+            list_midi_inputs,
+            start_native_midi_input,
+            stop_native_midi_input,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

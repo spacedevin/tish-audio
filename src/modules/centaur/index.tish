@@ -49,7 +49,7 @@ export fn centaur_buildAudio(ctx, node) {
 inNode = ctx.createGain(); outNode = ctx.createGain(); outNode.gain.value = node.params.output ?? 0.5;
 const cleanGain = ctx.createGain(); cleanGain.gain.value = Math.max(0, 1.0 - ((node.params.drive ?? 500) / 1500));
 const drivePath = ctx.createWaveShaper(); drivePath.curve = makeDistortionCurve(node.params.drive ?? 500);
-const treble = ctx.createBiquadFilter(); treble.type = 'highshelf'; treble.frequency.value = 2000; treble.gain.value = ((node.params.highs ?? 5) - 5) * 2;
+const treble = ctx.createBiquadFilter(); treble["type"] = 'highshelf'; treble.frequency.value = 2000; treble.gain.value = ((node.params.highs ?? 5) - 5) * 2;
 inNode.connect(cleanGain); cleanGain.connect(outNode);
 inNode.connect(drivePath); drivePath.connect(treble); treble.connect(outNode);
 nodeParamSync = (ctx, n) => {

@@ -50,7 +50,7 @@ export fn dub_layer_buildAudio(ctx, node) {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delay = ctx.createDelay(5.0); delay.delayTime.value = node.params.time ?? 0.55;
 const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.62;
-const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = node.params.dark ?? 2800;
+const tone = ctx.createBiquadFilter(); tone["type"] = 'lowpass'; tone.frequency.value = node.params.dark ?? 2800;
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.48;
 inNode.connect(outNode);
 inNode.connect(delay); delay.connect(tone); tone.connect(wetGain); wetGain.connect(outNode);

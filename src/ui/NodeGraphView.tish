@@ -17,19 +17,22 @@ const JACK_PROTRUDE = 13;
 
 const getNodeSize = (node) => {
 let w = 200; let h = 340;
-if (MODULE_REGISTRY[node.type]?.layout) {
-return { w: MODULE_REGISTRY[node.type].layout.width, h: MODULE_REGISTRY[node.type].layout.height };
+const nt = node["type"];
+const mod = MODULE_REGISTRY[nt];
+if (mod && mod.layout) {
+return { w: mod.layout.width, h: mod.layout.height };
 }
-if (node.type === 'SYS_IN') { w = 96; h = 140; }
-else if (node.type === 'SYS_OUT') { w = 80; h = 140; }
+if (nt === 'SYS_IN') { w = 96; h = 140; }
+else if (nt === 'MIDI_IN') { w = 224; h = 200; }
+else if (nt === 'SYS_OUT') { w = 80; h = 140; }
 else if (node.isSystem) { w = 80; h = 140; }
-else if (['splitter', 'crossover'].includes(node.type)) { w = 140; h = 180; }
-else if (node.type === 'eq7') { w = 400; h = 340; }
-else if (String(node.type).startsWith('amp_')) { w = 300; h = 340; }
-else if (node.type === 'master_eq') { w = 640; h = 216; }
-else if (node.type === 'graphic_eq') { w = 640; h = 216; }
-else if (node.type === 'vu_meter') { w = 120; h = 200; }
-else if (node.type === 'console_mixer') { w = 640; h = 216; }
+else if (['splitter', 'crossover'].includes(nt)) { w = 140; h = 180; }
+else if (nt === 'eq7') { w = 400; h = 340; }
+else if (String(nt).startsWith('amp_')) { w = 300; h = 340; }
+else if (nt === 'master_eq') { w = 640; h = 216; }
+else if (nt === 'graphic_eq') { w = 640; h = 216; }
+else if (nt === 'vu_meter') { w = 120; h = 200; }
+else if (nt === 'console_mixer') { w = 640; h = 216; }
 return { w, h };
 };
 
@@ -146,6 +149,75 @@ out.push({ c: c, paths: paths });
 return out;
 };
 
+const renderMidiInNode = (node, midiBindings, nodes, addConnection, clearMidiPatchFromInNode, toggleMidiBindingCapture, exportMidiBindingCapture, removeNode, startDragNode, midiCaptureUiTick, getMidiCaptureEventCount) => {
+let bid = "";
+let binding = null;
+if (node.params && node.params.midiBindingId) {
+bid = node.params.midiBindingId;
+let bj = 0;
+while (bj < midiBindings.length) {
+if (midiBindings[bj].id === bid) {
+binding = midiBindings[bj];
+break;
+}
+bj = bj + 1;
+}
+}
+const genTargets = [];
+let gj = 0;
+while (gj < nodes.length) {
+const cn = nodes[gj];
+const reg = MODULE_REGISTRY[cn["type"]];
+if (reg && reg.acceptsMidiInput === true) {
+genTargets.push({ id: cn.id, label: cn.label && String(cn.label).length ? cn.label : cn.id });
+}
+gj = gj + 1;
+}
+const tgt = binding && binding.targetNodeId ? binding.targetNodeId : null;
+const capOn = binding && binding.capture === true;
+const capCount = (typeof getMidiCaptureEventCount === "function" && bid) ? getMidiCaptureEventCount(bid) : 0;
+return (
+<div
+onPointerDown={(e) => startDragNode(e, node)}
+class={"flex flex-col gap-2 w-56 min-h-[168px] border-2 border-violet-700 bg-gradient-to-b from-violet-950/50 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8)] cursor-grab active:cursor-grabbing select-none relative group p-2 " + (capOn ? "ring-2 ring-amber-400/80 shadow-[0_0_28px_rgba(251,191,36,0.22)] animate-pulse" : "")}
+>
+<div class="text-[10px] font-black tracking-widest text-violet-300 uppercase text-center truncate">{node.label}</div>
+<div class="text-[9px] font-mono text-neutral-400 text-center truncate">{(tgt ? ("-> " + tgt) : "Target: none")}</div>
+{genTargets.length === 0 ? (
+<div class="text-[8px] text-neutral-500 text-center leading-snug px-1">Drag the <span class="text-amber-300 font-bold">MIDI</span> jack on the right into the <span class="text-amber-300 font-bold">MIDI</span> jack on <span class="text-violet-300 font-bold">MIDI Poly</span>, or pick a target below once that module is on the board.</div>
+) : null}
+<div class="flex flex-wrap gap-1 justify-center">
+<button
+onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (clearMidiPatchFromInNode) clearMidiPatchFromInNode(node.id); }}
+class={"px-2 py-0.5 rounded text-[9px] font-bold border " + (!tgt ? "border-violet-400 text-violet-100 bg-violet-900/60" : "border-neutral-700 text-neutral-400 hover:border-violet-600")}
+>None</button>
+{genTargets.map((gt) => (
+<button
+key={gt.id}
+onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (addConnection && bid) addConnection(node.id, 'midi', gt.id, 'midi'); }}
+class={"px-2 py-0.5 rounded text-[9px] font-bold border truncate max-w-[5.5rem] " + (tgt === gt.id ? "border-violet-400 text-violet-100 bg-violet-900/60" : "border-neutral-700 text-neutral-400 hover:border-violet-600")}
+title={gt.id}
+>{gt.label}</button>
+))}
+</div>
+<div class={"text-center text-[9px] font-mono tabular-nums px-1 " + (capOn ? "text-amber-200" : "text-neutral-500")}>
+{capOn ? ((String(capCount) + " events in capture buffer") + (capCount > 0 ? " | play more notes" : " | play MIDI to fill")) : "Arm capture to record note/CC into JSON export"}
+</div>
+<div class="flex gap-1 justify-center mt-1">
+<button
+onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (toggleMidiBindingCapture && bid) toggleMidiBindingCapture(bid); }}
+class={"px-2 py-1 rounded text-[9px] font-bold " + (capOn ? "bg-amber-500 text-black ring-1 ring-amber-200" : "bg-neutral-800 text-neutral-300 border border-neutral-600")}
+>{capOn ? "Capturing" : "Arm cap"}</button>
+<button
+onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (exportMidiBindingCapture && bid) exportMidiBindingCapture(bid); }}
+class="px-2 py-1 rounded text-[9px] font-bold bg-neutral-800 text-neutral-300 border border-neutral-600"
+>Export</button>
+</div>
+<button title="Remove MIDI input" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">{h(X, { "class": "w-4 h-4 text-red-500 hover:text-red-400" })}</button>
+</div>
+);
+};
+
 export fn NodeGraphView(props) {
 let nodes = props.nodes;
 let connections = props.connections;
@@ -159,7 +231,12 @@ let nodeAudioMapRef = props.nodeAudioMapRef;
 let audioGraphTick = props.audioGraphTick !== undefined && props.audioGraphTick !== null ? props.audioGraphTick : 0;
   let onAudioUiBump = props.onAudioUiBump;
 let patchActive = props.patchActive !== undefined && props.patchActive !== null ? props.patchActive : true;
-
+let midiBindings = props.midiBindings != null ? props.midiBindings : [];
+let clearMidiPatchFromInNode = props.clearMidiPatchFromInNode;
+let toggleMidiBindingCapture = props.toggleMidiBindingCapture;
+let exportMidiBindingCapture = props.exportMidiBindingCapture;
+let midiCaptureUiTick = props.midiCaptureUiTick != null ? props.midiCaptureUiTick : 0;
+let getMidiCaptureEventCount = props.getMidiCaptureEventCount;
   const boardRef = useRef(null);
 const dragLiveRef = useRef(null);
 const wireFromNodeRef = useRef(null);
@@ -201,7 +278,23 @@ const dropWire = (e, toNodeId, toPortId) => {
 e.stopPropagation();
 setWiring(prev => {
 if (prev && prev.fromId !== toNodeId) {
-addConnection(prev.fromId, prev.fromPort, toNodeId, toPortId);
+const fp = prev.fromPort;
+const tp = toPortId;
+const fromIsMidi = fp === 'midi';
+const toIsMidi = tp === 'midi';
+if (fromIsMidi || toIsMidi) {
+if (!(fromIsMidi && toIsMidi)) {
+resetWireDraftDomCache();
+return null;
+}
+const fromN = nodes.find(n => n.id === prev.fromId);
+const toN = nodes.find(n => n.id === toNodeId);
+if (!fromN || fromN["type"] !== 'MIDI_IN' || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) {
+resetWireDraftDomCache();
+return null;
+}
+}
+addConnection(prev.fromId, fp, toNodeId, tp);
 }
 resetWireDraftDomCache();
 return null;
@@ -254,18 +347,20 @@ i = i + 1;
 const cableBlocks = connections.filter(c => m[c.from] && m[c.to]).map(c => {
 const fromNode = m[c.from];
 const toNode = m[c.to];
+const isMidiCable = c.fromPort === 'midi' && c.toPort === 'midi';
 const start = getJackCoords(fromNode, true, c.fromPort);
 const end = getJackCoords(toNode, false, c.toPort);
 const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
 const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
+const accentStroke = isMidiCable ? '#fbbf24' : '#a855f7';
 return (
 <g key={c.id} class="pointer-events-auto group tf-placed-conn" id={"tf_placed_" + String(c.id)}>
 <path d={d} class="cursor-grab active:cursor-grabbing pointer-events-auto" onPointerDown={(e) => grabCable(e, c)} style={{ fill: 'none', stroke: 'transparent', "stroke-width": 24 }} />
-<path d={d} transform="translate(0,6)" class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.75)', "stroke-width": 16 }} />
+<path d={d} class="blur-sm pointer-events-none" style={{ fill: 'none', stroke: 'rgba(0,0,0,0.75)', "stroke-width": 16, transform: 'translate(0px, 6px)' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#0d0d0d', "stroke-width": 12, "stroke-linecap": 'round' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#2a2a2a', "stroke-width": 7, "stroke-linecap": 'round' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#141414', "stroke-width": 5, "stroke-linecap": 'round' }} />
-<path d={d} id={"c_" + String(c.id)} class="audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+<path d={d} id={"c_" + String(c.id)} class={"audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150 " + (isMidiCable ? "midi-cable-path" : "")} style={{ fill: 'none', stroke: accentStroke, "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
 <circle cx={start.x} cy={start.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
 <circle cx={start.x} cy={start.y} r="2.2" fill="#090909" class="pointer-events-none" />
 <circle cx={end.x} cy={end.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
@@ -389,13 +484,20 @@ const wm = wireMouseRef.current;
 if (fromNode && wm) {
 const wModel = { fromId: wiring.fromId, fromPort: wiring.fromPort, x: wm.x, y: wm.y };
 const d = draftWireD(fromNode, wModel);
+const draftMidi = wiring.fromPort === 'midi';
+const draftBlur = draftMidi ? '#78350f' : '#6b21a8';
+const draftStroke = draftMidi ? '#f59e0b' : '#a855f7';
+const draftTip = draftMidi ? '#fef3c7' : '#ffffff';
+const draftRing = draftMidi ? '#fbbf24' : '#a855f7';
+const draftFill = draftMidi ? '#422006' : '#4c1d95';
+const draftDot = draftMidi ? '#1c0a02' : '#1a0a2e';
 draftCableGroup = (
 <g id="tf_draft_cable">
-<path d={d} filter="url(#cable-shadow)" class="transition-colors duration-150" style={{ fill: 'none', stroke: '#6b21a8', "stroke-width": 10, "stroke-linecap": 'round', opacity: 0.7 }} />
-<path d={d} class="transition-colors duration-150" style={{ fill: 'none', stroke: '#a855f7', "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
-<path d={d} class="animate-dash-flow pointer-events-none" style={{ fill: 'none', stroke: '#ffffff', "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
-<circle cx={getJackCoords(fromNode, true, wiring.fromPort).x} cy={getJackCoords(fromNode, true, wiring.fromPort).y} r="5" fill="#4c1d95" stroke="#a855f7" style={{ "stroke-width": 1 }} class="pointer-events-none" />
-<circle cx={getJackCoords(fromNode, true, wiring.fromPort).x} cy={getJackCoords(fromNode, true, wiring.fromPort).y} r="2" fill="#1a0a2e" class="pointer-events-none" />
+<path d={d} class="blur-sm transition-colors duration-150 pointer-events-none" style={{ fill: 'none', stroke: draftBlur, "stroke-width": 10, "stroke-linecap": 'round', opacity: 0.7 }} />
+<path d={d} class="transition-colors duration-150" style={{ fill: 'none', stroke: draftStroke, "stroke-width": 6, "stroke-linecap": 'round', opacity: 0.9 }} />
+<path d={d} class="animate-dash-flow pointer-events-none" style={{ fill: 'none', stroke: draftTip, "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+<circle cx={getJackCoords(fromNode, true, wiring.fromPort).x} cy={getJackCoords(fromNode, true, wiring.fromPort).y} r="5" fill={draftFill} stroke={draftRing} style={{ "stroke-width": 1 }} class="pointer-events-none" />
+<circle cx={getJackCoords(fromNode, true, wiring.fromPort).x} cy={getJackCoords(fromNode, true, wiring.fromPort).y} r="2" fill={draftDot} class="pointer-events-none" />
 </g>
 );
 }
@@ -410,146 +512,139 @@ onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
 onPointerLeave={(e) => { if (e.buttons === 0) handlePointerUp(); }}
 >
-<WebGLBackground active={patchActive} />
+{h(WebGLBackground, { "active": patchActive })}
 
-<svg xmlns="http://www.w3.org/2000/svg" class="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
+<svg class="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
 {draftCableGroup}
 {cableBlocks}
 </svg>
 
 {nodes.map(node => {
 const ports = getNodePorts(node);
-
+const nt = node["type"];
+let hasOutWire = false;
+let hi = 0;
+while (hi < connections.length) {
+const hc = connections[hi];
+if (hc.from === node.id && hc.fromPort !== 'midi') {
+hasOutWire = true;
+break;
+}
+hi = hi + 1;
+}
 return (
 <div key={node.id} class="tf-node-root absolute z-20 pointer-events-auto touch-manipulation" style={{ transform: "translate(" + String(node.x) + "px, " + String(node.y) + "px)" }}>
 
 
-{node.type !== 'SYS_IN' && ports["in"].map(port => {
+{nt !== 'SYS_IN' && nt !== 'MIDI_IN' && ports["in"].map(port => {
 const coords = getJackCoords(node, false, port);
 const leftPx = coords.x - node.x;
 const topPx = coords.y - node.y;
+const isMidiJack = port === 'midi';
 return (
 <div 
 key={"in-" + port}
 class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
 style={{ left: String(leftPx) + "px", top: String(topPx) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
-title={"Patch In: " + port.toUpperCase()}
+title={isMidiJack ? "MIDI in (from MIDI input node)" : "Patch In"}
 >
-<svg width="28" height="28" viewBox="0 0 28 28" class="jack-svg">
-<circle cx="14" cy="14" r="13.5" fill="#0c0c0c" stroke="#000" style={{ "stroke-width": 0.5 }}/>
-<circle cx="14" cy="14" r="11.5" fill="url(#jack-metal)"/>
-<circle cx="14" cy="14" r="8.5" fill="#111"/>
-<circle cx="14" cy="14" r="6.8" fill="#1e1e1e" stroke="#3a3a3a" style={{ "stroke-width": 0.5 }}/>
-<circle cx="14" cy="14" r="4.8" fill="url(#jack-socket)"/>
-<circle cx="14" cy="14" r="2" fill="#030303"/>
-<circle cx="14" cy="14" r="3.8" fill="none" stroke="#666" style={{ "stroke-width": 0.6, opacity: 0.4 }}/>
-<path d="M 7 9 A 8.5 8.5 0 0 1 15 5.5" stroke="rgba(255,255,255,0.28)" style={{ "stroke-width": 1.5, "stroke-linecap": "round" }} fill="none"/>
-</svg>
-{ports["in"].length > 1 && <span class="jack-label">{port.toUpperCase()}</span>}
+<div class={"w-7 h-7 rounded-full shadow-inner " + (isMidiJack ? "bg-violet-950 border-2 border-amber-400/90" : "bg-neutral-800 border border-neutral-600")} />
+{ports["in"].length > 1 || isMidiJack ? (<span class="jack-label">{isMidiJack ? "MIDI" : port.toUpperCase()}</span>) : null}
 </div>
 );
 })}
 
 
-{node.type !== 'SYS_OUT' && ports["out"].map(port => {
+{nt !== 'SYS_OUT' && ports["out"].length > 0 && ports["out"].map(port => {
 const coords = getJackCoords(node, true, port);
 const leftPxOut = coords.x - node.x;
 const topPxOut = coords.y - node.y;
+const isMidiJack = port === 'midi';
 return (
 <div 
 key={"out-" + port}
 class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
 style={{ left: String(leftPxOut) + "px", top: String(topPxOut) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerDown={(e) => startWire(e, node.id, port)}
-title={"Drag out from: " + port.toUpperCase()}
+title={isMidiJack ? "MIDI out (to synth)" : "Drag out"}
 >
-<svg width="28" height="28" viewBox="0 0 28 28" class="jack-svg">
-<circle cx="14" cy="14" r="13.5" fill="#0c0c0c" stroke="#000" style={{ "stroke-width": 0.5 }}/>
-<circle cx="14" cy="14" r="11.5" fill="url(#jack-metal)"/>
-<circle cx="14" cy="14" r="8.5" fill="#111"/>
-<circle cx="14" cy="14" r="6.8" fill="#1e1e1e" stroke="#3a3a3a" style={{ "stroke-width": 0.5 }}/>
-<circle cx="14" cy="14" r="4.8" fill="url(#jack-socket)"/>
-<circle cx="14" cy="14" r="2" fill="#030303"/>
-<circle cx="14" cy="14" r="3.8" fill="none" stroke="#666" style={{ "stroke-width": 0.6, opacity: 0.4 }}/>
-<path d="M 7 9 A 8.5 8.5 0 0 1 15 5.5" stroke="rgba(255,255,255,0.28)" style={{ "stroke-width": 1.5, "stroke-linecap": "round" }} fill="none"/>
-</svg>
-{ports["out"].length > 1 && <span class="jack-label">{port.toUpperCase()}</span>}
+<div class={"w-7 h-7 rounded-full shadow-inner " + (isMidiJack ? "bg-violet-950 border-2 border-amber-400/90" : "bg-neutral-800 border border-neutral-600")} />
+{ports["out"].length > 1 || isMidiJack ? (<span class="jack-label">{isMidiJack ? "MIDI" : port.toUpperCase()}</span>) : null}
 </div>
 );
 })}
 
 <div class="relative z-30 isolate">
-{node.type === 'SYS_IN' ? (
+{nt === 'SYS_IN' ? (
 <div 
 onPointerDown={(e) => startDragNode(e, node)}
 class="flex flex-col items-center justify-center w-24 h-[140px] border-2 border-green-700 bg-gradient-to-b from-green-900/40 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing select-none relative group"
 >
 <span class="transform -rotate-90 text-xs font-black tracking-widest text-green-500 drop-shadow-md select-none whitespace-nowrap truncate w-[120px] text-center">{node.label}</span>
-<button type="button" title="Remove input" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity"><X class="w-4 h-4 text-red-500 hover:text-red-400" /></button>
+<button title="Remove input" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">{h(X, { "class": "w-4 h-4 text-red-500 hover:text-red-400" })}</button>
 </div>
-) : node.type === 'SYS_OUT' ? (
+) : nt === 'SYS_OUT' ? (
 <div 
 onPointerDown={(e) => startDragNode(e, node)}
 class="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-neutral-700 bg-gradient-to-b from-neutral-800 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.1)] cursor-grab active:cursor-grabbing select-none"
 >
 <span class="transform -rotate-90 text-sm font-black tracking-widest text-orange-500 drop-shadow-md select-none whitespace-nowrap">{node.label}</span>
 </div>
-) : MODULE_REGISTRY[node.type]?.View ? (
-h(MODULE_REGISTRY[node.type].View, {
+) : nt === 'MIDI_IN' ? renderMidiInNode(node, midiBindings, nodes, addConnection, clearMidiPatchFromInNode, toggleMidiBindingCapture, exportMidiBindingCapture, removeNode, startDragNode, midiCaptureUiTick, getMidiCaptureEventCount) : MODULE_REGISTRY[nt] && MODULE_REGISTRY[nt]["View"] ? (
+h(MODULE_REGISTRY[nt]["View"], {
   node: node,
   onRemove: () => removeNode(node.id),
-  onChange: (param, val) => updateNodeParam(node.id, param, val),
+  onChange: (pn, val) => updateNodeParam(node.id, pn, val),
   onDragStart: (e) => startDragNode(e, node),
   onToggleBypass: () => toggleNodeBypass(node.id),
   audioDataMap: nodeAudioMapRef.current,
   meterSync: audioGraphTick,
   onFaderDragEnd: onAudioUiBump
 })
-) : node.type === 'master_eq' ? (
-<RackNode 
-node={node} 
-onRemove={() => removeNode(node.id)} 
-onChange={(param, val) => updateNodeParam(node.id, param, val)} 
-onDragStart={(e) => startDragNode(e, node)}
-onToggleBypass={() => toggleNodeBypass(node.id)}
-audioDataMap={nodeAudioMapRef.current}
-meterSync={audioGraphTick}
-onFaderDragEnd={onAudioUiBump}
-/>
-) : node.type === 'graphic_eq' ? (
-<GraphicEqNode 
-node={node} 
-onRemove={() => removeNode(node.id)} 
-onChange={(param, val) => updateNodeParam(node.id, param, val)} 
-onDragStart={(e) => startDragNode(e, node)}
-onToggleBypass={() => toggleNodeBypass(node.id)}
-audioDataMap={nodeAudioMapRef.current}
-meterSync={audioGraphTick}
-onFaderDragEnd={onAudioUiBump}
-/>
-) : node.type === 'vu_meter' ? (
-<VuMeterNode 
-node={node} 
-onRemove={() => removeNode(node.id)} 
-onChange={(param, val) => updateNodeParam(node.id, param, val)} 
-onDragStart={(e) => startDragNode(e, node)}
-audioDataMap={nodeAudioMapRef.current}
-/>
-) : node.type === 'console_mixer' ? (
-<ConsoleNode
-node={node}
-onRemove={() => removeNode(node.id)}
-onChange={(param, val) => updateNodeParam(node.id, param, val)}
-onDragStart={(e) => startDragNode(e, node)}
-audioDataMap={nodeAudioMapRef.current}
-meterSync={audioGraphTick}
-onFaderDragEnd={onAudioUiBump}
-/>
-) : (node.type === 'splitter' || node.type === 'crossover') ? (
+) : nt === 'master_eq' ? (
+h(RackNode, {
+node: node,
+onRemove: () => removeNode(node.id),
+onChange: (pn, val) => updateNodeParam(node.id, pn, val),
+onDragStart: (e) => startDragNode(e, node),
+onToggleBypass: () => toggleNodeBypass(node.id),
+audioDataMap: nodeAudioMapRef.current,
+meterSync: audioGraphTick,
+onFaderDragEnd: onAudioUiBump
+})
+) : nt === 'graphic_eq' ? (
+h(GraphicEqNode, {
+node: node,
+onRemove: () => removeNode(node.id),
+onChange: (pn, val) => updateNodeParam(node.id, pn, val),
+onDragStart: (e) => startDragNode(e, node),
+onToggleBypass: () => toggleNodeBypass(node.id),
+audioDataMap: nodeAudioMapRef.current,
+meterSync: audioGraphTick,
+onFaderDragEnd: onAudioUiBump
+})
+) : nt === 'vu_meter' ? (
+h(VuMeterNode, {
+node: node,
+onRemove: () => removeNode(node.id),
+onChange: (pn, val) => updateNodeParam(node.id, pn, val),
+onDragStart: (e) => startDragNode(e, node),
+audioDataMap: nodeAudioMapRef.current
+})
+) : nt === 'console_mixer' ? (
+h(ConsoleNode, {
+node: node,
+onRemove: () => removeNode(node.id),
+onChange: (pn, val) => updateNodeParam(node.id, pn, val),
+onDragStart: (e) => startDragNode(e, node),
+audioDataMap: nodeAudioMapRef.current,
+meterSync: audioGraphTick,
+onFaderDragEnd: onAudioUiBump
+})
+) : (nt === 'splitter' || nt === 'crossover') ? (
 <div 
 class={"relative w-[140px] h-[180px] bg-gradient-to-br " + node.color + " rounded-xl border-t border-l border-t-white/20 border-l-white/20 border-r-black/50 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_10px_rgba(0,0,0,0.5)] p-4 flex flex-col transition-all duration-300 " + (node.bypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
-style={{ filter: 'url(#metal-texture)' }}
 >
 <div 
 onPointerDown={(e) => startDragNode(e, node)} 
@@ -559,25 +654,30 @@ class="text-center font-black mb-4 text-xs uppercase text-white/90 drop-shadow-m
 </div>
 
 <div class="flex-1 flex flex-wrap justify-center gap-2">
-{Object.entries(node.params).map(([key, val]) => {
+{Object.entries(node.params).map(([pk, val]) => {
 let min = 0; let max = 2;
-if (key === 'freq') { min = 100; max = 5000; }
-return <RotaryKnob key={key} label={key} min={min} max={max} value={val} theme={node.theme} onChange={(v) => updateNodeParam(node.id, key, v)} />
+if (pk === 'freq') { min = 100; max = 5000; }
+return h(RotaryKnob, { key: pk, label: pk, min: min, max: max, value: val, theme: node.theme, onChange: (v) => updateNodeParam(node.id, pk, v) })
 })}
 </div>
-<button type="button" title="Remove node" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class={"absolute top-2 right-2 " + hardwareRemoveClass}>
-<X class="w-4 h-4" />
+<button title="Remove node" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); removeNode(node.id); }} class={"absolute top-2 right-2 " + hardwareRemoveClass}>
+{h(X, { "class": "w-4 h-4" })}
 </button>
 </div>
 ) : (
-<PedalNode 
-pedal={node} 
-onRemove={() => removeNode(node.id)} 
-onChange={(param, val) => updateNodeParam(node.id, param, val)} 
-onDragStart={(e) => startDragNode(e, node)}
-onToggleBypass={() => toggleNodeBypass(node.id)}
-/>
+h(PedalNode, {
+pedal: node,
+onRemove: () => removeNode(node.id),
+onChange: (pn, val) => updateNodeParam(node.id, pn, val),
+onDragStart: (e) => startDragNode(e, node),
+onToggleBypass: () => toggleNodeBypass(node.id)
+})
 )}
+{nt === 'midi_poly' && !hasOutWire ? (
+<div class="absolute left-1/2 bottom-0.5 z-40 w-[13rem] -translate-x-1/2 px-1 py-0.5 rounded bg-amber-950/95 border border-amber-600/60 text-[7px] font-bold text-amber-100 text-center leading-tight pointer-events-none shadow-lg">
+Patch the right output jack to MASTER OUT (orange) or into a chain that ends there to hear this synth.
+</div>
+) : null}
 </div>
 </div>
 );

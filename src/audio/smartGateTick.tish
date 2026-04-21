@@ -11,7 +11,7 @@ export fn tickSmartGates(mapRef, nodes) {
     
     if (!n || n.bypassed) continue;
     
-    const def = MODULE_REGISTRY[n.type];
+    const def = MODULE_REGISTRY[n["type"]];
     if (def && def.tickFrame) {
       const box = map[n.id];
       if (box && box.smartGateRuntime) {

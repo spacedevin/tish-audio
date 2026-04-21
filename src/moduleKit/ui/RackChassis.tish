@@ -142,7 +142,6 @@ export fn _RackChassis(props) {
 
               {!previewOnly && onRemove ? (
                 <button
-                  type="button"
                   title="Remove rack"
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
@@ -158,7 +157,7 @@ export fn _RackChassis(props) {
                   }}
                   class={_hardwareRemoveClass}
                 >
-                  <X class="w-4 h-4" />
+                  {h(X, { "class": "w-4 h-4" })}
                 </button>
               ) : null}
             </div>

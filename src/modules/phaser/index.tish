@@ -57,8 +57,8 @@ export fn phaser_buildAudio(ctx, node) {
 
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const filters = [];
-for(let i=0; i<4; i = i + 1) { const f = ctx.createBiquadFilter(); f.type = 'allpass'; f.frequency.value = 1000; filters.push(f); }
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 0.8;
+for(let i=0; i<4; i = i + 1) { const f = ctx.createBiquadFilter(); f["type"] = 'allpass'; f.frequency.value = 1000; filters.push(f); }
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = node.params.rate ?? 0.8;
 const lfoDepth = ctx.createGain(); lfoDepth.gain.value = node.params.sweep ?? 800;
 lfo.connect(lfoDepth); filters.forEach(f => lfoDepth.connect(f.frequency)); lfo.start();
 inNode.connect(filters[0]); filters[0].connect(filters[1]); filters[1].connect(filters[2]); filters[2].connect(filters[3]); filters[3].connect(outNode);

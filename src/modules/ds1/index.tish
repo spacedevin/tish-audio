@@ -47,42 +47,42 @@ export fn ds1_buildAudio(ctx, node) {
 
 
 inNode = ctx.createWaveShaper();
-const driveAmount = (node.type === 'fuzz' || node.type === 'muff' || node.type === 'metal') ? (node.params.drive ?? 800) * 5 : (node.params.drive ?? 400);
-inNode.curve = node.type === 'blues_od' ? makeAsymmetricCurve(driveAmount) : makeDistortionCurve(driveAmount); 
+const driveAmount = (node["type"] === 'fuzz' || node["type"] === 'muff' || node["type"] === 'metal') ? (node.params.drive ?? 800) * 5 : (node.params.drive ?? 400);
+inNode.curve = node["type"] === 'blues_od' ? makeAsymmetricCurve(driveAmount) : makeDistortionCurve(driveAmount); 
 inNode.oversample = '4x';
 
-if (node.type === 'metal' || node.type === 'ds1') {
-const midCut = ctx.createBiquadFilter(); midCut.type = 'peaking'; midCut.frequency.value = node.params.midFreq ?? 800; midCut.gain.value = node.params.midCut ?? -10; midCut.Q.value = 2.0;
+if (node["type"] === 'metal' || node["type"] === 'ds1') {
+const midCut = ctx.createBiquadFilter(); midCut["type"] = 'peaking'; midCut.frequency.value = node.params.midFreq ?? 800; midCut.gain.value = node.params.midCut ?? -10; midCut.Q.value = 2.0;
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
 inNode.connect(midCut); midCut.connect(outNode);
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
 inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
 smoothAudioParam(midCut.frequency, p.midFreq ?? 800, ctx);
 smoothAudioParam(midCut.gain, p.midCut ?? -10, ctx);
 smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
 };
-} else if (node.type === 'rat') {
-const toneBp = ctx.createBiquadFilter(); toneBp.type = 'lowpass'; toneBp.frequency.value = node.params.filter ?? 1500;
+} else if (node["type"] === 'rat') {
+const toneBp = ctx.createBiquadFilter(); toneBp["type"] = 'lowpass'; toneBp.frequency.value = node.params.filter ?? 1500;
 const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.4;
 inNode.connect(toneBp); toneBp.connect(gain); outNode = gain;
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
 inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
 smoothAudioParam(toneBp.frequency, p.filter ?? 1500, ctx);
 smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
 };
 } else {
-const toneBp = ctx.createBiquadFilter(); toneBp.type = 'lowpass'; toneBp.frequency.value = node.params.tone ?? 3000;
+const toneBp = ctx.createBiquadFilter(); toneBp["type"] = 'lowpass'; toneBp.frequency.value = node.params.tone ?? 3000;
 const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.5;
 inNode.connect(toneBp); toneBp.connect(gain); outNode = gain;
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
 inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
 smoothAudioParam(toneBp.frequency, p.tone ?? 3000, ctx);

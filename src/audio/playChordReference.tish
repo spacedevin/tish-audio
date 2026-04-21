@@ -14,7 +14,7 @@ const start = t0 + played * 0.025; // staggered strum
 const osc = ctx.createOscillator();
 const g = ctx.createGain();
 
-osc.type = 'triangle';
+osc["type"] = 'triangle';
 osc.frequency.setValueAtTime(freq, start);
 
 g.gain.setValueAtTime(0.0001, start);

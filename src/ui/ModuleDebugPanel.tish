@@ -19,12 +19,12 @@ const defs = PEDAL_LIBRARY[category];
 let di = 0;
 while (di < defs.length) {
 const def = defs[di];
-const regMeta = MODULE_REGISTRY[def.type] && MODULE_REGISTRY[def.type].metadata ? MODULE_REGISTRY[def.type].metadata : null;
+const regMeta = MODULE_REGISTRY[def["type"]] && MODULE_REGISTRY[def["type"]].metadata ? MODULE_REGISTRY[def["type"]].metadata : null;
 const vsDbg = regMeta && regMeta.visualStyle ? regMeta.visualStyle : null;
 chain.push({
-id: "dbg_" + def.type + "_" + String(ci) + "_" + String(di),
+id: "dbg_" + def["type"] + "_" + String(ci) + "_" + String(di),
 category: category,
-type: def.type,
+"type": def["type"],
 label: def.label,
 color: def.color,
 theme: def.theme,
@@ -53,20 +53,20 @@ return (
 <span class="text-xs font-black tracking-widest text-orange-400">DEBUG</span>
 <p class="text-[11px] text-neutral-500 mt-0.5">Hardware previews for the full library. Click a module to add it to your patch board.</p>
 </div>
-<button type="button" onClick={onClose} class="text-neutral-500 hover:text-white p-2 rounded-lg hover:bg-neutral-800 transition-colors" title="Close">
+<button onClick={onClose} class="text-neutral-500 hover:text-white p-2 rounded-lg hover:bg-neutral-800 transition-colors" title="Close">
 <X class="w-5 h-5" />
 </button>
 </div>
 <div class="overflow-x-auto overflow-y-auto custom-scrollbar p-4 flex flex-wrap items-center gap-4 flex-1 min-h-0 content-start">
 {chain.map((mod, idx) => {
-const isWide = mod.type === 'graphic_eq' || mod.type === 'master_eq' || mod.type === 'console_mixer';
-const isVu = mod.type === 'vu_meter';
-const isEq7 = mod.type === 'eq7';
-const isAmpSim = String(mod.type).startsWith('amp_');
+const isWide = mod["type"] === 'graphic_eq' || mod["type"] === 'master_eq' || mod["type"] === 'console_mixer';
+const isVu = mod["type"] === 'vu_meter';
+const isEq7 = mod["type"] === 'eq7';
+const isAmpSim = String(mod["type"]).startsWith('amp_');
 
 let preview = null;
-if (MODULE_REGISTRY[mod.type]?.View) {
-  preview = h(MODULE_REGISTRY[mod.type].View, {
+if (MODULE_REGISTRY[mod["type"]] && MODULE_REGISTRY[mod["type"]]["View"]) {
+  preview = h(MODULE_REGISTRY[mod["type"]]["View"], {
     node: mod,
     previewOnly: true,
     onRemove: noop,
@@ -77,7 +77,7 @@ if (MODULE_REGISTRY[mod.type]?.View) {
     meterSync: 0,
     onFaderDragEnd: noop
   });
-} else if (mod.type === 'master_eq') {
+} else if (mod["type"] === 'master_eq') {
   preview = (
     <RackNode
       node={mod}
@@ -91,7 +91,7 @@ if (MODULE_REGISTRY[mod.type]?.View) {
       onFaderDragEnd={noop}
     />
   );
-} else if (mod.type === 'graphic_eq') {
+} else if (mod["type"] === 'graphic_eq') {
   preview = (
     <GraphicEqNode
       node={mod}
@@ -105,7 +105,7 @@ if (MODULE_REGISTRY[mod.type]?.View) {
       onFaderDragEnd={noop}
     />
   );
-} else if (mod.type === 'vu_meter') {
+} else if (mod["type"] === 'vu_meter') {
   preview = (
     <VuMeterNode
       node={mod}
@@ -116,7 +116,7 @@ if (MODULE_REGISTRY[mod.type]?.View) {
       audioDataMap={dbgAudioMap}
     />
   );
-} else if (mod.type === 'console_mixer') {
+} else if (mod["type"] === 'console_mixer') {
   preview = (
     <ConsoleNode
       node={mod}
@@ -131,11 +131,11 @@ if (MODULE_REGISTRY[mod.type]?.View) {
   );
 }
 
-let layout = MODULE_REGISTRY[mod.type]?.layout;
+let layout = MODULE_REGISTRY[mod["type"]] && MODULE_REGISTRY[mod["type"]]["layout"] ? MODULE_REGISTRY[mod["type"]]["layout"] : null;
 if (!layout) {
-  if (mod.type === 'master_eq' || mod.type === 'graphic_eq' || mod.type === 'console_mixer') {
+  if (mod["type"] === 'master_eq' || mod["type"] === 'graphic_eq' || mod["type"] === 'console_mixer') {
     layout = { width: 640, height: 216 };
-  } else if (mod.type === 'vu_meter') {
+  } else if (mod["type"] === 'vu_meter') {
     layout = { width: 120, height: 200 };
   } else {
     layout = { width: 200, height: 340 };
@@ -152,7 +152,7 @@ const innerW = layout.width;
 const innerH = layout.height;
 
 return (
-<div key={mod.id} class="shrink-0 cursor-pointer transition-transform hover:scale-105 hover:z-10 focus:outline-none" tabIndex="0" onClick={() => { if (props.addNode) props.addNode(mod.category, mod.type); onClose(); }}>
+<div key={mod.id} class="shrink-0 cursor-pointer transition-transform hover:scale-105 hover:z-10 focus:outline-none" tabIndex="0" onClick={() => { if (props.addNode) props.addNode(mod.category, mod["type"]); onClose(); }}>
 <div class="shrink-0 overflow-hidden rounded-lg border border-neutral-800/80 bg-black/50 shadow-md hover:shadow-[0_0_20px_rgba(249,115,22,0.3)] transition-shadow" style={{ width: String(slotW) + "px", height: String(slotH) + "px" }}>
 <div style={{ width: String(innerW) + "px", height: String(innerH) + "px", transform: "scale(" + String(sc) + ")", transformOrigin: "top left", pointerEvents: "none" }}>
 {preview}

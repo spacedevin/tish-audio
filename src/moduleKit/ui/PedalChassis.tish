@@ -243,7 +243,6 @@ export fn _PedalChassis(props) {
 
       {!previewOnly && onRemove ? (
         <button
-          type="button"
           title="Remove pedal"
           onPointerDown={(e) => {
             if (e.button !== 0) return;
@@ -259,7 +258,7 @@ export fn _PedalChassis(props) {
           }}
           class={"absolute top-3 right-3 pointer-events-auto " + _hardwareRemoveClass}
         >
-          <X class="w-4 h-4" />
+          {h(X, { "class": "w-4 h-4" })}
         </button>
       ) : null}
     </div>

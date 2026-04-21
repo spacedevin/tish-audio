@@ -53,7 +53,7 @@ export fn eq7_buildAudio(ctx, node) {
 
 const freqs = [100, 200, 400, 800, 1600, 3200, 6400];
 const filters = freqs.map((f) => {
-const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.414;
+const filter = ctx.createBiquadFilter(); filter["type"] = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.414;
 const paramKey = "b" + (f >= 1000 ? (f/1000).toString().replace(".", "k") : String(f));
 filter.gain.value = node.params[paramKey] ?? 0;
 return filter;

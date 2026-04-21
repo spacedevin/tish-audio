@@ -1,0 +1,154 @@
+// Central dispatch for normalized MIDI events from Web MIDI and native (Tauri) sources.
+
+let __midiListeners = [];
+
+export fn subscribeMidiDispatch(listener) {
+  __midiListeners.push(listener);
+  return () => {
+    let next = [];
+    let i = 0;
+    while (i < __midiListeners.length) {
+      if (__midiListeners[i] !== listener) {
+        next.push(__midiListeners[i]);
+      }
+      i = i + 1;
+    }
+    __midiListeners = next;
+  };
+}
+
+export fn dispatchMidiEvent(ev) {
+  let i = 0;
+  while (i < __midiListeners.length) {
+    try {
+      __midiListeners[i](ev);
+    } catch (e) {
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("[TishAudio:midi] listener error", e);
+      }
+    }
+    i = i + 1;
+  }
+}
+
+export fn parseMidiBytes(bytes, inputId, whenMs) {
+  if (!bytes || bytes.length < 1) {
+    return null;
+  }
+  const u8 = bytes;
+  const b0 = u8[0];
+  if ((b0 & 240) === 240) {
+    return null;
+  }
+  const channel = b0 & 15;
+  const cmd = b0 & 240;
+  const when = typeof whenMs === "number" && Number.isFinite(whenMs) ? whenMs : 0;
+
+  if (cmd === 144) {
+    if (u8.length < 3) {
+      return null;
+    }
+    const note = u8[1];
+    const vel = u8[2];
+    if (vel === 0) {
+      return { kind: "noteOff", inputId, channel, note, velocity: 0, when };
+    }
+    return { kind: "noteOn", inputId, channel, note, velocity: vel, when };
+  }
+  if (cmd === 128) {
+    if (u8.length < 3) {
+      return null;
+    }
+    return { kind: "noteOff", inputId, channel, note: u8[1], velocity: u8[2], when };
+  }
+  if (cmd === 176) {
+    if (u8.length < 3) {
+      return null;
+    }
+    return { kind: "cc", inputId, channel, controller: u8[1], value: u8[2], when };
+  }
+  if (cmd === 224) {
+    if (u8.length < 3) {
+      return null;
+    }
+    const value14 = u8[1] | (u8[2] << 7);
+    return { kind: "pitchBend", inputId, channel, value14, when };
+  }
+  return null;
+}
+
+export fn feedNativeMidiPayload(payload) {
+  if (payload == null) {
+    return;
+  }
+  let p = payload;
+  if (typeof p === "string") {
+    try {
+      p = JSON.parse(p);
+    } catch (e) {
+      return;
+    }
+  }
+  const inputId = p.inputId != null ? p.inputId : p.input_id;
+  const bytes = p.bytes;
+  if (!inputId || !bytes || !bytes.length) {
+    return;
+  }
+  const when = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
+  const ev = parseMidiBytes(bytes, String(inputId), when);
+  if (ev) {
+    dispatchMidiEvent(ev);
+  }
+}
+
+const __webCleanups = {};
+
+export fn detachWebMidiInput(logicalId) {
+  const k = String(logicalId);
+  const cleanup = __webCleanups[k];
+  if (cleanup) {
+    try {
+      cleanup();
+    } catch (e) {
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("[TishAudio:midi] detach", e);
+      }
+    }
+    Reflect.deleteProperty(__webCleanups, k);
+  }
+}
+
+export fn attachWebMidiInput(logicalId, midiInput) {
+  const k = String(logicalId);
+  detachWebMidiInput(k);
+  if (!midiInput) {
+    return;
+  }
+  midiInput.onmidimessage = (e) => {
+    const when = e.timeStamp != null ? e.timeStamp : (typeof performance !== "undefined" && performance.now ? performance.now() : 0);
+    const data = e.data;
+    if (!data || data.length < 1) {
+      return;
+    }
+    const arr = [];
+    let i = 0;
+    while (i < data.length) {
+      arr.push(data[i]);
+      i = i + 1;
+    }
+    const ev = parseMidiBytes(arr, k, when);
+    if (ev) {
+      dispatchMidiEvent(ev);
+    }
+  };
+  __webCleanups[k] = () => {
+    midiInput.onmidimessage = null;
+  };
+}
+
+export fn requestWebMidiAccess() {
+  if (typeof navigator === "undefined" || !navigator.requestMIDIAccess) {
+    return Promise.reject(new Error("Web MIDI API not available"));
+  }
+  return navigator.requestMIDIAccess({ sysex: false });
+}

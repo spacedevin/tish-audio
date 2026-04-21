@@ -44,7 +44,7 @@ curve[i] = Math.round(x * steps) / steps;
 return curve;
 }
 
-export fn createReverbIR(ctx, duration = 2.5, decay = 5.0, type = 'spring') {
+export fn createReverbIR(ctx, duration = 2.5, decay = 5.0, verbType = 'spring') {
 const sampleRate = ctx.sampleRate;
 const length = sampleRate * duration;
 const impulse = ctx.createBuffer(2, length, sampleRate);
@@ -52,8 +52,8 @@ for (let i = 0; i < 2; i = i + 1) {
 const channel = impulse.getChannelData(i);
 for (let j = 0; j < length; j = j + 1) {
 let noise = (Math.random() * 2 - 1);
-if (type === 'plate') noise = Math.sin(j * 0.1) * noise; 
-if (type === 'hall') noise = noise * (1 - (j/length) * 0.5); 
+if (verbType === 'plate') noise = Math.sin(j * 0.1) * noise; 
+if (verbType === 'hall') noise = noise * (1 - (j/length) * 0.5); 
 channel[j] = noise * Math.pow(1 - j / length, decay);
 }
 }

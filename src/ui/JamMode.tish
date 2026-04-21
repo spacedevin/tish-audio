@@ -40,13 +40,13 @@ osc.start(time); osc.stop(time + 0.5);
 }
 if (beatNumber % 8 === 4) {
 const osc = ac.createOscillator(); const gain = ac.createGain();
-osc.type = 'triangle'; osc.connect(gain); gain.connect(ac.destination);
+osc["type"] = 'triangle'; osc.connect(gain); gain.connect(ac.destination);
 osc.frequency.setValueAtTime(250, time); gain.gain.setValueAtTime(0.5, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
 osc.start(time); osc.stop(time + 0.2);
 }
 if (beatNumber % 2 === 0) {
 const osc = ac.createOscillator(); const gain = ac.createGain();
-osc.type = 'square'; osc.connect(gain); gain.connect(ac.destination);
+osc["type"] = 'square'; osc.connect(gain); gain.connect(ac.destination);
 osc.frequency.setValueAtTime(8000, time); gain.gain.setValueAtTime(0.1, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
 osc.start(time); osc.stop(time + 0.05);
 }
@@ -125,11 +125,11 @@ return (
 <p class="text-neutral-400 mb-8">Auto-accompaniment engine</p>
 <div class="flex flex-col items-center gap-8">
 <button onClick={() => setIsPlaying(!isPlaying)} class={"w-24 h-24 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all " + (isPlaying ? "bg-red-500 hover:bg-red-400" : "bg-green-500 hover:bg-green-400")}>
-{isPlaying ? <Square class="w-10 h-10 text-black fill-current" /> : <Play class="w-10 h-10 text-black fill-current ml-2" />}
+{isPlaying ? h(Square, { "class": "w-10 h-10 text-black fill-current" }) : h(Play, { "class": "w-10 h-10 text-black fill-current ml-2" })}
 </button>
 <div class="w-full max-w-xs">
 <div class="flex justify-between text-sm text-neutral-400 mb-2"><span>Tempo</span><span class="font-mono text-white">{tempo} BPM</span></div>
-<input type="range" min="60" max="200" value={tempo} onChange={(e) => setTempo(Number(e.target.value))} class="w-full accent-orange-500 select-text" />
+{h("input", { "type": "range", min: "60", max: "200", value: tempo, onChange: (e) => setTempo(Number(e.target.value)), "class": "w-full accent-orange-500 select-text" })}
 </div>
 </div>
 </div>

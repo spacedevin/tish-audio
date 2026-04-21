@@ -11,6 +11,9 @@ const pitchAnalyserRef = deps.pitchAnalyserRef
 const outGainRef = deps.outGainRef
 
 Object.values(nodeAudioMapRef.current).forEach(n => {
+if (n.midiSink && typeof n.midiSink.dispose === "function") {
+try { n.midiSink.dispose(); } catch (eMidi) {}
+}
 if (n.discardPullSilent) {
 try { n.discardPullSilent.disconnect(); } catch (e) {}
 }
@@ -30,13 +33,14 @@ let inPorts = null; let outPorts = null;
 let analysers = {}; 
 let nodeParamSync = null;
 let smartGateRuntime = null;
+let midiSink = null;
 
 // BYPASS LOGIC
-if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter'].includes(node.type)) {
+if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter'].includes(node["type"])) {
 inNode = ctx.createGain();
 outNode = inNode; 
 } 
-else if (node.type === 'SYS_IN') {
+else if (node["type"] === 'SYS_IN') {
 // Web: MediaStreamAudioSourceNode. Tauri: AudioWorkletNode (native cpal → events → worklet ring buffer).
 inNode = sourcesRef.current[node.params?.deviceId];
 if (!inNode) {
@@ -48,13 +52,13 @@ if (pitchAnalyserRef && pitchAnalyserRef.current && inNode && typeof inNode.conn
 try { inNode.connect(pitchAnalyserRef.current); } catch (ePitchTap) {}
 }
 } 
-else if (node.type === 'SYS_OUT') {
+else if (node["type"] === 'SYS_OUT') {
 inNode = ctx.createGain();
 inNode.connect(analyserRef.current); 
 outNode = inNode;
 }
-else if (MODULE_REGISTRY[node.type]?.buildAudio) {
-const built = MODULE_REGISTRY[node.type].buildAudio(ctx, node);
+else if (MODULE_REGISTRY[node["type"]]?.buildAudio) {
+const built = MODULE_REGISTRY[node["type"]].buildAudio(ctx, node);
 inNode = built["in"];
 outNode = built["out"];
 if (built.lfo) lfo = built.lfo;
@@ -64,38 +68,39 @@ if (built.outPorts) outPorts = built.outPorts;
 if (built.analysers) analysers = built.analysers;
 if (built.nodeParamSync) nodeParamSync = built.nodeParamSync;
 if (built.smartGateRuntime) smartGateRuntime = built.smartGateRuntime;
+if (built.midiSink) midiSink = built.midiSink;
 }
-else if (node.type === 'sm57_sim') {
-const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 100;
-const p1 = ctx.createBiquadFilter(); p1.type = 'peaking'; p1.frequency.value = 3000; p1.gain.value = 4;
-const p2 = ctx.createBiquadFilter(); p2.type = 'peaking'; p2.frequency.value = 6000; p2.gain.value = 2;
-const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 12000;
+else if (node["type"] === 'sm57_sim') {
+const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 100;
+const p1 = ctx.createBiquadFilter(); p1["type"] = 'peaking'; p1.frequency.value = 3000; p1.gain.value = 4;
+const p2 = ctx.createBiquadFilter(); p2["type"] = 'peaking'; p2.frequency.value = 6000; p2.gain.value = 2;
+const lp = ctx.createBiquadFilter(); lp["type"] = 'lowpass'; lp.frequency.value = 12000;
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
 hp.connect(p1); p1.connect(p2); p2.connect(lp); lp.connect(outNode);
 inNode = hp;
 nodeParamSync = (ctx, n) => { smoothAudioParam(outNode.gain, n.params.level ?? 1.0, ctx); };
 }
-else if (node.type === 'u87_sim') {
-const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 40;
-const hs = ctx.createBiquadFilter(); hs.type = 'highshelf'; hs.frequency.value = 8000; hs.gain.value = 3;
+else if (node["type"] === 'u87_sim') {
+const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 40;
+const hs = ctx.createBiquadFilter(); hs["type"] = 'highshelf'; hs.frequency.value = 8000; hs.gain.value = 3;
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
 hp.connect(hs); hs.connect(outNode);
 inNode = hp;
 nodeParamSync = (ctx, n) => { smoothAudioParam(outNode.gain, n.params.level ?? 1.0, ctx); };
 }
-else if (node.type === 'ribbon_sim') {
+else if (node["type"] === 'ribbon_sim') {
 inNode = ctx.createWaveShaper(); inNode.curve = makeDistortionCurve(10); 
-const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 8000;
-const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 60;
+const lp = ctx.createBiquadFilter(); lp["type"] = 'lowpass'; lp.frequency.value = 8000;
+const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 60;
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
 inNode.connect(lp); lp.connect(hp); hp.connect(outNode);
 nodeParamSync = (ctx, n) => { smoothAudioParam(outNode.gain, n.params.level ?? 1.0, ctx); };
 }
-else if (node.type === 'vocal_doubler') {
+else if (node["type"] === 'vocal_doubler') {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delayL = ctx.createDelay(1.0); delayL.delayTime.value = 0.02; 
 const delayR = ctx.createDelay(1.0); delayR.delayTime.value = 0.03; 
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 1.5;
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = 1.5;
 const lfoDepth = ctx.createGain(); lfoDepth.gain.value = (node.params.spread ?? 0.5) * 0.005;
 lfo.connect(lfoDepth); lfoDepth.connect(delayL.delayTime); lfoDepth.connect(delayR.delayTime); lfo.start();
 const wetMix = ctx.createGain(); wetMix.gain.value = node.params.mix ?? 0.5;
@@ -111,10 +116,10 @@ smoothAudioParam(dryMix.gain, 1.0 - (p.mix ?? 0.5), ctx);
 smoothAudioParam(lfoDepth.gain, (p.spread ?? 0.5) * 0.005, ctx);
 };
 }
-else if (node.type === 'compressor' || node.type === 'noise_gate') {
+else if (node["type"] === 'compressor' || node["type"] === 'noise_gate') {
 inNode = ctx.createDynamicsCompressor();
 inNode.threshold.value = node.params.threshold ?? -24;
-inNode.ratio.value = node.type === 'noise_gate' ? 20 : (node.params.ratio ?? 4); 
+inNode.ratio.value = node["type"] === 'noise_gate' ? 20 : (node.params.ratio ?? 4); 
 inNode.attack.value = 0.005; 
 inNode.release.value = node.params.decay ?? 0.1;
 outNode = ctx.createGain(); 
@@ -124,12 +129,12 @@ nodeParamSync = (ctx, n) => {
 const p = n.params;
 const dyn = inNode;
 smoothAudioParam(dyn.threshold, p.threshold ?? -24, ctx);
-smoothAudioParam(dyn.ratio, n.type === 'noise_gate' ? 20 : (p.ratio ?? 4), ctx);
+smoothAudioParam(dyn.ratio, n["type"] === 'noise_gate' ? 20 : (p.ratio ?? 4), ctx);
 smoothAudioParam(dyn.release, p.decay ?? 0.1, ctx);
 smoothAudioParam(outNode.gain, p.makeup ?? 1.0, ctx);
 };
 }
-else if (node.type === 'smart_gate') {
+else if (node["type"] === 'smart_gate') {
 const pass = ctx.createGain(); pass.gain.value = 1.0;
 const follower = ctx.createAnalyser();
 follower.fftSize = 2048;
@@ -145,10 +150,10 @@ const st = { gainSmoo: 1, lastNow: 0 };
 smartGateRuntime = { analyser: follower, gateGain: gateGain, buf: buf, st: st };
 nodeParamSync = null;
 }
-else if (node.type === 'eq7') {
+else if (node["type"] === 'eq7') {
 const freqs = [100, 200, 400, 800, 1600, 3200, 6400];
 const filters = freqs.map((f) => {
-const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.414;
+const filter = ctx.createBiquadFilter(); filter["type"] = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.414;
 const paramKey = "b" + (f >= 1000 ? (f/1000).toString().replace(".", "k") : String(f));
 filter.gain.value = node.params[paramKey] ?? 0;
 return filter;
@@ -169,16 +174,16 @@ fi = fi + 1;
 smoothAudioParam(outNode.gain, p.level ?? 1.0, ctx);
 };
 }
-else if (node.type === 'master_eq') {
+else if (node["type"] === 'master_eq') {
 if (node.bypassed) {
 inNode = ctx.createGain(); outNode = inNode;
 } else {
 const inputPad = ctx.createGain(); inputPad.gain.value = 1.0;
-const sub = ctx.createBiquadFilter(); sub.type = 'lowshelf'; sub.frequency.value = 80; sub.gain.value = (node.params.sub ?? 0) * 10;
-const low = ctx.createBiquadFilter(); low.type = 'peaking'; low.frequency.value = 250; low.gain.value = (node.params.low ?? 0) * 10; low.Q.value = 1.4;
-const mid = ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1000; mid.gain.value = (node.params.mid ?? 0) * 10; mid.Q.value = 1.4;
-const high = ctx.createBiquadFilter(); high.type = 'peaking'; high.frequency.value = 4000; high.gain.value = (node.params.high ?? 0) * 10; high.Q.value = 1.4;
-const air = ctx.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 10000; air.gain.value = (node.params.air ?? 0) * 10;
+const sub = ctx.createBiquadFilter(); sub["type"] = 'lowshelf'; sub.frequency.value = 80; sub.gain.value = (node.params.sub ?? 0) * 10;
+const low = ctx.createBiquadFilter(); low["type"] = 'peaking'; low.frequency.value = 250; low.gain.value = (node.params.low ?? 0) * 10; low.Q.value = 1.4;
+const mid = ctx.createBiquadFilter(); mid["type"] = 'peaking'; mid.frequency.value = 1000; mid.gain.value = (node.params.mid ?? 0) * 10; mid.Q.value = 1.4;
+const high = ctx.createBiquadFilter(); high["type"] = 'peaking'; high.frequency.value = 4000; high.gain.value = (node.params.high ?? 0) * 10; high.Q.value = 1.4;
+const air = ctx.createBiquadFilter(); air["type"] = 'highshelf'; air.frequency.value = 10000; air.gain.value = (node.params.air ?? 0) * 10;
 
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
 inNode = inputPad;
@@ -194,7 +199,7 @@ inputPad.connect(nodeAnalyser);
 const bandFreqs = { sub: 80, low: 250, mid: 1000, high: 4000, air: 10000 };
 Object.entries(bandFreqs).forEach(([key, f]) => {
 const bp = ctx.createBiquadFilter();
-bp.type = 'bandpass';
+bp["type"] = 'bandpass';
 bp.frequency.value = f;
 bp.Q.value = 2.0;
 const boost = ctx.createGain();
@@ -219,14 +224,14 @@ smoothAudioParam(outNode.gain, p.level ?? 1.0, ctx);
 };
 }
 }
-else if (node.type === 'graphic_eq') {
+else if (node["type"] === 'graphic_eq') {
 if (node.bypassed) {
 inNode = ctx.createGain(); outNode = inNode;
 } else {
 const inputPad = ctx.createGain(); inputPad.gain.value = 1.0;
 const freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const filters = freqs.map((f) => {
-const filter = ctx.createBiquadFilter(); filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.4;
+const filter = ctx.createBiquadFilter(); filter["type"] = 'peaking'; filter.frequency.value = f; filter.Q.value = 1.4;
 const paramKey = f >= 1000 ? ("b" + String(f/1000) + "k") : ("b" + String(f));
 filter.gain.value = (node.params[paramKey] ?? 0) * 12; // +/- 12 dB
 return filter;
@@ -247,7 +252,7 @@ inputPad.connect(nodeAnalyser);
 freqs.forEach((f) => {
 const paramKey = f >= 1000 ? ("b" + String(f/1000) + "k") : ("b" + String(f));
 const bp = ctx.createBiquadFilter();
-bp.type = 'bandpass';
+bp["type"] = 'bandpass';
 bp.frequency.value = f;
 bp.Q.value = 4.0;
 const boost = ctx.createGain();
@@ -274,7 +279,7 @@ smoothAudioParam(outNode.gain, p.level ?? 1.0, ctx);
 };
 }
 }
-else if (node.type === 'vu_meter') {
+else if (node["type"] === 'vu_meter') {
 inNode = ctx.createGain(); 
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 1.0;
 inNode.connect(outNode);
@@ -284,14 +289,14 @@ nodeAnalyser.smoothingTimeConstant = 0.8;
 outNode.connect(nodeAnalyser);
 nodeParamSync = (ctx, n) => { smoothAudioParam(outNode.gain, n.params.level ?? 1.0, ctx); };
 }
-else if (node.type === 'auto_wah' || node.type === 'tron') {
+else if (node["type"] === 'auto_wah' || node["type"] === 'tron') {
 inNode = ctx.createBiquadFilter();
-inNode.type = 'bandpass';
+inNode["type"] = 'bandpass';
 inNode.frequency.value = node.params.baseFreq ?? 400;
-inNode.Q.value = node.type === 'tron' ? 8.0 : 4.0; 
+inNode.Q.value = node["type"] === 'tron' ? 8.0 : 4.0; 
 
 lfo = ctx.createOscillator();
-lfo.type = node.type === 'tron' ? 'sawtooth' : 'sine';
+lfo["type"] = node["type"] === 'tron' ? 'sawtooth' : 'sine';
 lfo.frequency.value = node.params.rate ?? 2.0;
 
 const lfoDepth = ctx.createGain();
@@ -309,7 +314,7 @@ smoothAudioParam(lfo.frequency, p.rate ?? 2.0, ctx);
 smoothAudioParam(lfoDepth.gain, p.sweep ?? 1500, ctx);
 };
 }
-else if (node.type === 'bitcrush') {
+else if (node["type"] === 'bitcrush') {
 inNode = ctx.createWaveShaper();
 inNode.curve = makeBitcrusherCurve(node.params.bits ?? 4);
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.5;
@@ -320,13 +325,13 @@ inNode.curve = makeBitcrusherCurve(p.bits ?? 4);
 smoothAudioParam(outNode.gain, p.level ?? 0.5, ctx);
 };
 }
-else if (node.type === 'boost' || node.type === 'splitter') {
+else if (node["type"] === 'boost' || node["type"] === 'splitter') {
 inNode = ctx.createGain(); 
 inNode.gain.value = node.params.gain ?? node.params.output ?? 1.0; 
 outNode = inNode;
 nodeParamSync = (ctx, n) => { smoothAudioParam(inNode.gain, n.params.gain ?? n.params.output ?? 1.0, ctx); };
 }
-else if (node.type === 'console_mixer') {
+else if (node["type"] === 'console_mixer') {
 outNode = ctx.createGain();
 outNode.gain.value = node.params.master ?? 1.0;
 inPorts = {};
@@ -364,10 +369,10 @@ ci = ci + 1;
 }
 };
 }
-else if (node.type === 'crossover') {
+else if (node["type"] === 'crossover') {
 inNode = ctx.createGain();
-const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = node.params.freq ?? 800;
-const high = ctx.createBiquadFilter(); high.type = 'highpass'; high.frequency.value = node.params.freq ?? 800;
+const low = ctx.createBiquadFilter(); low["type"] = 'lowpass'; low.frequency.value = node.params.freq ?? 800;
+const high = ctx.createBiquadFilter(); high["type"] = 'highpass'; high.frequency.value = node.params.freq ?? 800;
 inNode.connect(low); inNode.connect(high);
 outPorts = { low, high };
 nodeParamSync = (ctx, n) => {
@@ -376,11 +381,11 @@ smoothAudioParam(low.frequency, fv, ctx);
 smoothAudioParam(high.frequency, fv, ctx);
 };
 }
-else if (node.type === 'centaur') {
+else if (node["type"] === 'centaur') {
 inNode = ctx.createGain(); outNode = ctx.createGain(); outNode.gain.value = node.params.output ?? 0.5;
 const cleanGain = ctx.createGain(); cleanGain.gain.value = Math.max(0, 1.0 - ((node.params.drive ?? 500) / 1500));
 const drivePath = ctx.createWaveShaper(); drivePath.curve = makeDistortionCurve(node.params.drive ?? 500);
-const treble = ctx.createBiquadFilter(); treble.type = 'highshelf'; treble.frequency.value = 2000; treble.gain.value = ((node.params.highs ?? 5) - 5) * 2;
+const treble = ctx.createBiquadFilter(); treble["type"] = 'highshelf'; treble.frequency.value = 2000; treble.gain.value = ((node.params.highs ?? 5) - 5) * 2;
 inNode.connect(cleanGain); cleanGain.connect(outNode);
 inNode.connect(drivePath); drivePath.connect(treble); treble.connect(outNode);
 nodeParamSync = (ctx, n) => {
@@ -391,12 +396,12 @@ drivePath.curve = makeDistortionCurve(p.drive ?? 500);
 smoothAudioParam(treble.gain, ((p.highs ?? 5) - 5) * 2, ctx);
 };
 }
-else if (node.type === 'octa_fuzz') {
-inNode = ctx.createBiquadFilter(); inNode.type = 'highpass'; inNode.frequency.value = 100; 
+else if (node["type"] === 'octa_fuzz') {
+inNode = ctx.createBiquadFilter(); inNode["type"] = 'highpass'; inNode.frequency.value = 100; 
 const rect = ctx.createWaveShaper(); rect.curve = makeRectifierCurve();
-const dcBlocker = ctx.createBiquadFilter(); dcBlocker.type = 'highpass'; dcBlocker.frequency.value = 80; 
+const dcBlocker = ctx.createBiquadFilter(); dcBlocker["type"] = 'highpass'; dcBlocker.frequency.value = 80; 
 const fuzz = ctx.createWaveShaper(); fuzz.curve = makeDistortionCurve(node.params.drive ?? 600);
-const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = node.params.tone ?? 3000;
+const tone = ctx.createBiquadFilter(); tone["type"] = 'lowpass'; tone.frequency.value = node.params.tone ?? 3000;
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
 inNode.connect(rect); rect.connect(dcBlocker); dcBlocker.connect(fuzz); fuzz.connect(tone); tone.connect(outNode);
 nodeParamSync = (ctx, n) => {
@@ -406,10 +411,10 @@ smoothAudioParam(tone.frequency, p.tone ?? 3000, ctx);
 smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
 };
 }
-else if (node.type === 'sub_mosh') {
-const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;
+else if (node["type"] === 'sub_mosh') {
+const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 90;
 const rect = ctx.createWaveShaper(); rect.curve = makeRectifierCurve();
-const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = node.params.cut ?? 1400; lp.Q.value = 0.85;
+const lp = ctx.createBiquadFilter(); lp["type"] = 'lowpass'; lp.frequency.value = node.params.cut ?? 1400; lp.Q.value = 0.85;
 const wetGain = ctx.createGain(); wetGain.gain.value = (node.params.mix ?? 0.45) * 0.95;
 const dryGain = ctx.createGain(); dryGain.gain.value = 1.0 - (node.params.mix ?? 0.45) * 0.55;
 const sum = ctx.createGain();
@@ -428,12 +433,12 @@ smoothAudioParam(lp.frequency, p.cut ?? 1400, ctx);
 smoothAudioParam(outNode.gain, p.level ?? 0.75, ctx);
 };
 }
-else if (node.type === 'chainsaw') {
-const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 200;
+else if (node["type"] === 'chainsaw') {
+const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 200;
 const fuzz = ctx.createWaveShaper(); fuzz.curve = makeDistortionCurve(node.params.drive ?? 820);
 fuzz.oversample = '4x';
-const scoop = ctx.createBiquadFilter(); scoop.type = 'peaking'; scoop.frequency.value = 1250; scoop.Q.value = 1.35; scoop.gain.value = node.params.scoop ?? -18;
-const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6800;
+const scoop = ctx.createBiquadFilter(); scoop["type"] = 'peaking'; scoop.frequency.value = 1250; scoop.Q.value = 1.35; scoop.gain.value = node.params.scoop ?? -18;
+const lp = ctx.createBiquadFilter(); lp["type"] = 'lowpass'; lp.frequency.value = 6800;
 inNode = hp;
 hp.connect(fuzz); fuzz.connect(scoop); scoop.connect(lp);
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.42;
@@ -445,11 +450,11 @@ smoothAudioParam(scoop.gain, p.scoop ?? -18, ctx);
 smoothAudioParam(outNode.gain, p.level ?? 0.42, ctx);
 };
 }
-else if (node.type === 'dub_layer') {
+else if (node["type"] === 'dub_layer') {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delay = ctx.createDelay(5.0); delay.delayTime.value = node.params.time ?? 0.55;
 const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.62;
-const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = node.params.dark ?? 2800;
+const tone = ctx.createBiquadFilter(); tone["type"] = 'lowpass'; tone.frequency.value = node.params.dark ?? 2800;
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.48;
 inNode.connect(outNode);
 inNode.connect(delay); delay.connect(tone); tone.connect(wetGain); wetGain.connect(outNode);
@@ -462,12 +467,12 @@ smoothAudioParam(tone.frequency, p.dark ?? 2800, ctx);
 smoothAudioParam(wetGain.gain, p.mix ?? 0.48, ctx);
 };
 }
-else if (node.type === 'tape_echo') {
+else if (node["type"] === 'tape_echo') {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delay = ctx.createDelay(5.0); delay.delayTime.value = node.params.time ?? 0.4;
 const feedback = ctx.createGain(); feedback.gain.value = node.params.feedback ?? 0.6;
-const lowpass = ctx.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 4000 - ((node.params.age ?? 0.5) * 3000);
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 1.2;
+const lowpass = ctx.createBiquadFilter(); lowpass["type"] = 'lowpass'; lowpass.frequency.value = 4000 - ((node.params.age ?? 0.5) * 3000);
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = 1.2;
 const lfoDepth = ctx.createGain(); lfoDepth.gain.value = (node.params.age ?? 0.5) * 0.008;
 lfo.connect(lfoDepth); lfoDepth.connect(delay.delayTime); lfo.start();
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.5;
@@ -483,15 +488,15 @@ smoothAudioParam(lfoDepth.gain, (p.age ?? 0.5) * 0.008, ctx);
 smoothAudioParam(wetGain.gain, p.mix ?? 0.5, ctx);
 };
 }
-else if (node.type.startsWith('amp_')) {
+else if (node["type"].startsWith('amp_')) {
 inNode = ctx.createWaveShaper(); 
 inNode.curve = makeDistortionCurve((node.params.gain ?? 50) * 10); 
 inNode.oversample = '4x';
 
-const bass = ctx.createBiquadFilter(); bass.type = 'lowshelf'; bass.frequency.value = 120; bass.gain.value = ((node.params.bass ?? 1.0) - 1) * 10;
-const mid = ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = node.type === 'amp_modern' ? 500 : 800; mid.gain.value = ((node.params.mid ?? 1.0) - 1) * 10; mid.Q.value = 1.0;
-const treble = ctx.createBiquadFilter(); treble.type = 'highshelf'; treble.frequency.value = 4000; treble.gain.value = ((node.params.treble ?? 1.0) - 1) * 10;
-const presence = ctx.createBiquadFilter(); presence.type = 'lowpass'; presence.frequency.value = node.params.presence ?? 3000; 
+const bass = ctx.createBiquadFilter(); bass["type"] = 'lowshelf'; bass.frequency.value = 120; bass.gain.value = ((node.params.bass ?? 1.0) - 1) * 10;
+const mid = ctx.createBiquadFilter(); mid["type"] = 'peaking'; mid.frequency.value = node["type"] === 'amp_modern' ? 500 : 800; mid.gain.value = ((node.params.mid ?? 1.0) - 1) * 10; mid.Q.value = 1.0;
+const treble = ctx.createBiquadFilter(); treble["type"] = 'highshelf'; treble.frequency.value = 4000; treble.gain.value = ((node.params.treble ?? 1.0) - 1) * 10;
+const presence = ctx.createBiquadFilter(); presence["type"] = 'lowpass'; presence.frequency.value = node.params.presence ?? 3000; 
 
 outNode = ctx.createGain(); outNode.gain.value = node.params.master ?? 0.8;
 inNode.connect(bass); bass.connect(mid); mid.connect(treble); treble.connect(presence); presence.connect(outNode);
@@ -505,44 +510,44 @@ smoothAudioParam(presence.frequency, p.presence ?? 3000, ctx);
 smoothAudioParam(outNode.gain, p.master ?? 0.8, ctx);
 };
 }
-else if (['metal', 'muff', 'overdrive', 'fuzz', 'ds1', 'screamer', 'blues_od', 'rat'].includes(node.type)) {
+else if (['metal', 'muff', 'overdrive', 'fuzz', 'ds1', 'screamer', 'blues_od', 'rat'].includes(node["type"])) {
 inNode = ctx.createWaveShaper();
-const driveAmount = (node.type === 'fuzz' || node.type === 'muff' || node.type === 'metal') ? (node.params.drive ?? 800) * 5 : (node.params.drive ?? 400);
-inNode.curve = node.type === 'blues_od' ? makeAsymmetricCurve(driveAmount) : makeDistortionCurve(driveAmount); 
+const driveAmount = (node["type"] === 'fuzz' || node["type"] === 'muff' || node["type"] === 'metal') ? (node.params.drive ?? 800) * 5 : (node.params.drive ?? 400);
+inNode.curve = node["type"] === 'blues_od' ? makeAsymmetricCurve(driveAmount) : makeDistortionCurve(driveAmount); 
 inNode.oversample = '4x';
 
-if (node.type === 'metal' || node.type === 'ds1') {
-const midCut = ctx.createBiquadFilter(); midCut.type = 'peaking'; midCut.frequency.value = node.params.midFreq ?? 800; midCut.gain.value = node.params.midCut ?? -10; midCut.Q.value = 2.0;
+if (node["type"] === 'metal' || node["type"] === 'ds1') {
+const midCut = ctx.createBiquadFilter(); midCut["type"] = 'peaking'; midCut.frequency.value = node.params.midFreq ?? 800; midCut.gain.value = node.params.midCut ?? -10; midCut.Q.value = 2.0;
 outNode = ctx.createGain(); outNode.gain.value = node.params.level ?? 0.4;
 inNode.connect(midCut); midCut.connect(outNode);
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
 inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
 smoothAudioParam(midCut.frequency, p.midFreq ?? 800, ctx);
 smoothAudioParam(midCut.gain, p.midCut ?? -10, ctx);
 smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
 };
-} else if (node.type === 'rat') {
-const toneBp = ctx.createBiquadFilter(); toneBp.type = 'lowpass'; toneBp.frequency.value = node.params.filter ?? 1500;
+} else if (node["type"] === 'rat') {
+const toneBp = ctx.createBiquadFilter(); toneBp["type"] = 'lowpass'; toneBp.frequency.value = node.params.filter ?? 1500;
 const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.4;
 inNode.connect(toneBp); toneBp.connect(gain); outNode = gain;
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
 inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
 smoothAudioParam(toneBp.frequency, p.filter ?? 1500, ctx);
 smoothAudioParam(outNode.gain, p.level ?? 0.4, ctx);
 };
 } else {
-const toneBp = ctx.createBiquadFilter(); toneBp.type = 'lowpass'; toneBp.frequency.value = node.params.tone ?? 3000;
+const toneBp = ctx.createBiquadFilter(); toneBp["type"] = 'lowpass'; toneBp.frequency.value = node.params.tone ?? 3000;
 const gain = ctx.createGain(); gain.gain.value = node.params.level ?? 0.5;
 inNode.connect(toneBp); toneBp.connect(gain); outNode = gain;
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 const dAmt = (typ === 'fuzz' || typ === 'muff' || typ === 'metal') ? (p.drive ?? 800) * 5 : (p.drive ?? 400);
 inNode.curve = typ === 'blues_od' ? makeAsymmetricCurve(dAmt) : makeDistortionCurve(dAmt);
 smoothAudioParam(toneBp.frequency, p.tone ?? 3000, ctx);
@@ -550,23 +555,23 @@ smoothAudioParam(outNode.gain, p.level ?? 0.5, ctx);
 };
 }
 } 
-else if (['chorus', 'flanger', 'delay', 'slapback', 'vibrato', 'rotary'].includes(node.type)) {
+else if (['chorus', 'flanger', 'delay', 'slapback', 'vibrato', 'rotary'].includes(node["type"])) {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const delay = ctx.createDelay(5.0); 
-delay.delayTime.value = node.type === 'chorus' ? 0.03 : node.type === 'flanger' ? 0.005 : node.type === 'vibrato' ? 0.02 : (node.params.time ?? 0.0);
+delay.delayTime.value = node["type"] === 'chorus' ? 0.03 : node["type"] === 'flanger' ? 0.005 : node["type"] === 'vibrato' ? 0.02 : (node.params.time ?? 0.0);
 let lfoDepthMod = null;
 let feedbackGain = null;
 let wetMixGain = null;
 
-if (node.type !== 'delay' && node.type !== 'slapback') {
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 1.0;
-lfoDepthMod = ctx.createGain(); lfoDepthMod.gain.value = node.type === 'chorus' ? (node.params.depth ?? 1.0) * 0.01 : (node.params.depth ?? 0.005);
+if (node["type"] !== 'delay' && node["type"] !== 'slapback') {
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = node.params.rate ?? 1.0;
+lfoDepthMod = ctx.createGain(); lfoDepthMod.gain.value = node["type"] === 'chorus' ? (node.params.depth ?? 1.0) * 0.01 : (node.params.depth ?? 0.005);
 lfo.connect(lfoDepthMod); lfoDepthMod.connect(delay.delayTime); lfo.start();
 }
 
-if (node.type === 'rotary') {
+if (node["type"] === 'rotary') {
 const tremoloGain = ctx.createGain();
-const tremLfo = ctx.createOscillator(); tremLfo.type = 'sine'; tremLfo.frequency.value = node.params.rate ?? 6.0;
+const tremLfo = ctx.createOscillator(); tremLfo["type"] = 'sine'; tremLfo.frequency.value = node.params.rate ?? 6.0;
 const tremDepth = ctx.createGain(); tremDepth.gain.value = 0.5;
 tremLfo.connect(tremDepth); tremDepth.connect(tremoloGain.gain); tremLfo.start();
 delay.connect(tremoloGain);
@@ -575,10 +580,10 @@ tremoloGain.connect(outNode);
 delay.connect(outNode);
 }
 
-if (node.type !== 'vibrato') inNode.connect(outNode); 
+if (node["type"] !== 'vibrato') inNode.connect(outNode); 
 inNode.connect(delay); 
 
-if (node.type === 'flanger' || node.type === 'delay' || node.type === 'slapback') {
+if (node["type"] === 'flanger' || node["type"] === 'delay' || node["type"] === 'slapback') {
 feedbackGain = ctx.createGain(); feedbackGain.gain.value = node.params.feedback ?? 0.5;
 delay.connect(feedbackGain); feedbackGain.connect(delay);
 if (node.params.mix !== undefined) {
@@ -589,7 +594,7 @@ delay.connect(wetMixGain); wetMixGain.connect(outNode);
 }
 nodeParamSync = (ctx, n) => {
 const p = n.params;
-const typ = n.type;
+const typ = n["type"];
 if (typ === 'delay' || typ === 'slapback') smoothAudioParam(delay.delayTime, p.time ?? 0, ctx);
 if (lfo) smoothAudioParam(lfo.frequency, p.rate ?? 1.0, ctx);
 if (lfoDepthMod) {
@@ -600,11 +605,11 @@ if (feedbackGain) smoothAudioParam(feedbackGain.gain, p.feedback ?? 0.5, ctx);
 if (wetMixGain) smoothAudioParam(wetMixGain.gain, p.mix ?? 1.0, ctx);
 };
 }
-else if (node.type === 'phaser') {
+else if (node["type"] === 'phaser') {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const filters = [];
-for(let i=0; i<4; i = i + 1) { const f = ctx.createBiquadFilter(); f.type = 'allpass'; f.frequency.value = 1000; filters.push(f); }
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.rate ?? 0.8;
+for(let i=0; i<4; i = i + 1) { const f = ctx.createBiquadFilter(); f["type"] = 'allpass'; f.frequency.value = 1000; filters.push(f); }
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = node.params.rate ?? 0.8;
 const lfoDepth = ctx.createGain(); lfoDepth.gain.value = node.params.sweep ?? 800;
 lfo.connect(lfoDepth); filters.forEach(f => lfoDepth.connect(f.frequency)); lfo.start();
 inNode.connect(filters[0]); filters[0].connect(filters[1]); filters[1].connect(filters[2]); filters[2].connect(filters[3]); filters[3].connect(outNode);
@@ -616,9 +621,9 @@ if (lfo) smoothAudioParam(lfo.frequency, p.rate ?? 0.8, ctx);
 if (lfoDepthPhaser) smoothAudioParam(lfoDepthPhaser.gain, p.sweep ?? 800, ctx);
 };
 }
-else if (node.type === 'tremolo') {
+else if (node["type"] === 'tremolo') {
 inNode = ctx.createGain(); outNode = inNode; 
-lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = node.params.speed ?? 5.0;
+lfo = ctx.createOscillator(); lfo["type"] = 'sine'; lfo.frequency.value = node.params.speed ?? 5.0;
 const lfoDepthTrem = ctx.createGain(); lfoDepthTrem.gain.value = node.params.depth ?? 0.5;
 lfo.connect(lfoDepthTrem); lfoDepthTrem.connect(inNode.gain); lfo.start();
 nodeParamSync = (ctx, n) => {
@@ -627,12 +632,12 @@ if (lfo) smoothAudioParam(lfo.frequency, p.speed ?? 5.0, ctx);
 smoothAudioParam(lfoDepthTrem.gain, p.depth ?? 0.5, ctx);
 };
 }
-else if (node.type === 'shimmer_verb') {
+else if (node["type"] === 'shimmer_verb') {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const convolver = ctx.createConvolver();
 let lastDecay = Math.min(4.5, node.params.decay ?? 3.2);
 convolver.buffer = createReverbIR(ctx, lastDecay, 6.2, 'hall');
-const air = ctx.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 3200; air.gain.value = (node.params.sheen ?? 0.65) * 14;
+const air = ctx.createBiquadFilter(); air["type"] = 'highshelf'; air.frequency.value = 3200; air.gain.value = (node.params.sheen ?? 0.65) * 14;
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.38;
 inNode.connect(convolver); convolver.connect(air); air.connect(wetGain); wetGain.connect(outNode);
 inNode.connect(outNode);
@@ -647,12 +652,12 @@ convolver.buffer = createReverbIR(ctx, lastDecay, 6.2, 'hall');
 }
 };
 }
-else if (node.type.endsWith('_verb')) {
+else if (node["type"].endsWith('_verb')) {
 inNode = ctx.createGain(); outNode = ctx.createGain();
 const convolver = ctx.createConvolver(); 
-const type = node.type.replace('_verb', '');
+const verbKind = node["type"].replace('_verb', '');
 let lastDecay = node.params.decay ?? 3.0;
-convolver.buffer = createReverbIR(ctx, lastDecay, 5.0, type);
+convolver.buffer = createReverbIR(ctx, lastDecay, 5.0, verbKind);
 const wetGain = ctx.createGain(); wetGain.gain.value = node.params.mix ?? 0.5;
 inNode.connect(convolver); convolver.connect(wetGain); wetGain.connect(outNode); inNode.connect(outNode); 
 nodeParamSync = (ctx, n) => { 
@@ -660,7 +665,7 @@ smoothAudioParam(wetGain.gain, n.params.mix ?? 0.5, ctx);
 const curDecay = n.params.decay ?? 3.0;
 if (Math.abs(curDecay - lastDecay) > 0.05) {
 lastDecay = curDecay;
-convolver.buffer = createReverbIR(ctx, lastDecay, 5.0, type);
+convolver.buffer = createReverbIR(ctx, lastDecay, 5.0, verbKind);
 }
 };
 }
@@ -686,11 +691,15 @@ lfo: lfo,
 analyser: nodeAnalyser,
 analysers: analysers,
 _syncLiveParams: nodeParamSync,
-smartGateRuntime: smartGateRuntime
+smartGateRuntime: smartGateRuntime,
+midiSink: midiSink
 };
 });
 
 currentConns.forEach(conn => {
+if (conn.fromPort === 'midi' || conn.toPort === 'midi') {
+return;
+}
 const fromData = nodeAudioMapRef.current[conn.from];
 const toData = nodeAudioMapRef.current[conn.to];
 if (fromData && toData) {
@@ -706,9 +715,9 @@ let ni = 0;
 while (ni < currentNodes.length) {
 const node = currentNodes[ni];
 ni = ni + 1;
-if (node.type !== 'master_eq' && node.type !== 'graphic_eq') continue;
+if (node["type"] !== 'master_eq' && node["type"] !== 'graphic_eq') continue;
 if (node.bypassed) continue;
-const hasOutgoing = currentConns.some(c => c.from === node.id);
+const hasOutgoing = currentConns.some(c => c.from === node.id && c.fromPort !== 'midi');
 if (hasOutgoing) continue;
 const box = nodeAudioMapRef.current[node.id];
 if (!box || !box.out) continue;
@@ -717,6 +726,27 @@ silent.gain.value = 0;
 box.out.connect(silent);
 silent.connect(ctx.destination);
 box.discardPullSilent = silent;
+}
+
+// MIDI Poly (and similar) synthesize into `out` but have no incoming audio; if nothing is patched
+// from `out`, the subgraph may not reach the destination graph pull. Zero-gain tap keeps the engine hot.
+let njp = 0;
+while (njp < currentNodes.length) {
+const node = currentNodes[njp];
+njp = njp + 1;
+if (node["type"] !== 'midi_poly') continue;
+if (node.bypassed) continue;
+const hasOut = currentConns.some(c => c.from === node.id && c.fromPort !== 'midi');
+if (hasOut) continue;
+const box = nodeAudioMapRef.current[node.id];
+if (!box || !box.out || !box.midiSink) continue;
+const silentPull = ctx.createGain();
+silentPull.gain.value = 0;
+try {
+box.out.connect(silentPull);
+silentPull.connect(ctx.destination);
+box.discardPullSilent = silentPull;
+} catch (ePull) {}
 }
 
 }
