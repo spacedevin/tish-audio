@@ -69,6 +69,7 @@ return <canvas ref={canvasRef} width={width} height={height} class="rounded-[1px
 }
 
 export fn VerticalFader(props) { let label = props.label; let min = props.min; let max = props.max; let value = props.value; let onChange = props.onChange; let analyser = props.analyser; let variant = props.variant ?? "default"; let heightClass = props.heightClass ?? "h-24";
+let interactive = props.interactive !== false;
 let rackSlot = props.rackSlot === true;
 let meterSync = props.meterSync;
 let onFaderDragEnd = props.onFaderDragEnd;
@@ -159,7 +160,7 @@ const troughClass = rackSlot
 : "relative w-2.5 h-full bg-black/90 rounded-full shadow-[inset_0_2px_5px_rgba(0,0,0,1)] flex justify-center border border-zinc-800/50";
 
 return (
-<div class={"flex flex-col items-center shrink-0 select-none touch-none px-0.5 " + colW}>
+<div class={"flex flex-col items-center shrink-0 select-none touch-none px-0.5 " + colW + " " + (interactive ? "pointer-events-auto" : "pointer-events-none")}>
 <div class={"relative flex gap-1 items-center touch-none overflow-hidden rounded-sm " + heightClass}>
 <div
 ref={dragSurfaceRef}
@@ -193,6 +194,7 @@ style={{ bottom: String(pct * 100) + "%", transform: "translateY(50%)" }}
 }
 
 export fn RotaryKnob(props) { let label = props.label; let min = props.min; let max = props.max; let value = props.value; let onChange = props.onChange; let theme = props.theme; let compact = props.compact;
+let interactive = props.interactive !== false;
 const dragSurfaceRef = useRef(null);
 const detachDragRef = useRef(null);
 
@@ -285,7 +287,7 @@ const capShell = isDark
 : "shadow-[inset_0_2px_6px_rgba(255,255,255,0.7),inset_0_-2px_5px_rgba(0,0,0,0.25)] bg-gradient-to-br from-neutral-100 via-neutral-300 to-neutral-500 border border-neutral-400";
 
 return (
-<div class={"flex flex-col items-center select-none touch-none shrink-0 " + (compact ? "m-0.5" : "m-1")}>
+<div class={"flex flex-col items-center select-none touch-none shrink-0 " + (interactive ? "pointer-events-auto " : "pointer-events-none ") + (compact ? "m-0.5" : "m-1")}>
 <div
 ref={dragSurfaceRef}
 onPointerDown={handlePointerDown}

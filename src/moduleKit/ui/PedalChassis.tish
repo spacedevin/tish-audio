@@ -15,10 +15,17 @@ export fn _PedalChassis(props) {
 
   return (
     <div 
-      class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none " + node.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
+      class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none touch-none " + node.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100") + (previewOnly ? " pointer-events-none" : "")}
       style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
     >
       <div class={"absolute inset-0 rounded-2xl mix-blend-multiply pointer-events-none " + (isAmpSim ? "opacity-40" : "opacity-45")} style={{ filter: 'url(#metal-texture)' }} />
+
+      {!previewOnly && onDragStart ? (
+        <div
+          onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); onDragStart(e); }}
+          class="absolute inset-0 z-[6] rounded-2xl cursor-grab active:cursor-grabbing touch-none"
+        />
+      ) : null}
 
       {[[3,3], [3, 11], [18, 3], [18, 11]].map(([t, l], i) => (
         <div key={i} class={"absolute w-3 h-3 rounded-full pointer-events-none border border-zinc-600 shadow-[inset_0_1px_2px_rgba(255,255,255,0.35),inset_0_-2px_3px_rgba(0,0,0,0.85),0_1px_2px_rgba(0,0,0,0.6)] bg-gradient-to-br from-zinc-200 via-zinc-400 to-zinc-600 flex items-center justify-center " + (i===0 ? "top-3 left-3" : i===1 ? "top-3 right-3" : i===2 ? screwBr + " left-3" : screwBr + " right-3")}>
@@ -28,22 +35,21 @@ export fn _PedalChassis(props) {
       ))}
       
       <div 
-        onPointerDown={previewOnly ? undefined : onDragStart}
-        class={"shrink-0 text-center font-black " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + (previewOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
+        class={"relative z-10 shrink-0 text-center font-black pointer-events-none " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
       >
         {node.label}
       </div>
 
-      <div class={"flex-1 min-h-0 flex flex-wrap justify-center content-start " + (isAmpSim ? "gap-x-2 gap-y-1 pb-1 content-start" : isCompact ? "gap-1.5" : "gap-3") + (previewOnly ? " pointer-events-none" : "")}>
+      <div class={"relative z-10 flex-1 min-h-0 flex flex-wrap justify-center content-start " + (isAmpSim ? "gap-x-2 gap-y-1 pb-1 content-start" : isCompact ? "gap-1.5" : "gap-3") + (previewOnly ? " opacity-80" : " pointer-events-none")}>
         {children}
       </div>
 
-      <div class={"shrink-0 flex flex-col items-center gap-1.5 pt-1 " + (previewOnly ? "pointer-events-none opacity-80" : "")}>
+      <div class={"relative z-10 shrink-0 flex flex-col items-center gap-1.5 pt-1 pointer-events-none " + (previewOnly ? "opacity-80" : "")}>
         <div 
           class={"w-2.5 h-2.5 rounded-full border border-black transition-colors duration-300 " + (!isBypassed ? "bg-red-600 border-red-950" : "bg-zinc-800")}
           style={!isBypassed ? { boxShadow: '0 0 14px 4px rgba(239,68,68,0.95), 0 0 28px 8px rgba(239,68,68,0.35), inset 0 0 6px rgba(255,255,255,0.35)' } : { boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.9)' }}
         />
-        <div class="w-16 h-16 rounded-full bg-gradient-to-b from-zinc-700 via-zinc-900 to-black shadow-[0_8px_18px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.12)] border border-black flex items-center justify-center">
+        <div class={"w-16 h-16 rounded-full bg-gradient-to-b from-zinc-700 via-zinc-900 to-black shadow-[0_8px_18px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.12)] border border-black flex items-center justify-center " + (previewOnly ? "" : "pointer-events-auto")}>
           <div class="w-14 h-14 rounded-full bg-gradient-to-b from-zinc-900 to-black shadow-inner border border-zinc-950 flex items-center justify-center">
             <div 
               onPointerDown={(e) => { e.stopPropagation(); if (!previewOnly && onToggleBypass) onToggleBypass(); }}

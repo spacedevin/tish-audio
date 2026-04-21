@@ -221,6 +221,8 @@ setWiring({ fromId: nodeId, fromPort: portId });
 };
 
 const startDragNode = (e, node) => {
+if (e.button !== 0) return;
+e.preventDefault();
 e.stopPropagation();
 if (!boardRef.current) return;
 const rect = boardRef.current.getBoundingClientRect();
@@ -403,7 +405,7 @@ return (
 <div class="flex-1 min-h-0 w-full min-w-0 flex flex-col relative">
 <div 
 ref={boardRef}
-class="flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none"
+class="flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none select-none"
 onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
 onPointerLeave={(e) => { if (e.buttons === 0) handlePointerUp(); }}

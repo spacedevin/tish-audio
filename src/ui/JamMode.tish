@@ -129,7 +129,7 @@ return (
 </button>
 <div class="w-full max-w-xs">
 <div class="flex justify-between text-sm text-neutral-400 mb-2"><span>Tempo</span><span class="font-mono text-white">{tempo} BPM</span></div>
-<input type="range" min="60" max="200" value={tempo} onChange={(e) => setTempo(Number(e.target.value))} class="w-full accent-orange-500" />
+<input type="range" min="60" max="200" value={tempo} onChange={(e) => setTempo(Number(e.target.value))} class="w-full accent-orange-500 select-text" />
 </div>
 </div>
 </div>
