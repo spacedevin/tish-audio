@@ -26,7 +26,9 @@ const canvasRef = useRef(null);
 const gameStateRef = useRef(null);
 const smootherRef = useRef(null);
 const strumGateRef = useRef(null);
-if (!strumGateRef.current) strumGateRef.current = createStrumGate();
+if (!strumGateRef.current || typeof strumGateRef.current.reset !== "function" || typeof strumGateRef.current.update !== "function") {
+  strumGateRef.current = createStrumGate({});
+}
 const profileIdRef = useRef(profileId);
 const hudScoreRef = useRef(null);
 const hudComboRef = useRef(null);
@@ -59,6 +61,9 @@ const resetForProfile = (pid) => {
 const p = getProfile(pid);
 gameStateRef.current = createGameState(p);
 smootherRef.current = createLaneSmoother();
+if (!strumGateRef.current || typeof strumGateRef.current.reset !== "function") {
+  strumGateRef.current = createStrumGate({});
+}
 strumGateRef.current.reset();
 hudSnapRef.current = { score: -1, combo: -1, lane: -999, phrase: -1 };
 writeHudRow(0, 0, -1, 0);
@@ -122,6 +127,9 @@ try { if (ac.state === 'suspended') void ac.resume(); } catch (eR) {}
 
 analyser.getFloatTimeDomainData(dataArray);
 const frame = analyzeTimeDomainFrame(dataArray, sampleRate, { maxHz: 2200 });
+if (!strumGateRef.current || typeof strumGateRef.current.update !== "function") {
+  strumGateRef.current = createStrumGate({});
+}
 const strum = strumGateRef.current.update(frame.rms, time);
 const freq = frame.freqHz;
 

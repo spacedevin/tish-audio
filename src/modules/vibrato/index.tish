@@ -9,9 +9,16 @@ export const vibrato_category = 'MODULATION';
 
 export const vibrato_metadata = {
   label: 'Vibrato',
-  color: 'from-sky-500 to-sky-700',
+  color: 'from-teal-600 to-slate-900',
   theme: 'dark',
-  defaultParams: {"rate":4,"depth":0.003}
+  defaultParams: {"rate":4,"depth":0.003},
+  visualStyle: {
+    texture: 'matte',
+    border: 'smooth',
+    font: 'mono',
+    shape: 'mini',
+    footswitch: 'mini',
+  },
 };
 
 export const vibrato_layout = {"width":200,"height":340};

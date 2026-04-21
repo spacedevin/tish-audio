@@ -19,7 +19,9 @@ strum: false
 export fn useLiveGuitarPitch(analyserRef, audioReady, active, openMidis) {
 const midis = openMidis && openMidis.length ? openMidis : STANDARD_6_EADGBE_OPEN_MIDI;
 const strumGateRef = useRef(null);
-if (!strumGateRef.current) strumGateRef.current = createStrumGate();
+if (!strumGateRef.current || typeof strumGateRef.current.reset !== "function" || typeof strumGateRef.current.update !== "function") {
+  strumGateRef.current = createStrumGate({});
+}
 const lastKeyRef = useRef('');
 
 // State moved to caller for imperative rendering.
@@ -32,11 +34,17 @@ const sampleRate = analyser.context.sampleRate;
 try { if (analyser.context.state === 'suspended') void analyser.context.resume(); } catch (eR) {}
 analyser.getFloatTimeDomainData(dataArray);
 const frame = analyzeTimeDomainFrame(dataArray, sampleRate, { maxHz: 2200 });
+if (!strumGateRef.current || typeof strumGateRef.current.update !== "function") {
+  strumGateRef.current = createStrumGate({});
+}
 const strum = strumGateRef.current.update(frame.rms, performance.now());
 return buildTunerSnapshot(frame.freqHz, midisToUse, strum);
 };
 
 const resetGate = () => {
+if (!strumGateRef.current || typeof strumGateRef.current.reset !== "function") {
+  strumGateRef.current = createStrumGate({});
+}
 strumGateRef.current.reset();
 };
 return { getSnapshot, resetStrumGate: resetGate };

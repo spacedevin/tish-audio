@@ -1,7 +1,7 @@
 import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
 import { h } from "lattish"
 import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
-import { RotaryKnob } from "../../ui/controls.tish"
+import { RotaryKnob, SpectrumDisplay } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
 export const phaser_type = 'phaser';
@@ -9,15 +9,24 @@ export const phaser_category = 'MODULATION';
 
 export const phaser_metadata = {
   label: 'Phase 90',
-  color: 'from-orange-500 to-orange-700',
+  color: 'from-fuchsia-600 via-purple-800 to-indigo-950',
   theme: 'dark',
-  defaultParams: {"rate":0.8,"sweep":800}
+  defaultParams: {"rate":0.8,"sweep":800},
+  visualStyle: {
+    border: 'neon',
+    neonColor: 'cyan',
+    screws: 'rivets',
+    font: 'wide',
+    texture: 'carbon',
+    shape: 'barrel',
+  },
 };
 
-export const phaser_layout = {"width":200,"height":340};
+export const phaser_layout = {"width":200,"height":400};
 
 export fn phaser_View(props) {
-  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly, audioDataMap } = props;
+  const outA = audioDataMap && audioDataMap[node.id] && audioDataMap[node.id].portAnalysers && audioDataMap[node.id].portAnalysers.main ? audioDataMap[node.id].portAnalysers.main : null;
   
   return (
     <PedalChassis
@@ -31,6 +40,7 @@ export fn phaser_View(props) {
       isAmpSim={false}
       isCompact={false}
     >
+      <SpectrumDisplay analyser={outA} width={168} height={56} color="rgba(34,211,238,0.9)" barCount={24} style="dots" />
       <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={phaser_metadata.defaultParams.rate} />
       <RotaryKnob label={formatKnobLabel('sweep')} min={100} max={3000} value={node.params.sweep} theme={node.theme} onChange={(v) => onChange('sweep', v)} resetValue={phaser_metadata.defaultParams.sweep} />
     </PedalChassis>

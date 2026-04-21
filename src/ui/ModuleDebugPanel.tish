@@ -19,6 +19,8 @@ const defs = PEDAL_LIBRARY[category];
 let di = 0;
 while (di < defs.length) {
 const def = defs[di];
+const regMeta = MODULE_REGISTRY[def.type] && MODULE_REGISTRY[def.type].metadata ? MODULE_REGISTRY[def.type].metadata : null;
+const vsDbg = regMeta && regMeta.visualStyle ? regMeta.visualStyle : null;
 chain.push({
 id: "dbg_" + def.type + "_" + String(ci) + "_" + String(di),
 category: category,
@@ -28,6 +30,7 @@ color: def.color,
 theme: def.theme,
 params: { ...def.defaultParams },
 defaultParams: { ...def.defaultParams },
+visualStyle: vsDbg,
 bypassed: false
 });
 di = di + 1;

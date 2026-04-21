@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, h, runBatched, useMemo } from "lattish"
 import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2 } from "./icons.tish"
-import { PEDAL_LIBRARY } from "./modules/registry.tish"
+import { PEDAL_LIBRARY, MODULE_REGISTRY } from "./modules/registry.tish"
 import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
 import { syncAudioNodeParams } from "./audio/syncAudioNodeParams.tish"
@@ -499,9 +499,12 @@ const addNode = (category, type) => {
 const template = PEDAL_LIBRARY[category].find(p => p.type === type);
 if (!template) return;
 
+const regMeta = MODULE_REGISTRY[type] && MODULE_REGISTRY[type].metadata ? MODULE_REGISTRY[type].metadata : null;
+const vsFromReg = regMeta && regMeta.visualStyle ? regMeta.visualStyle : null;
 setNodes(prev => [...prev, { 
 id: Math.random().toString(36).substr(2, 9), 
 ...template, 
+visualStyle: vsFromReg,
 params: { ...template.defaultParams },
 bypassed: false, 
 x: 300 + Math.random() * 100, 

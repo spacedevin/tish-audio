@@ -6,7 +6,7 @@ const canvasRef = useRef(null);
 
 useEffect(() => {
 const canvas = canvasRef.current;
-if (!canvas) return;
+if (!canvas || typeof canvas.getContext !== "function") return;
 const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
 if (!gl) return;
 

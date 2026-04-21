@@ -1,7 +1,7 @@
 import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
 import { h } from "lattish"
 import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
-import { RotaryKnob } from "../../ui/controls.tish"
+import { RotaryKnob, XYPad } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
 export const auto_wah_type = 'auto_wah';
@@ -9,12 +9,20 @@ export const auto_wah_category = 'FILTER';
 
 export const auto_wah_metadata = {
   label: 'Auto Wah',
-  color: 'from-violet-600 to-fuchsia-800',
+  color: 'from-amber-400 via-orange-500 to-yellow-700',
   theme: 'dark',
-  defaultParams: {"rate":2,"sweep":1500,"baseFreq":400}
+  defaultParams: {"rate":2,"sweep":1500,"baseFreq":400},
+  visualStyle: {
+    border: 'neon',
+    neonColor: 'orange',
+    font: 'rounded',
+    shape: 'wide',
+    texture: 'matte',
+    screws: 'hex',
+  },
 };
 
-export const auto_wah_layout = {"width":200,"height":340};
+export const auto_wah_layout = {"width":220,"height":400};
 
 export fn auto_wah_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
@@ -31,8 +39,21 @@ export fn auto_wah_View(props) {
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={auto_wah_metadata.defaultParams.rate} />
-      <RotaryKnob label={formatKnobLabel('sweep')} min={100} max={3000} value={node.params.sweep} theme={node.theme} onChange={(v) => onChange('sweep', v)} resetValue={auto_wah_metadata.defaultParams.sweep} />
+      <XYPad
+        xLabel="SWEEP"
+        yLabel="RATE"
+        xMin={100}
+        xMax={3000}
+        yMin={0.1}
+        yMax={15}
+        xValue={node.params.sweep}
+        yValue={node.params.rate}
+        onChange={(xv, yv) => { onChange('sweep', xv); onChange('rate', yv); }}
+        width={176}
+        height={108}
+        color="rgba(251,191,36,0.95)"
+        interactive={!previewOnly}
+      />
       <RotaryKnob label={formatKnobLabel('baseFreq')} min={100} max={5000} value={node.params.baseFreq} theme={node.theme} onChange={(v) => onChange('baseFreq', v)} resetValue={auto_wah_metadata.defaultParams.baseFreq} />
     </PedalChassis>
   );

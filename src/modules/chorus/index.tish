@@ -1,7 +1,7 @@
 import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
 import { h } from "lattish"
 import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
-import { RotaryKnob } from "../../ui/controls.tish"
+import { RotaryKnob, WaveformDisplay } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
 export const chorus_type = 'chorus';
@@ -9,15 +9,23 @@ export const chorus_category = 'MODULATION';
 
 export const chorus_metadata = {
   label: 'Analog Chorus',
-  color: 'from-cyan-500 to-cyan-800',
+  color: 'from-teal-500 via-cyan-600 to-emerald-900',
   theme: 'dark',
-  defaultParams: {"rate":1.5,"depth":1}
+  defaultParams: {"rate":1.5,"depth":1},
+  visualStyle: {
+    texture: 'matte',
+    border: 'smooth',
+    font: 'rounded',
+    neonColor: 'green',
+    shape: 'stompbox',
+  },
 };
 
-export const chorus_layout = {"width":200,"height":340};
+export const chorus_layout = {"width":200,"height":400};
 
 export fn chorus_View(props) {
-  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
+  const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly, audioDataMap } = props;
+  const outA = audioDataMap && audioDataMap[node.id] && audioDataMap[node.id].portAnalysers && audioDataMap[node.id].portAnalysers.main ? audioDataMap[node.id].portAnalysers.main : null;
   
   return (
     <PedalChassis
@@ -31,6 +39,7 @@ export fn chorus_View(props) {
       isAmpSim={false}
       isCompact={false}
     >
+      <WaveformDisplay analyser={outA} width={168} height={48} color="rgba(45,212,191,0.85)" style="fill" />
       <RotaryKnob label={formatKnobLabel('rate')} min={0.1} max={15} value={node.params.rate} theme={node.theme} onChange={(v) => onChange('rate', v)} resetValue={chorus_metadata.defaultParams.rate} />
       <RotaryKnob label={formatKnobLabel('depth')} min={0} max={1} value={node.params.depth} theme={node.theme} onChange={(v) => onChange('depth', v)} resetValue={chorus_metadata.defaultParams.depth} />
     </PedalChassis>

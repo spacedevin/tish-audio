@@ -11,7 +11,15 @@ export const overdrive_metadata = {
   label: 'Tube Drive',
   color: 'from-yellow-400 to-yellow-600',
   theme: 'light',
-  defaultParams: { drive: 400, tone: 3000, level: 0.5 }
+  defaultParams: { drive: 400, tone: 3000, level: 0.5 },
+  visualStyle: {
+    texture: 'hammered',
+    border: 'angular',
+    screws: 'hex',
+    font: 'condensed',
+    neonColor: 'red',
+    shape: 'stompbox',
+  },
 };
 
 export const overdrive_layout = { width: 200, height: 340 };

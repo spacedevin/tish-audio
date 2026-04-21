@@ -3,68 +3,262 @@ import { X } from "../../icons.tish"
 
 export const _hardwareRemoveClass = "z-30 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-950/90 bg-gradient-to-b from-zinc-200 via-zinc-500 to-zinc-900 text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-4px_8px_rgba(0,0,0,0.55),0_3px_12px_rgba(0,0,0,0.55)] transition-all duration-200 hover:from-orange-200 hover:via-orange-400 hover:to-orange-950 hover:text-white hover:border-orange-950/80 hover:shadow-[0_0_14px_rgba(249,115,22,0.45)] active:scale-95";
 
+const neonGlowClass = (key) => {
+  if (key === "orange") return " shadow-[0_0_26px_rgba(249,115,22,0.42),inset_0_0_20px_rgba(249,115,22,0.06)]";
+  if (key === "cyan") return " shadow-[0_0_26px_rgba(34,211,238,0.38),inset_0_0_18px_rgba(34,211,238,0.07)]";
+  if (key === "purple") return " shadow-[0_0_26px_rgba(168,85,247,0.42),inset_0_0_18px_rgba(168,85,247,0.07)]";
+  if (key === "green") return " shadow-[0_0_26px_rgba(34,197,94,0.38),inset_0_0_18px_rgba(34,197,94,0.07)]";
+  if (key === "red") return " shadow-[0_0_26px_rgba(239,68,68,0.42),inset_0_0_18px_rgba(239,68,68,0.07)]";
+  return "";
+};
+
+const textureFilterUrl = (texture) => {
+  if (texture === "hammered") return "url(#hammered-texture)";
+  if (texture === "carbon") return "url(#carbon-texture)";
+  if (texture === "leather") return "url(#leather-texture)";
+  if (texture === "matte") return "url(#metal-texture)";
+  if (texture === "none") return "none";
+  return "url(#metal-texture)";
+};
+
+const shapeRadius = (shape) => {
+  if (shape === "mini") return "rounded-xl";
+  if (shape === "tall") return "rounded-3xl";
+  if (shape === "barrel") return "rounded-[2.5rem]";
+  if (shape === "wide") return "rounded-2xl";
+  return "rounded-2xl";
+};
+
+const borderPreset = (border, neonColor) => {
+  if (border === "angular") return "border-2 border-zinc-900 border-t-zinc-600 border-l-zinc-600";
+  if (border === "smooth") return "border border-zinc-800/60 border-t-white/25 border-l-white/20";
+  if (border === "neon") {
+    const ring = neonColor === "cyan" ? "ring-2 ring-cyan-400/50" : neonColor === "purple" ? "ring-2 ring-purple-400/50" : neonColor === "orange" ? "ring-2 ring-orange-400/50" : "ring-2 ring-fuchsia-400/45";
+    return "border border-zinc-900 " + ring;
+  }
+  if (border === "rust") return "border-2 border-orange-950/90 border-t-orange-700/40 border-l-amber-900/30";
+  return "border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black";
+};
+
+const fontPreset = (font) => {
+  if (font === "mono") return "font-mono font-bold tracking-wide";
+  if (font === "serif") return "font-serif font-bold tracking-wide";
+  if (font === "condensed") return "font-sans font-black tracking-[0.15em]";
+  if (font === "wide") return "font-sans font-bold tracking-[0.4em]";
+  if (font === "rounded") return "font-sans font-extrabold tracking-wide";
+  return "font-black tracking-widest";
+};
+
+const screwBlock = (variant, screwBr, i, cornerClass) => {
+  if (variant === "none") return null;
+  if (variant === "rivets") {
+    return (
+      <div key={i} class={"absolute w-2 h-2 rounded-full pointer-events-none bg-gradient-to-br from-amber-800 to-amber-950 border border-black/80 shadow-inner " + cornerClass}>
+        <div class="absolute inset-0.5 rounded-full bg-amber-700/40" />
+      </div>
+    );
+  }
+  if (variant === "hex") {
+    return (
+      <div key={i} class={"absolute w-3 h-3 pointer-events-none flex items-center justify-center " + cornerClass} style={{ clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)" }}>
+        <div class="w-full h-full bg-gradient-to-br from-zinc-300 via-zinc-500 to-zinc-800 border border-zinc-900 shadow-[inset_0_1px_1px_rgba(255,255,255,0.35)]" />
+      </div>
+    );
+  }
+  return (
+    <div key={i} class={"absolute w-3 h-3 rounded-full pointer-events-none border border-zinc-600 shadow-[inset_0_1px_2px_rgba(255,255,255,0.35),inset_0_-2px_3px_rgba(0,0,0,0.85),0_1px_2px_rgba(0,0,0,0.6)] bg-gradient-to-br from-zinc-200 via-zinc-400 to-zinc-600 flex items-center justify-center " + cornerClass}>
+      <div class="w-2 h-px bg-zinc-800 rounded-full shadow-sm" />
+      <div class="absolute w-px h-2 bg-zinc-800 rounded-full shadow-sm" />
+    </div>
+  );
+};
+
 export fn _PedalChassis(props) {
   const { node, previewOnly, onDragStart, onRemove, onToggleBypass, panelW, panelH, isAmpSim, isCompact, children } = props;
-  const isDark = node.theme === 'dark';
+  const vs = { ...(node.visualStyle || {}), ...(props.visualStyle || {}) };
+  const shape = vs.shape || "stompbox";
+  const texture = vs.texture || "metal";
+  const border = vs.border || "beveled";
+  const font = vs.font || null;
+  const screws = vs.screws || "crosshead";
+  const neonColor = vs.neonColor || null;
+  const labelPos = vs.labelPos || "top";
+  const footswitch = vs.footswitch || "standard";
+
+  const isDark = node.theme === "dark";
   const isBypassed = node.bypassed;
-  const screwBr = "bottom-24";
+  const screwBr = footswitch === "none" ? "bottom-8" : footswitch === "mini" ? "bottom-20" : "bottom-24";
+
+  const radiusClass = shapeRadius(shape);
+  const borderClass = borderPreset(border, neonColor);
+  const fontClass = font ? fontPreset(font) : null;
+  const titleFont = fontClass ? fontClass : isAmpSim ? "font-black" : "font-black tracking-widest";
 
   const faceShadow = isAmpSim
     ? "shadow-[0_28px_56px_rgba(0,0,0,0.92),0_10px_24px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.2),inset_0_-12px_32px_rgba(0,0,0,0.35)]"
     : "shadow-[0_22px_48px_rgba(0,0,0,0.88),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-10px_28px_rgba(0,0,0,0.4)]";
 
-  return (
-    <div 
-      class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none touch-none " + node.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100") + (previewOnly ? " pointer-events-none" : "")}
-      style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
+  const filterUrl = textureFilterUrl(texture);
+  const texOpacity = texture === "matte" ? "opacity-25" : texture === "none" ? "opacity-0" : isAmpSim ? "opacity-40" : "opacity-45";
+
+  const neonClass = neonColor ? neonGlowClass(neonColor) : "";
+
+  const corners = [
+    { i: 0, c: "top-3 left-3" },
+    { i: 1, c: "top-3 right-3" },
+    { i: 2, c: screwBr + " left-3" },
+    { i: 3, c: screwBr + " right-3" },
+  ];
+
+  const titleBlock = (
+    <div
+      class={
+        "relative z-10 shrink-0 text-center pointer-events-none " +
+        (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight " : isCompact ? "mb-2 mt-0 " : "mb-3 mt-2 ") +
+        (isAmpSim && !fontClass ? "" : " text-base ") +
+        " uppercase select-none " +
+        titleFont +
+        " " +
+        (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")
+      }
     >
-      <div class={"absolute inset-0 rounded-2xl mix-blend-multiply pointer-events-none " + (isAmpSim ? "opacity-40" : "opacity-45")} style={{ filter: 'url(#metal-texture)' }} />
+      {labelPos === "side" ? (
+        <span class="inline-block max-w-[5.5rem] leading-tight" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>
+          {node.label}
+        </span>
+      ) : (
+        node.label
+      )}
+    </div>
+  );
 
-      {!previewOnly && onDragStart ? (
-        <div
-          onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); onDragStart(e); }}
-          class="absolute inset-0 z-[6] rounded-2xl cursor-grab active:cursor-grabbing touch-none"
-        />
-      ) : null}
+  const knobsBlock = (
+    <div
+      class={
+        "relative z-10 flex-1 min-h-0 flex flex-wrap justify-center content-start " +
+        (isAmpSim ? "gap-x-2 gap-y-1 pb-1 content-start" : isCompact ? "gap-1.5" : "gap-3") +
+        (labelPos === "side" ? " flex-1 flex-col items-center " : "") +
+        (previewOnly ? " opacity-80" : " pointer-events-none")
+      }
+    >
+      {children}
+    </div>
+  );
 
-      {[[3,3], [3, 11], [18, 3], [18, 11]].map(([t, l], i) => (
-        <div key={i} class={"absolute w-3 h-3 rounded-full pointer-events-none border border-zinc-600 shadow-[inset_0_1px_2px_rgba(255,255,255,0.35),inset_0_-2px_3px_rgba(0,0,0,0.85),0_1px_2px_rgba(0,0,0,0.6)] bg-gradient-to-br from-zinc-200 via-zinc-400 to-zinc-600 flex items-center justify-center " + (i===0 ? "top-3 left-3" : i===1 ? "top-3 right-3" : i===2 ? screwBr + " left-3" : screwBr + " right-3")}>
-          <div class="w-2 h-px bg-zinc-800 rounded-full shadow-sm"></div>
-          <div class="absolute w-px h-2 bg-zinc-800 rounded-full shadow-sm"></div>
-        </div>
-      ))}
-      
-      <div 
-        class={"relative z-10 shrink-0 text-center font-black pointer-events-none " + (isAmpSim ? "mb-1.5 mt-1 text-xs leading-tight" : isCompact ? "mb-2 mt-0" : "mb-3 mt-2") + " tracking-widest uppercase select-none " + (isAmpSim ? "" : " text-base ") + " " + (isDark ? "text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]" : "text-neutral-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.85)]")}
-      >
-        {node.label}
-      </div>
-
-      <div class={"relative z-10 flex-1 min-h-0 flex flex-wrap justify-center content-start " + (isAmpSim ? "gap-x-2 gap-y-1 pb-1 content-start" : isCompact ? "gap-1.5" : "gap-3") + (previewOnly ? " opacity-80" : " pointer-events-none")}>
-        {children}
-      </div>
-
+  const footBlock =
+    footswitch === "none" ? null : (
       <div class={"relative z-10 shrink-0 flex flex-col items-center gap-1.5 pt-1 pointer-events-none " + (previewOnly ? "opacity-80" : "")}>
-        <div 
-          class={"w-2.5 h-2.5 rounded-full border border-black transition-colors duration-300 " + (!isBypassed ? "bg-red-600 border-red-950" : "bg-zinc-800")}
-          style={!isBypassed ? { boxShadow: '0 0 14px 4px rgba(239,68,68,0.95), 0 0 28px 8px rgba(239,68,68,0.35), inset 0 0 6px rgba(255,255,255,0.35)' } : { boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.9)' }}
+        <div
+          class={"rounded-full border border-black transition-colors duration-300 " + (!isBypassed ? "bg-red-600 border-red-950" : "bg-zinc-800") + (footswitch === "mini" ? " w-2 h-2" : " w-2.5 h-2.5")}
+          style={
+            !isBypassed
+              ? { boxShadow: "0 0 10px 3px rgba(239,68,68,0.85), 0 0 20px 6px rgba(239,68,68,0.25), inset 0 0 4px rgba(255,255,255,0.35)" }
+              : { boxShadow: "inset 0 1px 3px rgba(0,0,0,0.9)" }
+          }
         />
-        <div class={"w-16 h-16 rounded-full bg-gradient-to-b from-zinc-700 via-zinc-900 to-black shadow-[0_8px_18px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.12)] border border-black flex items-center justify-center " + (previewOnly ? "" : "pointer-events-auto")}>
-          <div class="w-14 h-14 rounded-full bg-gradient-to-b from-zinc-900 to-black shadow-inner border border-zinc-950 flex items-center justify-center">
-            <div 
-              onPointerDown={(e) => { e.stopPropagation(); if (!previewOnly && onToggleBypass) onToggleBypass(); }}
-              class={"w-12 h-12 rounded-full cursor-pointer active:scale-95 transition-transform select-none border border-zinc-400 shadow-[0_4px_10px_rgba(0,0,0,0.9),inset_0_2px_3px_rgba(255,255,255,0.45),inset_0_-4px_8px_rgba(0,0,0,0.65)] bg-gradient-to-br from-zinc-100 via-zinc-300 to-zinc-600 flex items-center justify-center relative overflow-hidden " + (isBypassed ? "brightness-75 saturate-75" : "")}
+        <div
+          class={
+            "rounded-full bg-gradient-to-b from-zinc-700 via-zinc-900 to-black shadow-[0_8px_18px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.12)] border border-black flex items-center justify-center " +
+            (footswitch === "mini" ? "w-12 h-12 " : "w-16 h-16 ") +
+            (previewOnly ? "" : "pointer-events-auto")
+          }
+        >
+          <div class={(footswitch === "mini" ? "w-10 h-10 " : "w-14 h-14 ") + "rounded-full bg-gradient-to-b from-zinc-900 to-black shadow-inner border border-zinc-950 flex items-center justify-center"}>
+            <div
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                if (!previewOnly && onToggleBypass) onToggleBypass();
+              }}
+              class={
+                (footswitch === "mini" ? "w-9 h-9 " : "w-12 h-12 ") +
+                " rounded-full cursor-pointer active:scale-95 transition-transform select-none border border-zinc-400 shadow-[0_4px_10px_rgba(0,0,0,0.9),inset_0_2px_3px_rgba(255,255,255,0.45),inset_0_-4px_8px_rgba(0,0,0,0.65)] bg-gradient-to-br from-zinc-100 via-zinc-300 to-zinc-600 flex items-center justify-center relative overflow-hidden " +
+                (isBypassed ? "brightness-75 saturate-75" : "")
+              }
             >
-              <div class="absolute inset-1 rounded-full border border-white pointer-events-none opacity-25 shadow-[inset_0_1px_2px_rgba(0,0,0,0.35)]"></div>
-              <div class="w-6 h-6 rounded-full bg-gradient-to-br from-zinc-800 to-transparent opacity-20 pointer-events-none border border-black"></div>
-              <div class="absolute w-2 h-2 rounded-full bg-white pointer-events-none top-2 left-1/2 -translate-x-1/2 opacity-20 blur-sm"></div>
+              <div class="absolute inset-1 rounded-full border border-white pointer-events-none opacity-25 shadow-[inset_0_1px_2px_rgba(0,0,0,0.35)]" />
+              <div class="w-6 h-6 rounded-full bg-gradient-to-br from-zinc-800 to-transparent opacity-20 pointer-events-none border border-black" />
+              <div class="absolute w-2 h-2 rounded-full bg-white pointer-events-none top-2 left-1/2 -translate-x-1/2 opacity-20 blur-sm" />
             </div>
           </div>
         </div>
       </div>
+    );
+
+  const mainColumn =
+    labelPos === "side" ? (
+      <div class="relative z-10 flex flex-1 min-h-0 flex-row gap-2 items-stretch">
+        <div class="flex shrink-0 items-center justify-center pt-1">{titleBlock}</div>
+        <div class="flex flex-1 min-w-0 flex-col min-h-0">{knobsBlock}</div>
+      </div>
+    ) : labelPos === "bottom" ? (
+      <div class="relative z-10 flex flex-1 min-h-0 flex-col">
+        {knobsBlock}
+        {titleBlock}
+      </div>
+    ) : (
+      <div class="relative z-10 flex flex-1 min-h-0 flex-col">
+        {titleBlock}
+        {knobsBlock}
+      </div>
+    );
+
+  return (
+    <div
+      class={
+        "relative p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none touch-none " +
+        node.color +
+        " " +
+        faceShadow +
+        " " +
+        radiusClass +
+        " " +
+        borderClass +
+        neonClass +
+        " " +
+        (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100") +
+        (previewOnly ? " pointer-events-none" : "")
+      }
+      style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
+    >
+      {filterUrl !== "none" ? (
+        <div class={"absolute inset-0 mix-blend-multiply pointer-events-none " + texOpacity + " " + radiusClass} style={{ filter: filterUrl }} />
+      ) : null}
+
+      {!previewOnly && onDragStart ? (
+        <div
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            onDragStart(e);
+          }}
+          class={"absolute inset-0 z-[6] cursor-grab active:cursor-grabbing touch-none " + radiusClass}
+        />
+      ) : null}
+
+      {corners.map((co) => screwBlock(screws, screwBr, co.i, co.c))}
+
+      {mainColumn}
+
+      {footBlock}
 
       {!previewOnly && onRemove ? (
-        <button type="button" title="Remove pedal" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onRemove(); }} onKeyDown={(e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); e.stopPropagation(); onRemove(); }} class={"absolute top-3 right-3 pointer-events-auto " + _hardwareRemoveClass}>
+        <button
+          type="button"
+          title="Remove pedal"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            e.preventDefault();
+            onRemove();
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove();
+          }}
+          class={"absolute top-3 right-3 pointer-events-auto " + _hardwareRemoveClass}
+        >
           <X class="w-4 h-4" />
         </button>
       ) : null}

@@ -1,7 +1,7 @@
 import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "../../audio/dsp.tish"
 import { h } from "lattish"
 import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
-import { RotaryKnob } from "../../ui/controls.tish"
+import { RotaryKnob, RibbonController } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
 export const tremolo_type = 'tremolo';
@@ -9,12 +9,19 @@ export const tremolo_category = 'MODULATION';
 
 export const tremolo_metadata = {
   label: 'Tremolo',
-  color: 'from-green-600 to-green-900',
-  theme: 'dark',
-  defaultParams: {"speed":5,"depth":0.5}
+  color: 'from-red-200 via-amber-100 to-rose-950',
+  theme: 'light',
+  defaultParams: {"speed":5,"depth":0.5},
+  visualStyle: {
+    texture: 'leather',
+    border: 'beveled',
+    screws: 'crosshead',
+    font: 'serif',
+    shape: 'barrel',
+  },
 };
 
-export const tremolo_layout = {"width":200,"height":340};
+export const tremolo_layout = {"width":200,"height":400};
 
 export fn tremolo_View(props) {
   const { node, onRemove, onChange, onDragStart, onToggleBypass, previewOnly } = props;
@@ -31,7 +38,7 @@ export fn tremolo_View(props) {
       isAmpSim={false}
       isCompact={false}
     >
-      <RotaryKnob label={formatKnobLabel('speed')} min={0.1} max={15} value={node.params.speed} theme={node.theme} onChange={(v) => onChange('speed', v)} resetValue={tremolo_metadata.defaultParams.speed} />
+      <RibbonController label="SPEED" min={0.1} max={15} value={node.params.speed} onChange={(v) => onChange('speed', v)} width={168} color="rgba(220,38,38,0.95)" interactive={!previewOnly} />
       <RotaryKnob label={formatKnobLabel('depth')} min={0} max={1} value={node.params.depth} theme={node.theme} onChange={(v) => onChange('depth', v)} resetValue={tremolo_metadata.defaultParams.depth} />
     </PedalChassis>
   );

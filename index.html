@@ -31,6 +31,21 @@
         <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.15 0" in="noise" result="coloredNoise" />
         <feBlend in="SourceGraphic" in2="coloredNoise" mode="multiply" />
       </filter>
+      <filter id="hammered-texture" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.04 0.09" numOctaves="2" seed="3" result="hnoise" />
+        <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.22 0" in="hnoise" result="hcol" />
+        <feBlend in="SourceGraphic" in2="hcol" mode="multiply" />
+      </filter>
+      <filter id="carbon-texture" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9 0.05" numOctaves="2" seed="7" result="cnoise" />
+        <feColorMatrix type="matrix" values="0.3 0 0 0 0  0 0.3 0 0 0  0 0 0.35 0 0  0 0 0 0.35 0" in="cnoise" result="ccol" />
+        <feBlend in="SourceGraphic" in2="ccol" mode="overlay" />
+      </filter>
+      <filter id="leather-texture" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.02 0.03" numOctaves="3" seed="11" result="lnoise" />
+        <feColorMatrix type="matrix" values="0.45 0 0 0 0.02  0 0.35 0 0 0  0 0 0.28 0 0  0 0 0 0.18 0" in="lnoise" result="lcol" />
+        <feBlend in="SourceGraphic" in2="lcol" mode="multiply" />
+      </filter>
       <filter id="cable-shadow" x="-20%" y="-20%" width="140%" height="140%">
         <feDropShadow dx="0" dy="8" stdDeviation="6" floodOpacity="0.8" />
       </filter>
