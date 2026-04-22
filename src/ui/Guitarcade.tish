@@ -40,21 +40,25 @@ const hudSnapRef = useRef({ score: -1, combo: -1, lane: -999, phrase: -1 });
 
 profileIdRef.current = profileId;
 
+const setHudText = (ref, text) => {
+const el = ref && ref.current;
+if (!el) return;
+try {
+el.textContent = text;
+} catch (eTxt) {}
+};
+
 const writeHudRow = (score, combo, lane, roundsWon) => {
 const snap = hudSnapRef.current;
 if (snap.score === score && snap.combo === combo && snap.lane === lane && snap.phrase === roundsWon) return;
-snap.score = score;
-snap.combo = combo;
-snap.lane = lane;
-snap.phrase = roundsWon;
-if (hudScoreRef.current) hudScoreRef.current.textContent = String(score);
-if (hudComboRef.current) hudComboRef.current.textContent = String(combo);
-if (hudLaneRef.current) hudLaneRef.current.textContent = lane >= 0 ? String(lane) : '-';
-if (hudPhraseRef.current) hudPhraseRef.current.textContent = String(roundsWon) + ' / ' + String(PHRASES_TO_WIN_SESSION);
+hudSnapRef.current = { score: score, combo: combo, lane: lane, phrase: roundsWon };
+setHudText(hudScoreRef, String(score));
+setHudText(hudComboRef, String(combo));
+setHudText(hudLaneRef, lane >= 0 ? String(lane) : '-');
+setHudText(hudPhraseRef, String(roundsWon) + ' / ' + String(PHRASES_TO_WIN_SESSION));
 const left = Math.max(0, PHRASES_TO_WIN_SESSION - roundsWon);
-if (hudWinRef.current) {
-hudWinRef.current.textContent = roundsWon >= PHRASES_TO_WIN_SESSION ? 'You won! Tap Play again.' : String(left) + ' round win' + (left === 1 ? '' : 's') + ' left (each round = 8 hits, no miss)';
-}
+const winMsg = roundsWon >= PHRASES_TO_WIN_SESSION ? 'You won! Tap Play again.' : String(left) + ' round win' + (left === 1 ? '' : 's') + ' left (each round = 8 hits, no miss)';
+setHudText(hudWinRef, winMsg);
 };
 
 const resetForProfile = (pid) => {
@@ -68,7 +72,7 @@ strumGateRef.current.reset();
 hudSnapRef.current = { score: -1, combo: -1, lane: -999, phrase: -1 };
 writeHudRow(0, 0, -1, 0);
 const vo = victoryOverlayRef.current;
-if (vo) vo.classList.add('hidden');
+if (vo && vo.classList && typeof vo.classList.add === "function") vo.classList.add('hidden');
 };
 
 useEffect(() => {
@@ -109,7 +113,7 @@ else if (e["type"] === 'miss') playMissThud(ac);
 else if (e["type"] === 'win') {
 playWinFanfare(ac);
 const vo = victoryOverlayRef.current;
-if (vo) vo.classList.remove('hidden');
+if (vo && vo.classList && typeof vo.classList.remove === "function") vo.classList.remove('hidden');
 }
 ei = ei + 1;
 }

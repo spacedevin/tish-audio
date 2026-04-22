@@ -545,7 +545,7 @@ const isMidiJack = port === 'midi';
 return (
 <div 
 key={"in-" + port}
-class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
+class="jack-wrapper absolute w-7 h-7 z-40 cursor-crosshair"
 style={{ left: String(leftPx) + "px", top: String(topPx) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
 title={isMidiJack ? "MIDI in (from MIDI input node)" : "Patch In"}
@@ -565,13 +565,13 @@ const isMidiJack = port === 'midi';
 return (
 <div 
 key={"out-" + port}
-class="jack-wrapper absolute w-7 h-7 z-10 cursor-crosshair"
+class="jack-wrapper absolute w-7 h-7 z-40 cursor-crosshair"
 style={{ left: String(leftPxOut) + "px", top: String(topPxOut) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerDown={(e) => startWire(e, node.id, port)}
 title={isMidiJack ? "MIDI out (to synth)" : "Drag out"}
 >
 <div class={"w-7 h-7 rounded-full shadow-inner " + (isMidiJack ? "bg-violet-950 border-2 border-amber-400/90" : "bg-neutral-800 border border-neutral-600")} />
-{ports["out"].length > 1 || isMidiJack ? (<span class="jack-label">{isMidiJack ? "MIDI" : port.toUpperCase()}</span>) : null}
+{ports["out"].length > 1 || isMidiJack || nt === 'SYS_IN' ? (<span class="jack-label">{isMidiJack ? "MIDI" : port.toUpperCase()}</span>) : null}
 </div>
 );
 })}

@@ -10,16 +10,28 @@ let audioReady = props.audioReady === true;
 let spec = props.spec;
 let polyOpts = props.polyOpts;
 
-const rootRef = useRef(null);
+const gridHostIdRef = useRef(null);
+if (gridHostIdRef.current == null || gridHostIdRef.current === "") {
+gridHostIdRef.current = "chord-poly-grid-" + Math.random().toString(36).substr(2, 9);
+}
 const specRef = useRef(spec);
 const optsRef = useRef(polyOpts);
 specRef.current = spec;
 optsRef.current = polyOpts;
 const lastKeyRef = useRef('');
 
+const resolveGridEl = () => {
+if (typeof document === "undefined") return null;
+const el = document.getElementById(gridHostIdRef.current);
+if (el && typeof el.querySelector === "function") return el;
+return null;
+};
+
 useLayoutEffect(() => {
-primeChordPolyLiveDom(rootRef.current, spec);
-paintChordPolyLiveDom(rootRef.current, defaultChordSnap(), spec);
+const el = resolveGridEl();
+if (!el) return;
+primeChordPolyLiveDom(el, spec);
+paintChordPolyLiveDom(el, defaultChordSnap(), spec);
 }, [spec]);
 
 useEffect(() => {
@@ -38,7 +50,8 @@ const next = analyzeLiveChord(a, specRef.current, optsRef.current);
 const k = polyChordThrottleKey(next);
 if (k !== lastKeyRef.current) {
 lastKeyRef.current = k;
-paintChordPolyLiveDom(rootRef.current, next, specRef.current);
+const gel = resolveGridEl();
+if (gel) paintChordPolyLiveDom(gel, next, specRef.current);
 }
 raf = requestAnimationFrame(loop);
 };
@@ -49,5 +62,5 @@ cancelAnimationFrame(raf);
 };
 }, [tabActive, audioReady, analyserRef]);
 
-return h('div', { ref: rootRef, class: 'relative z-0 w-full shrink-0 isolate' }, []);
+return h('div', { id: gridHostIdRef.current, class: 'relative z-0 w-full shrink-0 isolate' }, []);
 }

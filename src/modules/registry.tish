@@ -481,7 +481,7 @@ export const PEDAL_LIBRARY = { ...LEGACY_LIBRARY };
 export const getNodePorts = (node) => {
   if (!node) return { "in": ['main'], "out": ['main'] };
   if (node["type"] === 'MIDI_IN') return { "in": [], "out": ['midi'] };
-  if (node["type"] === 'SYS_IN') return { "in": ['main'], "out": [] };
+  if (node["type"] === 'SYS_IN') return { "in": ['main'], "out": ['main'] };
   const regAccept = MODULE_REGISTRY[node["type"]];
   if (regAccept && regAccept.acceptsMidiInput === true) {
     return { "in": ['midi', 'main'], "out": ['main'] };

@@ -18,12 +18,16 @@ return '';
 };
 
 export fn primeChordPolyLiveDom(rootEl, spec) {
-if (!rootEl) return;
+if (!rootEl || typeof rootEl.removeChild !== "function" || typeof rootEl.appendChild !== "function") return;
 const doc = rootEl.ownerDocument || document;
 while (rootEl.firstChild) {
 rootEl.removeChild(rootEl.firstChild);
 }
-rootEl.className = 'space-y-4';
+try {
+rootEl.setAttribute("class", "space-y-4");
+} catch (eCls) {
+try { rootEl.className = "space-y-4"; } catch (eCls2) {}
+}
 
 const opens = spec.openMidis;
 const maxF = spec.maxFret != null ? spec.maxFret : 24;
@@ -122,7 +126,7 @@ rootEl.appendChild(assign);
 }
 
 export fn paintChordPolyLiveDom(rootEl, snap, spec) {
-if (!rootEl) return;
+if (!rootEl || typeof rootEl.querySelector !== "function") return;
 const d = rootEl.ownerDocument || document;
 const fill = rootEl.querySelector('[data-cp-conf-fill]');
 const meta = rootEl.querySelector('[data-cp-conf-meta]');

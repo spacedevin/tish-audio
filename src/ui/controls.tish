@@ -20,9 +20,15 @@ ctxRef.current = null;
 
 const draw = () => {
 animationId = requestAnimationFrame(draw);
-if (!analyser || !canvasRef.current) return;
-const ctx2 = ctxRef.current;
-if (!ctx2) return;
+if (!analyser) return;
+const canvasNow = canvasRef.current;
+if (!canvasNow || typeof canvasNow.getContext !== "function") return;
+let ctx2 = ctxRef.current;
+if (!ctx2 || typeof ctx2.clearRect !== "function") {
+ctx2 = canvasNow.getContext("2d");
+ctxRef.current = ctx2;
+}
+if (!ctx2 || typeof ctx2.clearRect !== "function") return;
 if (compact) {
 skipRef.current = skipRef.current + 1;
 if (skipRef.current % 2 === 1) return;
@@ -40,10 +46,10 @@ const db = 20 * Math.log10(Math.max(rms, 0.0001));
 const pct = (db + 52) / 52;
 const level = Math.max(0, Math.min(1, pct));
 
-ctx2.clearRect(0, 0, canvas.width, canvas.height);
+ctx2.clearRect(0, 0, canvasNow.width, canvasNow.height);
 
 const numSegments = 20;
-const segmentHeight = canvas.height / numSegments;
+const segmentHeight = canvasNow.height / numSegments;
 const gap = 1;
 
 for (let i = 0; i < numSegments; i = i + 1) {
@@ -55,7 +61,7 @@ if (i < 3) color = '#ef4444';
 else if (i < 7) color = '#eab308';
 
 ctx2.fillStyle = isActive ? color : 'rgba(0,0,0,0.5)';
-ctx2.fillRect(0, i * segmentHeight, canvas.width, segmentHeight - gap);
+ctx2.fillRect(0, i * segmentHeight, canvasNow.width, segmentHeight - gap);
 }
 };
 draw();
@@ -336,16 +342,22 @@ export fn WaveformDisplay(props) {
 
     const draw = () => {
       animationId = requestAnimationFrame(draw);
-      if (!analyser || !canvasRef.current) return;
-      const ctx2 = ctxRef.current;
-      if (!ctx2) return;
+      if (!analyser) return;
+      const canvasNow = canvasRef.current;
+      if (!canvasNow || typeof canvasNow.getContext !== "function") return;
+      let ctx2 = ctxRef.current;
+      if (!ctx2 || typeof ctx2.clearRect !== "function") {
+        ctx2 = canvasNow.getContext("2d");
+        ctxRef.current = ctx2;
+      }
+      if (!ctx2 || typeof ctx2.clearRect !== "function") return;
       try {
         analyser.getFloatTimeDomainData(dataArray);
       } catch (err) {
         return;
       }
-      const w = canvasRef.current.width;
-      const h = canvasRef.current.height;
+      const w = canvasNow.width;
+      const h = canvasNow.height;
       ctx2.clearRect(0, 0, w, h);
       ctx2.fillStyle = "rgba(0,0,0,0.55)";
       ctx2.fillRect(0, 0, w, h);
@@ -439,16 +451,22 @@ export fn SpectrumDisplay(props) {
 
     const draw = () => {
       animationId = requestAnimationFrame(draw);
-      if (!analyser || !canvasRef.current) return;
-      const ctx2 = ctxRef.current;
-      if (!ctx2) return;
+      if (!analyser) return;
+      const canvasNow = canvasRef.current;
+      if (!canvasNow || typeof canvasNow.getContext !== "function") return;
+      let ctx2 = ctxRef.current;
+      if (!ctx2 || typeof ctx2.clearRect !== "function") {
+        ctx2 = canvasNow.getContext("2d");
+        ctxRef.current = ctx2;
+      }
+      if (!ctx2 || typeof ctx2.clearRect !== "function") return;
       try {
         analyser.getByteFrequencyData(dataArray);
       } catch (err) {
         return;
       }
-      const w = canvasRef.current.width;
-      const h = canvasRef.current.height;
+      const w = canvasNow.width;
+      const h = canvasNow.height;
       ctx2.clearRect(0, 0, w, h);
       ctx2.fillStyle = "rgba(0,0,0,0.6)";
       ctx2.fillRect(0, 0, w, h);
