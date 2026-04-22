@@ -58,7 +58,14 @@ writeHeaderMeterDom(level, audioMeterPitchRef.current.note, audioMeterPitchRef.c
 if (frame.freqHz > 0) {
 const freq = frame.freqHz;
 const note = noteFromPitch(freq);
-const noteName = noteStrings[note % 12];
+let noteName = "-";
+if (Array.isArray(noteStrings) && Number.isFinite(note)) {
+const idx = ((Math.round(note) % 12) + 12) % 12;
+const ns = noteStrings[idx];
+if (ns != null) {
+noteName = ns;
+}
+}
 const rounded = Math.round(freq);
 if (noteName !== lastPitchNote || Math.abs(rounded - lastPitchFreq) >= 2) {
 lastPitchNote = noteName;

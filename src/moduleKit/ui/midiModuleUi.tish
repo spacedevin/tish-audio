@@ -1,0 +1,15 @@
+/** Standard stomp face — matches other utility pedals (e.g. boost, screamer). */
+export const MIDI_PEDAL_W = 200;
+export const MIDI_PEDAL_H = 340;
+
+/** Standard rack unit — matches RackChassis / master_eq / console_mixer. */
+export const MIDI_RACK_W = 640;
+export const MIDI_RACK_H = 216;
+
+export fn midiModuleIsRackNode(node) {
+  return !!(node && node.params && node.params.uiForm === "rack");
+}
+
+/** Shared Pedal / Rack toggle styling for MIDI Poly + MIDI Recorder (single binding; avoids duplicate top-level const in bundle). */
+export const MIDI_MODULE_FORM_SWITCH_CLASS =
+  "text-[8px] font-black uppercase tracking-widest text-zinc-400 hover:text-white border border-zinc-600 rounded px-1.5 py-0.5 bg-black/40";

@@ -19,6 +19,7 @@ import * as fuzz from './fuzz/index.tish';
 import * as hall_verb from './hall_verb/index.tish';
 import * as metal from './metal/index.tish';
 import * as midi_poly from './midi_poly/index.tish';
+import * as midi_recorder from './midi_recorder/index.tish';
 import * as muff from './muff/index.tish';
 import * as noise_gate from './noise_gate/index.tish';
 import * as octa_fuzz from './octa_fuzz/index.tish';
@@ -208,11 +209,20 @@ export const MODULE_REGISTRY = {
     type: midi_poly.midi_poly_type,
     category: midi_poly.midi_poly_category,
     metadata: midi_poly.midi_poly_metadata,
-    layout: midi_poly.midi_poly_layout,
     View: midi_poly.midi_poly_View,
     buildAudio: midi_poly.midi_poly_buildAudio,
     /** Node audio box exposes `midiSink` — MIDI_IN bindings may route here. */
     acceptsMidiInput: true,
+  },
+  'midi_recorder': {
+    type: midi_recorder.midi_recorder_type,
+    category: midi_recorder.midi_recorder_category,
+    metadata: midi_recorder.midi_recorder_metadata,
+    View: midi_recorder.midi_recorder_View,
+    buildAudio: midi_recorder.midi_recorder_buildAudio,
+    acceptsMidiInput: true,
+    /** May emit a second MIDI cable (pass-through to downstream synth). */
+    midiThrough: true,
   },
   'muff': {
     type: muff.muff_type,
@@ -471,6 +481,7 @@ const LEGACY_LIBRARY = {
   UTILITY: [
     { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
     { type: 'midi_poly', label: 'MIDI Poly', color: 'from-violet-600 to-indigo-900', theme: 'dark', defaultParams: { level: 0.35, waveform: 0, brightness: 0.5 } },
+    { type: 'midi_recorder', label: 'MIDI Recorder', color: 'from-amber-900 to-neutral-900', theme: 'dark', defaultParams: {} },
     { type: 'crossover', label: 'Freq Split', color: 'from-blue-800 to-indigo-950', theme: 'dark', defaultParams: { freq: 800 } },
     { type: 'splitter', label: 'Splitter', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { output: 1.0 } }
   ]
@@ -482,6 +493,8 @@ export const getNodePorts = (node) => {
   if (!node) return { "in": ['main'], "out": ['main'] };
   if (node["type"] === 'MIDI_IN') return { "in": [], "out": ['midi'] };
   if (node["type"] === 'SYS_IN') return { "in": ['main'], "out": ['main'] };
+  if (node["type"] === 'midi_recorder') return { "in": ['midi'], "out": ['midi'] };
+  if (node["type"] === 'midi_poly') return { "in": ['midi'], "out": ['main'] };
   const regAccept = MODULE_REGISTRY[node["type"]];
   if (regAccept && regAccept.acceptsMidiInput === true) {
     return { "in": ['midi', 'main'], "out": ['main'] };

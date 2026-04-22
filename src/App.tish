@@ -18,7 +18,7 @@ export fn App() {
 let [activeTab, setActiveTab] = useState('pedalboard');
 let [audioReady, setAudioReady] = useState(false);
 let [devices, setDevices] = useState([]);
-let [showDeviceMenu, setShowDeviceMenu] = useState(false);
+let [showHardwareMenu, setShowHardwareMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
 let [showModuleDebug, setShowModuleDebug] = useState(false);
 let [audioGraphTick, setAudioGraphTick] = useState(0);
@@ -50,7 +50,7 @@ patchBoardMeterTickRef.current = audioGraphTick;
 }
 const nodeGraphMeterTick = activeTab === 'pedalboard' ? audioGraphTick : patchBoardMeterTickRef.current;
 
-let midi = useMidiPatch(audioReady, nodeAudioMapRef, audioCtxRef, analyserRef, pitchAnalyserRef, outGainRef, setNodes, setAudioReady, setShowDeviceMenu, setShowModuleLibrary);
+let midi = useMidiPatch(audioReady, nodeAudioMapRef, audioCtxRef, analyserRef, pitchAnalyserRef, outGainRef, setNodes, setAudioReady, setShowHardwareMenu, setShowModuleLibrary);
 let midiDeviceRows = Array.isArray(midi.midiDevices) ? midi.midiDevices : [];
 
 async fn getDevices() {
@@ -109,8 +109,13 @@ const list = await ota.invoke("list_audio_inputs");
 const mapped = list.map((row) => ({ deviceId: row.id, label: row.name, kind: "audioinput" }));
 setDevices(mapped);
 setShowModuleLibrary(false);
-setShowDeviceMenu(true);
-log("getDevices: native device menu", { count: mapped.length });
+try {
+await midi.refreshMidiDevices();
+} catch (eMidiList) {
+console.warn("[TishAudio:input] refreshMidiDevices (native)", eMidiList);
+}
+setShowHardwareMenu(true);
+log("getDevices: hardware menu", { count: mapped.length });
 } catch (eNative) {
 console.error("[TishAudio:input] list_audio_inputs failed:", eNative);
 alert("Could not list native microphones: " + (eNative && eNative.message ? eNative.message : String(eNative)));
@@ -166,8 +171,13 @@ const audioDevs = devs.filter(d => d.kind === 'audioinput');
 log("getDevices: enumerateDevices", { total: devs.length, audioInputs: audioDevs.length, sample: audioDevs.slice(0, 3).map(d => ({ idLen: (d.deviceId || "").length, label: d.label })) });
 setDevices(audioDevs);
 setShowModuleLibrary(false);
-setShowDeviceMenu(true);
-log("getDevices: opened device menu");
+try {
+await midi.refreshMidiDevices();
+} catch (eMidiList2) {
+console.warn("[TishAudio:input] refreshMidiDevices (browser)", eMidiList2);
+}
+setShowHardwareMenu(true);
+log("getDevices: opened hardware menu");
 } catch (e) {
 console.error("[TishAudio:input] getDevices failed:", e);
 if (e && (e.name || e.message)) {
@@ -201,7 +211,7 @@ log("connectDevice: click", { deviceIdLen: (deviceId || "").length, label: label
 try {
 if (!audioCtxRef.current) {
 console.error("[TishAudio:input] connectDevice: no AudioContext — use Connect Input first (getDevices never completed).");
-alert("Audio is not initialized yet. Tap Connect Input and wait for the input list, then choose a device.");
+alert("Audio is not initialized yet. Tap Connect hardware, wait for the list, then choose a device.");
 return;
 }
 const ctx = audioCtxRef.current;
@@ -385,7 +395,7 @@ return [...prev, { id: Math.random().toString(36).substr(2, 9), from: newInId, f
 });
 
 setAudioReady(true);
-setShowDeviceMenu(false);
+setShowHardwareMenu(false);
 });
 log("connectDevice: done — SYS_IN added, audioReady=true");
 } catch (err) {
@@ -574,9 +584,26 @@ setConnections([]);
 };
 
 const updateNodeParam = (id, param, value) => {
-const floatValue = parseFloat(value);
-const safeValue = Number.isFinite(floatValue) ? floatValue : 0;
-setNodes(prev => prev.map(n => { if (n.id === id) { let p = { ...n.params }; p[param] = safeValue; return { ...n, params: p }; } return n; }));
+setNodes((prev) =>
+  prev.map((n) => {
+    if (n.id !== id) {
+      return n;
+    }
+    const p = { ...n.params };
+    if (param === "uiForm") {
+      if (value === "rack") {
+        p["uiForm"] = "rack";
+      } else {
+        Reflect.deleteProperty(p, "uiForm");
+      }
+      return { ...n, params: p };
+    }
+    const floatValue = parseFloat(value);
+    const safeValue = Number.isFinite(floatValue) ? floatValue : 0;
+    p[param] = safeValue;
+    return { ...n, params: p };
+  })
+);
 };
 
 const updateNodePos = (id, x, y) => {
@@ -595,10 +622,20 @@ if (fromIsMidi !== toIsMidi) return;
 if (fromIsMidi && toIsMidi) {
 const fromN = nodesRef.current.find(n => n.id === fromId);
 const toN = nodesRef.current.find(n => n.id === toId);
-if (!fromN || fromN["type"] !== 'MIDI_IN' || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) return;
+if (!fromN || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) {
+return;
+}
+const fromOk = fromN["type"] === "MIDI_IN" || !!(MODULE_REGISTRY[fromN["type"]] && MODULE_REGISTRY[fromN["type"]].midiThrough);
+if (!fromOk) {
+return;
+}
+if (fromN["type"] === "MIDI_IN") {
 const bid = fromN.params && fromN.params.midiBindingId;
-if (!bid) return;
+if (!bid) {
+return;
+}
 midi.updateMidiBindingTarget(bid, toId);
+}
 }
 setConnections(prev => {
 let base = prev;
@@ -615,18 +652,13 @@ setConnections(prev => {
 const hit = prev.find(c => c.id === id);
 if (hit && hit.fromPort === 'midi' && hit.toPort === 'midi') {
 const fromN = nodesRef.current.find(n => n.id === hit.from);
-const bid = fromN && fromN.params && fromN.params.midiBindingId;
+if (fromN && fromN["type"] === "MIDI_IN") {
+const bid = fromN.params && fromN.params.midiBindingId;
 if (bid) midi.updateMidiBindingTarget(bid, null);
+}
 }
 return prev.filter(c => c.id !== id);
 });
-};
-
-const clearMidiPatchFromInNode = (midiInNodeId) => {
-const node = nodesRef.current.find(n => n.id === midiInNodeId);
-const bid = node && node.params && node.params.midiBindingId;
-if (bid) midi.updateMidiBindingTarget(bid, null);
-setConnections(prev => prev.filter(c => !(c.from === midiInNodeId && c.fromPort === 'midi')));
 };
 
 // Lattish uses one global hook stack per App() flush; NodeGraphView runs O(nodes) FC hooks.
@@ -664,14 +696,9 @@ toggleNodeBypass={toggleNodeBypass}
 addConnection={addConnection}
 removeConnection={removeConnection}
 midiBindings={midi.midiBindings}
-clearMidiPatchFromInNode={clearMidiPatchFromInNode}
-toggleMidiBindingCapture={midi.toggleMidiBindingCapture}
-exportMidiBindingCapture={midi.exportMidiBindingCapture}
-midiCaptureUiTick={midi.midiCaptureUiTick}
-getMidiCaptureEventCount={midi.getMidiCaptureEventCount}
 />
 </div>
-), [activeTab, nodes, connections, nodeGraphMeterTick, removeNode, updateNodeParam, updateNodePos, toggleNodeBypass, addConnection, removeConnection, midi.midiBindings, clearMidiPatchFromInNode, midi.toggleMidiBindingCapture, midi.exportMidiBindingCapture, midi.midiCaptureUiTick, midi.getMidiCaptureEventCount]);
+), [activeTab, nodes, connections, nodeGraphMeterTick, removeNode, updateNodeParam, updateNodePos, toggleNodeBypass, addConnection, removeConnection, midi.midiBindings]);
 
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans select-none">
@@ -715,29 +742,20 @@ class="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-
 {h(Activity, { "class": "text-orange-500 w-7 h-7 shrink-0" })}
 <h1 class="text-lg sm:text-2xl font-black tracking-tighter text-white shrink-0">TONE<span class="text-orange-500">FRAME</span></h1>
 <button 
-disabled={inputFlowBusy}
-onClick={() => { console.log("[TishAudio:input] Connect Input button onClick"); void getDevices(); }} 
-class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 " + (inputFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait shadow-none" : "bg-orange-500 hover:bg-orange-400 text-black shadow-lg")}
+disabled={inputFlowBusy || midi.midiFlowBusy}
+onClick={() => { console.log("[TishAudio:input] Connect hardware onClick"); void getDevices(); }} 
+class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 border " + (inputFlowBusy || midi.midiFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait border-neutral-600 shadow-none" : "border-orange-500/40 bg-gradient-to-r from-orange-500 via-orange-500 to-violet-700 hover:from-orange-400 hover:to-violet-600 text-black shadow-lg")}
+title="Microphones, audio interfaces, and MIDI controllers"
 >
-{h(Mic, { "class": "w-4 h-4" })} 
-<span class="hidden sm:inline">{inputFlowBusy ? "Requesting mic…" : (Object.keys(sourcesRef.current).length === 0 ? 'Connect Input' : 'Add Input')}</span>
-<span class="sm:hidden">{inputFlowBusy ? "…" : "Input"}</span>
+{h(Mic, { "class": "w-4 h-4 shrink-0" })}
+{h(Music2, { "class": "w-4 h-4 shrink-0 opacity-90" })}
+<span class="hidden sm:inline">{inputFlowBusy || midi.midiFlowBusy ? "Scanning…" : (Object.keys(sourcesRef.current).length === 0 ? "Connect hardware" : "Add hardware")}</span>
+<span class="sm:hidden">{inputFlowBusy || midi.midiFlowBusy ? "…" : "I/O"}</span>
 </button>
-{activeTab === 'pedalboard' ? (
-<button
-disabled={midi.midiFlowBusy}
-onClick={() => { void midi.openMidiDeviceMenu(); }}
-class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 border border-violet-600/50 " + (midi.midiFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait" : "bg-violet-950/70 hover:bg-violet-900 text-violet-100")}
->
-{h(Music2, { "class": "w-4 h-4" })}
-<span class="hidden sm:inline">{midi.midiFlowBusy ? "MIDI…" : "Connect MIDI"}</span>
-<span class="sm:hidden">MIDI</span>
-</button>
-) : null}
 {activeTab === 'pedalboard' ? (
 <div class="flex items-center gap-2 shrink-0">
 <button 
-onClick={() => { setShowDeviceMenu(false); setShowModuleLibrary(prev => !prev); }} 
+onClick={() => { setShowHardwareMenu(false); setShowModuleLibrary(prev => !prev); }} 
 class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-orange-500/50 bg-gradient-to-b from-orange-900/30 to-neutral-900 hover:from-orange-800/40 font-bold tracking-wide text-xs text-orange-400"
 >
 {h(Plus, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">MODULES</span>{h(ChevronDown, { "class": "w-3.5 h-3.5 opacity-50" })}
@@ -760,47 +778,54 @@ title="Preview all modules in a chain (layout only)"
 
 <HeaderMeterReadout inactive={!audioReady} />
 
-{showDeviceMenu ? (
-<div class="absolute left-3 sm:left-4 top-full mt-1.5 w-72 max-w-lg bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl overflow-hidden z-50 flex flex-col" style={{ maxHeight: "min(24rem, calc(100vh - 6rem))" }}>
-<div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center shrink-0">
-<span class="text-xs font-bold text-neutral-400 tracking-widest">SELECT HARDWARE</span>
-<button  onClick={() => setShowDeviceMenu(false)}>{h(X, { "class": "w-4 h-4 text-neutral-500 hover:text-white" })}</button>
+{showHardwareMenu ? (
+<div class="absolute left-3 sm:left-4 top-full mt-1.5 w-[22rem] max-w-[calc(100vw-2rem)] bg-neutral-800 border border-neutral-600 rounded-lg shadow-2xl overflow-hidden z-50 flex flex-col ring-1 ring-orange-500/15" style={{ maxHeight: "min(28rem, calc(100vh - 6rem))" }}>
+<div class="p-3 bg-neutral-900 border-b border-neutral-700 flex justify-between items-center gap-2 shrink-0">
+<div class="flex items-center gap-2 min-w-0">
+{h(Mic, { "class": "w-4 h-4 text-orange-400 shrink-0" })}
+{h(Music2, { "class": "w-4 h-4 text-violet-400 shrink-0" })}
+<span class="text-xs font-bold text-neutral-200 tracking-widest truncate">CONNECT HARDWARE</span>
+</div>
+<button onClick={() => setShowHardwareMenu(false)} title="Close">{h(X, { "class": "w-4 h-4 text-neutral-500 hover:text-white shrink-0" })}</button>
 </div>
 <div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+<div class="px-3 pt-3 pb-1 flex items-center gap-2 border-b border-neutral-700/60">
+{h(Mic, { "class": "w-3.5 h-3.5 text-orange-400" })}
+<span class="text-[11px] font-bold text-orange-200/90 uppercase tracking-wide">Audio in</span>
+</div>
+<p class="px-3 pt-1 pb-2 text-[10px] text-neutral-500 leading-snug">Microphones and line inputs appear here.</p>
 {devices.length === 0 ? (
-<div class="p-4 text-center text-sm text-neutral-500">No audio inputs found. Check permissions.</div>
+<div class="px-4 pb-3 text-center text-xs text-neutral-500">No audio inputs found. Check permissions.</div>
 ) : (
 devices.map(d => (
 <button 
 key={d.deviceId} 
 onClick={() => { console.log("[TishAudio:input] device row click", d.deviceId ? (d.deviceId.slice(0, 8) + "…") : "(empty id)", d.label); void connectDevice(d.deviceId, d.label); }} 
-class="w-full text-left px-4 py-3 hover:bg-neutral-700 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
+class="w-full text-left px-4 py-2.5 hover:bg-neutral-700/90 transition-colors border-b border-neutral-700/40 text-sm truncate text-white"
 title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 >
 {d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 </button>
 ))
 )}
+<div class="px-3 pt-3 pb-1 flex items-center gap-2 border-t border-neutral-700/80 mt-1">
+{h(Music2, { "class": "w-3.5 h-3.5 text-violet-400" })}
+<span class="text-[11px] font-bold text-violet-200/90 uppercase tracking-wide">MIDI in</span>
 </div>
-</div>
-) : null}
-{midi.showMidiDeviceMenu ? (
-<div class="absolute left-3 sm:left-4 top-full mt-1.5 w-72 max-w-lg bg-neutral-800 border border-violet-700 rounded-lg shadow-2xl overflow-hidden z-50 flex flex-col" style={{ maxHeight: "min(24rem, calc(100vh - 6rem))" }}>
-<div class="p-3 bg-neutral-900 border-b border-violet-800 flex justify-between items-center shrink-0">
-<span class="text-xs font-bold text-violet-300 tracking-widest">SELECT MIDI</span>
-<button onClick={() => midi.setShowMidiDeviceMenu(false)}>{h(X, { "class": "w-4 h-4 text-neutral-500 hover:text-white" })}</button>
-</div>
-<div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+<p class="px-3 pt-1 pb-2 text-[10px] text-neutral-500 leading-snug">Controllers and keyboards (USB or Bluetooth). After you pick a port, drag the amber MIDI jack on the MIDI_IN node to your synth or MASTER OUT chain.</p>
 {midiDeviceRows.length === 0 ? (
-<div class="p-4 text-center text-sm text-neutral-500">No MIDI inputs found.</div>
+<div class="px-4 pb-4 text-center text-xs text-neutral-500">No MIDI inputs found.</div>
 ) : (
 midiDeviceRows.map((row, ri) => (
 <button
-key={String(ri) + "-" + (row.label || "")}
+key={row["native"] === true ? "midi-native-" + String(row.index) : "midi-web-" + String(row.deviceId != null ? row.deviceId : ri)}
 onClick={() => { void midi.connectMidiChoice(row); }}
-class="w-full text-left px-4 py-3 hover:bg-violet-950/40 transition-colors border-b border-neutral-700/50 text-sm truncate text-white"
+class="w-full text-left px-4 py-2.5 hover:bg-violet-950/35 transition-colors border-b border-neutral-700/40 text-sm text-white flex items-center gap-2 min-w-0"
 >
-{row.label || "MIDI device"}
+<span class="truncate flex-1 min-w-0">{row.label || "MIDI device"}</span>
+{row.hardwareVisualId ? (
+<span class="shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border border-amber-500/50 text-amber-300 bg-amber-950/40" title={row.hardwareDisplayName || "Known hardware — digital twin on patch"}>Twin</span>
+) : null}
 </button>
 ))
 )}

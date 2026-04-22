@@ -45,11 +45,11 @@ pub fn list_midi_inputs() -> Result<Vec<ListedMidiInput>, String> {
         midir::MidiInput::new("ToneFrame MIDI list").map_err(|e| format!("MidiInput::new: {}", e))?;
     let ports = midi_in.ports();
     let mut out = Vec::new();
-    for (i, _p) in ports.iter().enumerate() {
-        out.push(ListedMidiInput {
-            index: i,
-            name: format!("MIDI input {}", i),
-        });
+    for (i, port) in ports.iter().enumerate() {
+        let name = midi_in
+            .port_name(port)
+            .unwrap_or_else(|_| format!("MIDI input {}", i));
+        out.push(ListedMidiInput { index: i, name });
     }
     Ok(out)
 }

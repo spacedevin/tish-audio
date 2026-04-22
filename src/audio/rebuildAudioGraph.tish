@@ -36,7 +36,7 @@ let smartGateRuntime = null;
 let midiSink = null;
 
 // BYPASS LOGIC
-if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter'].includes(node["type"])) {
+if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter', 'midi_recorder'].includes(node["type"])) {
 inNode = ctx.createGain();
 outNode = inNode; 
 } 
@@ -669,6 +669,13 @@ convolver.buffer = createReverbIR(ctx, lastDecay, 5.0, verbKind);
 }
 };
 }
+else if (node["type"] === "MIDI_IN") {
+inNode = ctx.createGain();
+inNode.gain.value = 0;
+outNode = ctx.createGain();
+outNode.gain.value = 0;
+inNode.connect(outNode);
+}
 
 const finalOutPorts = outPorts || { main: outNode };
 const portAnalysers = {};
@@ -708,6 +715,18 @@ const inAudioNode = toData.inPorts[conn.toPort || 'main'];
 if (outAudioNode && inAudioNode) {
 outAudioNode.connect(inAudioNode);
 }
+}
+});
+
+currentConns.forEach((conn) => {
+if (!(conn.fromPort === "midi" && conn.toPort === "midi")) {
+return;
+}
+const fromData = nodeAudioMapRef.current[conn.from];
+const toData = nodeAudioMapRef.current[conn.to];
+if (fromData && fromData.midiSink && typeof fromData.midiSink.setMidiForward === "function") {
+const nextSink = toData && toData.midiSink ? toData.midiSink : null;
+fromData.midiSink.setMidiForward(nextSink);
 }
 });
 

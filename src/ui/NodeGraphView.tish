@@ -10,6 +10,8 @@ import { WebGLBackground } from "./WebGLBackground.tish"
 import { RotaryKnob } from "./controls.tish"
 import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode, hardwareRemoveClass } from "./nodes.tish"
 import { MODULE_REGISTRY } from "../modules/registry.tish"
+import { hardwareDisplayNameForId, midiInNodeSizeForParams } from "../inputDevices/midiHardwareVisuals.tish"
+import { MIDI_PEDAL_W, MIDI_PEDAL_H, MIDI_RACK_W, MIDI_RACK_H } from "../moduleKit/ui/midiModuleUi.tish"
 
 const SNAP_PEER_PX = 14;
 const SNAP_X_EDGE_GAP_PX = 20;
@@ -18,12 +20,23 @@ const JACK_PROTRUDE = 13;
 const getNodeSize = (node) => {
 let w = 200; let h = 340;
 const nt = node["type"];
+if (nt === "midi_poly" || nt === "midi_recorder") {
+const p = node.params || {};
+if (p && p.uiForm === "rack") {
+return { w: MIDI_RACK_W, h: MIDI_RACK_H };
+}
+return { w: MIDI_PEDAL_W, h: MIDI_PEDAL_H };
+}
 const mod = MODULE_REGISTRY[nt];
 if (mod && mod.layout) {
 return { w: mod.layout.width, h: mod.layout.height };
 }
 if (nt === 'SYS_IN') { w = 96; h = 140; }
-else if (nt === 'MIDI_IN') { w = 224; h = 200; }
+else if (nt === 'MIDI_IN') {
+const szM = midiInNodeSizeForParams(node.params);
+w = szM.w;
+h = szM.h;
+}
 else if (nt === 'SYS_OUT') { w = 80; h = 140; }
 else if (node.isSystem) { w = 80; h = 140; }
 else if (['splitter', 'crossover'].includes(nt)) { w = 140; h = 180; }
@@ -149,7 +162,7 @@ out.push({ c: c, paths: paths });
 return out;
 };
 
-const renderMidiInNode = (node, midiBindings, nodes, addConnection, clearMidiPatchFromInNode, toggleMidiBindingCapture, exportMidiBindingCapture, removeNode, startDragNode, midiCaptureUiTick, getMidiCaptureEventCount) => {
+const renderMidiInNode = (node, midiBindings, nodes, connections, removeNode, startDragNode) => {
 let bid = "";
 let binding = null;
 if (node.params && node.params.midiBindingId) {
@@ -163,56 +176,70 @@ break;
 bj = bj + 1;
 }
 }
-const genTargets = [];
-let gj = 0;
-while (gj < nodes.length) {
-const cn = nodes[gj];
-const reg = MODULE_REGISTRY[cn["type"]];
-if (reg && reg.acceptsMidiInput === true) {
-genTargets.push({ id: cn.id, label: cn.label && String(cn.label).length ? cn.label : cn.id });
+let midiWireToId = null;
+let wi = 0;
+const conns = Array.isArray(connections) ? connections : [];
+while (wi < conns.length) {
+const wc = conns[wi];
+if (wc && wc.from === node.id && wc.fromPort === "midi" && wc.toPort === "midi") {
+midiWireToId = wc.to;
+break;
 }
-gj = gj + 1;
+wi = wi + 1;
 }
-const tgt = binding && binding.targetNodeId ? binding.targetNodeId : null;
-const capOn = binding && binding.capture === true;
-const capCount = (typeof getMidiCaptureEventCount === "function" && bid) ? getMidiCaptureEventCount(bid) : 0;
+let headId = midiWireToId;
+if (!headId && binding && binding.targetNodeId) {
+headId = binding.targetNodeId;
+}
+const chainParts = [];
+let curC = headId;
+let guard = 0;
+while (curC && guard < 24) {
+guard = guard + 1;
+let part = curC;
+let ti = 0;
+while (ti < nodes.length) {
+const tn = nodes[ti];
+if (tn && tn.id === curC) {
+part = tn.label && String(tn.label).length ? String(tn.label) : curC;
+break;
+}
+ti = ti + 1;
+}
+chainParts.push(part);
+let nextId = null;
+let ci = 0;
+while (ci < conns.length) {
+const c = conns[ci];
+if (c && c.from === curC && c.fromPort === "midi" && c.toPort === "midi") {
+nextId = c.to;
+break;
+}
+ci = ci + 1;
+}
+curC = nextId;
+}
+const patchLine =
+  chainParts.length > 0
+    ? "MIDI → " + chainParts.join(" → ")
+    : "No MIDI patch — drag the amber MIDI out into a MIDI Recorder and/or synth chain.";
+const hardwareVisualId = node.params && node.params.hardwareVisualId ? node.params.hardwareVisualId : null;
 return (
 <div
 onPointerDown={(e) => startDragNode(e, node)}
-class={"flex flex-col gap-2 w-56 min-h-[168px] border-2 border-violet-700 bg-gradient-to-b from-violet-950/50 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8)] cursor-grab active:cursor-grabbing select-none relative group p-2 " + (capOn ? "ring-2 ring-amber-400/80 shadow-[0_0_28px_rgba(251,191,36,0.22)] animate-pulse" : "")}
+class="flex flex-col gap-2 w-[240px] min-h-[168px] border-2 border-violet-700 bg-gradient-to-b from-violet-950/50 to-neutral-900 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.8)] cursor-grab active:cursor-grabbing select-none relative group p-2 "
 >
 <div class="text-[10px] font-black tracking-widest text-violet-300 uppercase text-center truncate">{node.label}</div>
-<div class="text-[9px] font-mono text-neutral-400 text-center truncate">{(tgt ? ("-> " + tgt) : "Target: none")}</div>
-{genTargets.length === 0 ? (
-<div class="text-[8px] text-neutral-500 text-center leading-snug px-1">Drag the <span class="text-amber-300 font-bold">MIDI</span> jack on the right into the <span class="text-amber-300 font-bold">MIDI</span> jack on <span class="text-violet-300 font-bold">MIDI Poly</span>, or pick a target below once that module is on the board.</div>
+<div class={"text-[9px] text-center leading-snug px-1 " + (chainParts.length ? "text-violet-200 font-mono" : "text-neutral-500")}>
+{patchLine}
+</div>
+<div class="text-[8px] text-neutral-500 text-center leading-snug px-1">To record performance, add <span class="text-amber-400 font-bold">MIDI Recorder</span> on the MIDI chain and arm it on that module.</div>
+{hardwareVisualId ? (
+<div class="text-[8px] text-violet-400/90 text-center leading-snug px-1 border border-violet-800/50 rounded bg-black/25 py-1">
+Detected layout profile: <span class="font-bold text-violet-200">{hardwareDisplayNameForId(hardwareVisualId)}</span>
+<span class="text-neutral-500"> — no controls here; use the MIDI jack and downstream modules.</span>
+</div>
 ) : null}
-<div class="flex flex-wrap gap-1 justify-center">
-<button
-onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (clearMidiPatchFromInNode) clearMidiPatchFromInNode(node.id); }}
-class={"px-2 py-0.5 rounded text-[9px] font-bold border " + (!tgt ? "border-violet-400 text-violet-100 bg-violet-900/60" : "border-neutral-700 text-neutral-400 hover:border-violet-600")}
->None</button>
-{genTargets.map((gt) => (
-<button
-key={gt.id}
-onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (addConnection && bid) addConnection(node.id, 'midi', gt.id, 'midi'); }}
-class={"px-2 py-0.5 rounded text-[9px] font-bold border truncate max-w-[5.5rem] " + (tgt === gt.id ? "border-violet-400 text-violet-100 bg-violet-900/60" : "border-neutral-700 text-neutral-400 hover:border-violet-600")}
-title={gt.id}
->{gt.label}</button>
-))}
-</div>
-<div class={"text-center text-[9px] font-mono tabular-nums px-1 " + (capOn ? "text-amber-200" : "text-neutral-500")}>
-{capOn ? ((String(capCount) + " events in capture buffer") + (capCount > 0 ? " | play more notes" : " | play MIDI to fill")) : "Arm capture to record note/CC into JSON export"}
-</div>
-<div class="flex gap-1 justify-center mt-1">
-<button
-onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (toggleMidiBindingCapture && bid) toggleMidiBindingCapture(bid); }}
-class={"px-2 py-1 rounded text-[9px] font-bold " + (capOn ? "bg-amber-500 text-black ring-1 ring-amber-200" : "bg-neutral-800 text-neutral-300 border border-neutral-600")}
->{capOn ? "Capturing" : "Arm cap"}</button>
-<button
-onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); if (exportMidiBindingCapture && bid) exportMidiBindingCapture(bid); }}
-class="px-2 py-1 rounded text-[9px] font-bold bg-neutral-800 text-neutral-300 border border-neutral-600"
->Export</button>
-</div>
 <button title="Remove MIDI input" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">{h(X, { "class": "w-4 h-4 text-red-500 hover:text-red-400" })}</button>
 </div>
 );
@@ -232,11 +259,6 @@ let audioGraphTick = props.audioGraphTick !== undefined && props.audioGraphTick 
   let onAudioUiBump = props.onAudioUiBump;
 let patchActive = props.patchActive !== undefined && props.patchActive !== null ? props.patchActive : true;
 let midiBindings = props.midiBindings != null ? props.midiBindings : [];
-let clearMidiPatchFromInNode = props.clearMidiPatchFromInNode;
-let toggleMidiBindingCapture = props.toggleMidiBindingCapture;
-let exportMidiBindingCapture = props.exportMidiBindingCapture;
-let midiCaptureUiTick = props.midiCaptureUiTick != null ? props.midiCaptureUiTick : 0;
-let getMidiCaptureEventCount = props.getMidiCaptureEventCount;
   const boardRef = useRef(null);
 const dragLiveRef = useRef(null);
 const wireFromNodeRef = useRef(null);
@@ -289,7 +311,8 @@ return null;
 }
 const fromN = nodes.find(n => n.id === prev.fromId);
 const toN = nodes.find(n => n.id === toNodeId);
-if (!fromN || fromN["type"] !== 'MIDI_IN' || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) {
+const fromOkMidi = fromN && (fromN["type"] === "MIDI_IN" || !!(MODULE_REGISTRY[fromN["type"]] && MODULE_REGISTRY[fromN["type"]].midiThrough));
+if (!fromOkMidi || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) {
 resetWireDraftDomCache();
 return null;
 }
@@ -592,7 +615,7 @@ class="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-
 >
 <span class="transform -rotate-90 text-sm font-black tracking-widest text-orange-500 drop-shadow-md select-none whitespace-nowrap">{node.label}</span>
 </div>
-) : nt === 'MIDI_IN' ? renderMidiInNode(node, midiBindings, nodes, addConnection, clearMidiPatchFromInNode, toggleMidiBindingCapture, exportMidiBindingCapture, removeNode, startDragNode, midiCaptureUiTick, getMidiCaptureEventCount) : MODULE_REGISTRY[nt] && MODULE_REGISTRY[nt]["View"] ? (
+) : nt === 'MIDI_IN' ? renderMidiInNode(node, midiBindings, nodes, connections, removeNode, startDragNode) : MODULE_REGISTRY[nt] && MODULE_REGISTRY[nt]["View"] ? (
 h(MODULE_REGISTRY[nt]["View"], {
   node: node,
   onRemove: () => removeNode(node.id),

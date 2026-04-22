@@ -1,0 +1,275 @@
+import { h, useEffect, useState } from "lattish"
+import { PedalChassis, RackChassis } from "../../moduleKit/ui/index.tish"
+import { MIDI_PEDAL_W, MIDI_PEDAL_H, MIDI_MODULE_FORM_SWITCH_CLASS, midiModuleIsRackNode } from "../../moduleKit/ui/midiModuleUi.tish"
+
+export const midi_recorder_type = "midi_recorder";
+export const midi_recorder_category = "UTILITY";
+
+export const midi_recorder_metadata = {
+  label: "MIDI Recorder",
+  color: "from-amber-900 to-neutral-900",
+  theme: "dark",
+  defaultParams: {}
+};
+
+const cloneEventForLog = (ev, tAudio) => {
+  const rec = { t: tAudio, kind: ev.kind, channel: ev.channel };
+  if (ev.note != null) {
+    rec["note"] = ev.note;
+  }
+  if (ev.velocity != null) {
+    rec["velocity"] = ev.velocity;
+  }
+  if (ev.controller != null) {
+    rec["controller"] = ev.controller;
+  }
+  if (ev.value != null) {
+    rec["value"] = ev.value;
+  }
+  if (ev.value14 != null) {
+    rec["value14"] = ev.value14;
+  }
+  return rec;
+};
+
+export fn midi_recorder_buildAudio(ctx, node) {
+  void node;
+  const inNode = ctx.createGain();
+  inNode.gain.value = 0;
+  const outNode = ctx.createGain();
+  outNode.gain.value = 0;
+  inNode.connect(outNode);
+
+  const buffer = [];
+  let armed = false;
+  let forwardSink = null;
+
+  const midiSink = {
+    setMidiForward: (sink) => {
+      forwardSink = sink && typeof sink.handleEvent === "function" ? sink : null;
+    },
+    setArmed: (v) => {
+      armed = !!v;
+    },
+    getArmed: () => armed,
+    getEventCount: () => buffer.length,
+    getEvents: () => buffer.slice(),
+    clearBuffer: () => {
+      buffer.length = 0;
+    },
+    handleEvent: (ev, ctx2) => {
+      if (!ev || !ctx2) {
+        return;
+      }
+      if (armed) {
+        const t = ctx2.currentTime != null ? ctx2.currentTime : 0;
+        buffer.push(cloneEventForLog(ev, t));
+      }
+      if (forwardSink && typeof forwardSink.handleEvent === "function") {
+        forwardSink.handleEvent(ev, ctx2);
+      }
+    },
+    dispose: () => {
+      forwardSink = null;
+      buffer.length = 0;
+    }
+  };
+
+  return {
+    "in": inNode,
+    "out": outNode,
+    lfo: null,
+    nodeAnalyser: null,
+    inPorts: null,
+    outPorts: null,
+    analysers: {},
+    nodeParamSync: null,
+    smartGateRuntime: null,
+    midiSink: midiSink
+  };
+}
+
+export fn midi_recorder_View(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const audioDataMap = props.audioDataMap;
+  const meterSync = props.meterSync;
+  const previewOnly = props.previewOnly === true;
+
+  let [tick, setTick] = useState(0);
+  let [armedLocal, setArmedLocal] = useState(false);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setTick((x) => x + 1);
+    }, 200);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    const s = audioDataMap && audioDataMap[node.id] && audioDataMap[node.id].midiSink;
+    if (s && typeof s.getArmed === "function") {
+      setArmedLocal(!!s.getArmed());
+    }
+  }, [node.id, meterSync]);
+
+  const box = audioDataMap && audioDataMap[node.id];
+  const sink = box && box.midiSink;
+  void tick;
+  void meterSync;
+
+  const count = sink && typeof sink.getEventCount === "function" ? sink.getEventCount() : 0;
+  const rack = midiModuleIsRackNode(node);
+
+  const blurbPedal = (
+    <p class="text-neutral-500 text-center leading-snug px-0.5">
+      Patch <span class="text-amber-400 font-bold">MIDI in</span> from upstream, <span class="text-amber-400 font-bold">MIDI out</span> to synth. Arm to log events (audio clock); download as JSON.
+    </p>
+  );
+
+  const blurbRack = (
+    <p class="flex-1 min-w-0 text-[9px] text-neutral-500 leading-snug pr-2">
+      Patch <span class="text-amber-400 font-bold">MIDI in</span> from upstream and <span class="text-amber-400 font-bold">MIDI out</span> to the synth. Arm logs events on the audio clock; Export saves JSON.
+    </p>
+  );
+
+  const statusLine = (
+    <div class={"shrink-0 text-center font-mono tabular-nums text-[10px] min-w-[5.5rem] " + (armedLocal ? "text-amber-200" : "text-neutral-500")}>
+      {armedLocal ? String(count) + " events" : "Recorder off"}
+    </div>
+  );
+
+  const buttonRow = (compact) => (
+    <div class={"flex gap-1 shrink-0 " + (compact ? "flex-row items-center" : "flex-wrap justify-center w-full")}>
+      <button
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (sink && typeof sink.setArmed === "function") {
+            sink.setArmed(!armedLocal);
+            setArmedLocal(!armedLocal);
+            setTick((x) => x + 1);
+          }
+        }}
+        class={
+          "px-2 py-1 rounded font-bold " +
+          (compact ? "text-[8px] " : "text-[9px] ") +
+          (armedLocal ? "bg-amber-500 text-black ring-1 ring-amber-200" : "bg-neutral-800 text-neutral-300 border border-neutral-600")
+        }
+      >
+        {armedLocal ? "Armed" : "Arm"}
+      </button>
+      <button
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (!sink || typeof sink.getEvents !== "function") {
+            return;
+          }
+          const buf = sink.getEvents();
+          if (!buf || buf.length === 0) {
+            alert("No captured MIDI. Arm the recorder, play, then download.");
+            return;
+          }
+          const blob = new Blob([JSON.stringify(buf, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "midi-recorder-" + node.id + ".json";
+          a.click();
+          URL.revokeObjectURL(url);
+        }}
+        class={"px-2 py-1 rounded font-bold bg-neutral-800 text-neutral-300 border border-neutral-600 " + (compact ? "text-[8px]" : "text-[9px]")}
+      >
+        Export
+      </button>
+      <button
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (sink && typeof sink.clearBuffer === "function") {
+            sink.clearBuffer();
+            setTick((x) => x + 1);
+          }
+        }}
+        class={"px-2 py-1 rounded font-bold bg-neutral-900 text-neutral-500 border border-neutral-700 " + (compact ? "text-[8px]" : "text-[9px]")}
+      >
+        Clear
+      </button>
+    </div>
+  );
+
+  if (rack) {
+    return (
+      <RackChassis
+        node={node}
+        onRemove={onRemove}
+        onDragStart={onDragStart}
+        onToggleBypass={onToggleBypass}
+        previewOnly={previewOnly}
+        typeLabel="Rack · MIDI logger"
+        renderHeaderExtra={
+          previewOnly
+            ? null
+            : () => (
+                <button
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onChange("uiForm", "pedal");
+                  }}
+                  class={MIDI_MODULE_FORM_SWITCH_CLASS}
+                >
+                  Pedal
+                </button>
+              )
+        }
+      >
+        <div class="relative z-10 flex flex-1 min-h-0 flex-row items-center gap-2 px-3 py-2" dataMeterSync={meterSync}>
+          {blurbRack}
+          {statusLine}
+          {buttonRow(true)}
+        </div>
+      </RackChassis>
+    );
+  }
+
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={MIDI_PEDAL_W}
+      panelH={MIDI_PEDAL_H}
+      isAmpSim={false}
+      isCompact={false}
+    >
+      <div class="flex flex-col gap-2 px-1 w-full flex-1 min-h-0 text-[10px]">
+        {!previewOnly ? (
+          <div class="flex justify-end w-full -mt-1 pointer-events-auto">
+            <button
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onChange("uiForm", "rack");
+              }}
+              class={MIDI_MODULE_FORM_SWITCH_CLASS}
+            >
+              Rack
+            </button>
+          </div>
+        ) : null}
+        {blurbPedal}
+        {statusLine}
+        {buttonRow(false)}
+      </div>
+    </PedalChassis>
+  );
+}

@@ -1,6 +1,7 @@
 import { h, useEffect, useState } from "lattish"
 import { hzFromMidi } from "../../guitar/instrumentSpec.tish"
-import { PedalChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { PedalChassis, RackChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { MIDI_PEDAL_W, MIDI_PEDAL_H, MIDI_MODULE_FORM_SWITCH_CLASS, midiModuleIsRackNode } from "../../moduleKit/ui/midiModuleUi.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { smoothAudioParam } from "../../audio/smoothAudioParam.tish"
 
@@ -26,8 +27,6 @@ export const midi_poly_metadata = {
   defaultParams: { level: 0.35, waveform: 0, brightness: 0.5 }
 };
 
-export const midi_poly_layout = { width: 200, height: 340 };
-
 export fn midi_poly_View(props) {
   const node = props.node;
   const onRemove = props.onRemove;
@@ -36,6 +35,7 @@ export fn midi_poly_View(props) {
   const onToggleBypass = props.onToggleBypass;
   const audioDataMap = props.audioDataMap;
   const meterSync = props.meterSync;
+  const previewOnly = props.previewOnly === true;
 
   let [actRev, setActRev] = useState(0);
   useEffect(() => {
@@ -56,51 +56,122 @@ export fn midi_poly_View(props) {
   void actRev;
   void meterSync;
 
+  const rack = midiModuleIsRackNode(node);
+
+  const activityBlockPedal = (
+    <div class="text-[10px] font-mono text-center text-violet-200/90 border border-violet-800/60 rounded bg-black/40 py-2">
+      <div class="text-[8px] uppercase tracking-widest text-violet-400/80">Last note</div>
+      <div class="text-lg font-black tabular-nums">{activity.last}</div>
+      <div class="text-[9px] text-neutral-500">vel {String(Math.round(activity.vel))}</div>
+    </div>
+  );
+
+  const activityBlockRack = (
+    <div class="w-[132px] shrink-0 text-[9px] font-mono text-center text-violet-200/90 border border-violet-800/60 rounded bg-black/40 py-1.5 px-1 flex flex-col justify-center">
+      <div class="text-[7px] uppercase tracking-widest text-violet-400/80">Last note</div>
+      <div class="text-base font-black tabular-nums leading-tight">{activity.last}</div>
+      <div class="text-[8px] text-neutral-500">vel {String(Math.round(activity.vel))}</div>
+    </div>
+  );
+
+  const knobRow = (compact) => (
+    <>
+      <RotaryKnob
+        label={formatKnobLabel("level")}
+        min={0}
+        max={1}
+        value={node.params.level}
+        theme={node.theme}
+        compact={compact}
+        onChange={(v) => onChange("level", v)}
+        resetValue={midi_poly_metadata.defaultParams.level}
+      />
+      <RotaryKnob
+        label="WAVE"
+        min={0}
+        max={2}
+        value={node.params.waveform}
+        theme={node.theme}
+        compact={compact}
+        onChange={(v) => onChange("waveform", v)}
+        resetValue={midi_poly_metadata.defaultParams.waveform}
+      />
+      <RotaryKnob
+        label="BRITE"
+        min={0}
+        max={1}
+        value={node.params.brightness}
+        theme={node.theme}
+        compact={compact}
+        onChange={(v) => onChange("brightness", v)}
+        resetValue={midi_poly_metadata.defaultParams.brightness}
+      />
+    </>
+  );
+
+  if (rack) {
+    return (
+      <RackChassis
+        node={node}
+        onRemove={onRemove}
+        onDragStart={onDragStart}
+        onToggleBypass={onToggleBypass}
+        previewOnly={previewOnly}
+        typeLabel="Rack · MIDI synth"
+        renderHeaderExtra={
+          previewOnly
+            ? null
+            : () => (
+                <button
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onChange("uiForm", "pedal");
+                  }}
+                  class={MIDI_MODULE_FORM_SWITCH_CLASS}
+                >
+                  Pedal
+                </button>
+              )
+        }
+      >
+        <div class="relative z-10 flex flex-1 min-h-0 flex-row gap-3 px-3 py-2 items-stretch" dataMeterSync={meterSync}>
+          {activityBlockRack}
+          <div class="flex flex-1 min-w-0 flex-row items-center justify-evenly gap-1">{knobRow(true)}</div>
+        </div>
+      </RackChassis>
+    );
+  }
+
   return (
     <PedalChassis
       node={node}
       onRemove={onRemove}
       onDragStart={onDragStart}
       onToggleBypass={onToggleBypass}
-      previewOnly={props.previewOnly}
-      panelW={midi_poly_layout.width}
-      panelH={midi_poly_layout.height}
+      previewOnly={previewOnly}
+      panelW={MIDI_PEDAL_W}
+      panelH={MIDI_PEDAL_H}
       isAmpSim={false}
       isCompact={false}
     >
       <div class="flex flex-col gap-2 px-1 w-full" dataMeterSync={meterSync}>
-        <div class="text-[10px] font-mono text-center text-violet-200/90 border border-violet-800/60 rounded bg-black/40 py-2">
-          <div class="text-[8px] uppercase tracking-widest text-violet-400/80">Last note</div>
-          <div class="text-lg font-black tabular-nums">{activity.last}</div>
-          <div class="text-[9px] text-neutral-500">vel {String(Math.round(activity.vel))}</div>
-        </div>
-        <RotaryKnob
-          label={formatKnobLabel("level")}
-          min={0}
-          max={1}
-          value={node.params.level}
-          theme={node.theme}
-          onChange={(v) => onChange("level", v)}
-          resetValue={midi_poly_metadata.defaultParams.level}
-        />
-        <RotaryKnob
-          label="WAVE"
-          min={0}
-          max={2}
-          value={node.params.waveform}
-          theme={node.theme}
-          onChange={(v) => onChange("waveform", v)}
-          resetValue={midi_poly_metadata.defaultParams.waveform}
-        />
-        <RotaryKnob
-          label="BRITE"
-          min={0}
-          max={1}
-          value={node.params.brightness}
-          theme={node.theme}
-          onChange={(v) => onChange("brightness", v)}
-          resetValue={midi_poly_metadata.defaultParams.brightness}
-        />
+        {!previewOnly ? (
+          <div class="flex justify-end w-full -mt-1 pointer-events-auto">
+            <button
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onChange("uiForm", "rack");
+              }}
+              class={MIDI_MODULE_FORM_SWITCH_CLASS}
+            >
+              Rack
+            </button>
+          </div>
+        ) : null}
+        {activityBlockPedal}
+        {knobRow(false)}
       </div>
     </PedalChassis>
   );

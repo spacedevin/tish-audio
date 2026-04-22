@@ -1,0 +1,86 @@
+// Fingerprint MIDI port names for menu badges (Twin) and optional copy on MIDI_IN nodes.
+// SMK-25 family: used only for detection / labeling — MIDI_IN does not render a hardware "face" (patching stays on jacks + downstream modules).
+
+export const HARDWARE_MVAVE_SMK25_FAMILY = "mvave_smk25_family"
+
+const lower = (s) => (typeof s === "string" ? s.toLowerCase() : "");
+
+const normAlnum = (s) => {
+  const lo = lower(s);
+  let out = "";
+  let i = 0;
+  while (i < lo.length) {
+    const c = lo.charAt(i);
+    if ((c >= "a" && c <= "z") || (c >= "0" && c <= "9")) {
+      out = out + c;
+    }
+    i = i + 1;
+  }
+  return out;
+};
+
+const hasSmk25 = (s) => {
+  const lo = lower(s);
+  if (lo.indexOf("smk-25") >= 0 || lo.indexOf("smk25") >= 0 || lo.indexOf("smk 25") >= 0) {
+    return true;
+  }
+  const i = lo.indexOf("smk");
+  if (i < 0) {
+    return false;
+  }
+  const tail = lo.slice(i + 3);
+  const j = tail.indexOf("25");
+  return j >= 0 && j <= 4;
+};
+
+/** OS-visible port name → profile id, or null. */
+export fn matchMidiHardwareVisualId(portLabel) {
+  if (!portLabel || typeof portLabel !== "string") {
+    return null;
+  }
+  const s = portLabel;
+  if (hasSmk25(s)) {
+    return HARDWARE_MVAVE_SMK25_FAMILY;
+  }
+  const na = normAlnum(s);
+  if (na.indexOf("mvave") >= 0) {
+    return HARDWARE_MVAVE_SMK25_FAMILY;
+  }
+  if (na.indexOf("mwave") >= 0) {
+    return HARDWARE_MVAVE_SMK25_FAMILY;
+  }
+  if (lower(s).indexOf("sinco") >= 0) {
+    return HARDWARE_MVAVE_SMK25_FAMILY;
+  }
+  return null;
+}
+
+export fn hardwareDisplayNameForId(id) {
+  if (id === HARDWARE_MVAVE_SMK25_FAMILY) {
+    return "M-VAVE SMK-25 family";
+  }
+  return id || "MIDI";
+}
+
+/** Attach detection fields for the SELECT MIDI menu. */
+export fn enrichMidiDeviceRow(row) {
+  if (!row || typeof row !== "object") {
+    return row;
+  }
+  const label = row.label != null ? String(row.label) : "";
+  const hid = matchMidiHardwareVisualId(label);
+  if (!hid) {
+    return row;
+  }
+  return {
+    ...row,
+    hardwareVisualId: hid,
+    hardwareDisplayName: hardwareDisplayNameForId(hid)
+  };
+}
+
+/** Node bounds for MIDI_IN on the patch board (no embedded hardware UI). */
+export fn midiInNodeSizeForParams(params) {
+  void params;
+  return { w: 240, h: 200 };
+}
