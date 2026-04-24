@@ -1,0 +1,305 @@
+// Stateless pad hit animations. The SMK face iterates pads every render tick and
+// calls the active animation's `render(ctx)` to get a pure style descriptor the
+// caller turns into a <div>. No per-pad refs, no internal timers -- everything is
+// derived from (age, velocity, color).
+//
+// To add an animation: implement a `render(ctx)` that returns the descriptor below,
+// then add an entry to PAD_ANIMATIONS. The face exposes a button to cycle through
+// them and persists the chosen id in the device profile.
+
+import { h } from "lattish"
+
+const FLASH_MS = 160;
+const FADE_MS = 340;
+const IDLE_ALPHA = 0.14;
+const IDLE_SHADOW = "inset 0 2px 4px rgba(0,0,0,0.6)";
+
+const clamp01 = (x) => (x < 0 ? 0 : (x > 1 ? 1 : x));
+
+const levelFromAge = (age, velocity) => {
+  if (age >= FLASH_MS + FADE_MS) {
+    return 0;
+  }
+  if (age < FLASH_MS) {
+    return velocity;
+  }
+  return velocity * (1 - (age - FLASH_MS) / FADE_MS);
+};
+
+const rgba = (c, a) => "rgba(" + String(c.r) + "," + String(c.g) + "," + String(c.b) + "," + String(a) + ")";
+
+const baseBorderClass = (configured, hit) => {
+  if (!configured) {
+    return "border border-dashed border-neutral-600/60";
+  }
+  return hit ? "border-2 border-white" : "border border-neutral-700";
+};
+
+const velText = (hit, velocity) => (hit ? String(Math.round(velocity * 127)) : "");
+
+/**
+ * Animation context passed to every render fn.
+ *   age: ms since the last noteOn hit on this pad (Infinity-ish when idle)
+ *   velocity: the last captured velocity, normalized 0..1
+ *   color: { r, g, b } base accent for the active bank/row
+ *   configured: whether the pad has a learned or default note map
+ *   padIndex: 0..SMK_PADS-1
+ *   isBankB: whether the bank-B palette is active
+ *   now: optional timestamp (ms) used by animations that need absolute time
+ */
+
+/** Default soft pulse. */
+export fn padAnim_pulse(ctx) {
+  const level = levelFromAge(ctx.age, ctx.velocity);
+  const hit = level > 0.02;
+  const alpha = hit ? 0.35 + level * 0.65 : IDLE_ALPHA;
+  return {
+    bg: rgba(ctx.color, alpha),
+    shadow: hit
+      ? "0 0 24px " + rgba(ctx.color, 0.5 + level * 0.5)
+        + ", inset 0 0 16px rgba(255,255,255," + String(0.3 + level * 0.3) + ")"
+      : IDLE_SHADOW,
+    transform: hit ? "scale(" + String(0.94 + (1 - level) * 0.05) + ")" : "scale(1)",
+    borderClass: baseBorderClass(ctx.configured, hit),
+    labelColor: hit ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.45)",
+    velText: velText(hit, ctx.velocity),
+    overlay: null
+  };
+}
+
+/** Expanding ring from the center. */
+export fn padAnim_ripple(ctx) {
+  const level = levelFromAge(ctx.age, ctx.velocity);
+  const hit = level > 0.02;
+  const dur = 480;
+  const p = hit ? clamp01(ctx.age / dur) : 1;
+  const ringSize = 12 + p * 148;
+  const ringAlpha = hit ? (1 - p) * ctx.velocity : 0;
+  const overlay = hit
+    ? h("div", { class: "absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden" }, [
+        h("div", {
+          class: "rounded-full",
+          style: {
+            width: String(ringSize) + "%",
+            height: String(ringSize) + "%",
+            border: "3px solid " + rgba(ctx.color, ringAlpha),
+            boxShadow: "0 0 14px " + rgba(ctx.color, ringAlpha * 0.7)
+          }
+        })
+      ])
+    : null;
+  return {
+    bg: rgba(ctx.color, hit ? 0.18 + level * 0.3 : IDLE_ALPHA),
+    shadow: hit ? "inset 0 0 22px " + rgba(ctx.color, level * 0.55) : IDLE_SHADOW,
+    transform: "scale(1)",
+    borderClass: baseBorderClass(ctx.configured, hit),
+    labelColor: hit ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.45)",
+    velText: velText(hit, ctx.velocity),
+    overlay: overlay
+  };
+}
+
+/** Eight radial rays from the center. */
+export fn padAnim_starburst(ctx) {
+  const level = levelFromAge(ctx.age, ctx.velocity);
+  const hit = level > 0.02;
+  const dur = 380;
+  const p = hit ? clamp01(ctx.age / dur) : 1;
+  const rayLen = 8 + p * 62;
+  const rayAlpha = hit ? (1 - p) * ctx.velocity : 0;
+  const rays = [];
+  if (hit) {
+    let i = 0;
+    while (i < 8) {
+      const angle = i * 45;
+      rays.push(
+        h("div", {
+          key: "ray" + String(i),
+          class: "absolute top-1/2 left-1/2",
+          style: {
+            width: String(rayLen) + "%",
+            height: "3px",
+            transformOrigin: "0 50%",
+            transform: "translate(0,-50%) rotate(" + String(angle) + "deg)",
+            background: rgba(ctx.color, rayAlpha),
+            boxShadow: "0 0 8px " + rgba(ctx.color, rayAlpha * 0.7)
+          }
+        })
+      );
+      i = i + 1;
+    }
+  }
+  const overlay = hit ? h("div", { class: "absolute inset-0 pointer-events-none" }, rays) : null;
+  return {
+    bg: rgba(ctx.color, hit ? 0.15 + level * 0.25 : IDLE_ALPHA),
+    shadow: hit
+      ? "0 0 " + String(18 + level * 18) + "px " + rgba(ctx.color, 0.35 + level * 0.4)
+      : IDLE_SHADOW,
+    transform: "scale(1)",
+    borderClass: baseBorderClass(ctx.configured, hit),
+    labelColor: hit ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.45)",
+    velText: velText(hit, ctx.velocity),
+    overlay: overlay
+  };
+}
+
+/** Spring scale + heavy glow. */
+export fn padAnim_shockwave(ctx) {
+  const level = levelFromAge(ctx.age, ctx.velocity);
+  const hit = level > 0.02;
+  let scale = 1;
+  if (hit) {
+    const p = clamp01(ctx.age / 420);
+    if (p < 0.2) {
+      scale = 1 + 0.1 * (p / 0.2) * ctx.velocity;
+    } else if (p < 0.55) {
+      scale = 1 + (0.1 - 0.18 * ((p - 0.2) / 0.35)) * ctx.velocity;
+    } else {
+      scale = (1 - 0.08 * ctx.velocity) + 0.08 * ctx.velocity * ((p - 0.55) / 0.45);
+    }
+  }
+  const alpha = hit ? 0.45 + level * 0.55 : IDLE_ALPHA;
+  return {
+    bg: rgba(ctx.color, alpha),
+    shadow: hit
+      ? "0 0 " + String(30 + level * 24) + "px " + rgba(ctx.color, 0.55 + level * 0.45)
+        + ", inset 0 0 22px rgba(255,255,255," + String(0.35 + level * 0.45) + ")"
+      : IDLE_SHADOW,
+    transform: "scale(" + String(scale) + ")",
+    borderClass: baseBorderClass(ctx.configured, hit),
+    labelColor: hit ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.45)",
+    velText: velText(hit, ctx.velocity),
+    overlay: null
+  };
+}
+
+/** Scanline sweep + repeating grid overlay. */
+export fn padAnim_hologram(ctx) {
+  const level = levelFromAge(ctx.age, ctx.velocity);
+  const hit = level > 0.02;
+  const dur = 520;
+  const p = hit ? clamp01(ctx.age / dur) : 1;
+  const scanY = p * 100;
+  const scanA = hit ? (1 - p) * ctx.velocity * 0.9 : 0;
+  const overlay = hit
+    ? h("div", { class: "absolute inset-0 pointer-events-none overflow-hidden" }, [
+        h("div", {
+          class: "absolute left-0 right-0 h-[3px]",
+          style: {
+            top: String(scanY) + "%",
+            background: "rgba(255,255,255," + String(scanA) + ")",
+            boxShadow: "0 0 10px " + rgba(ctx.color, scanA * 0.9)
+          }
+        }),
+        h("div", {
+          class: "absolute inset-0",
+          style: {
+            backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,0) 0px, rgba(255,255,255," + String(0.08 * ctx.velocity) + ") 1px, rgba(255,255,255,0) 3px)",
+            opacity: String(1 - p * 0.4)
+          }
+        })
+      ])
+    : null;
+  return {
+    bg: rgba(ctx.color, hit ? 0.25 + level * 0.35 : IDLE_ALPHA),
+    shadow: hit
+      ? "inset 0 0 22px " + rgba(ctx.color, level * 0.75)
+        + ", 0 0 14px " + rgba(ctx.color, level * 0.45)
+      : IDLE_SHADOW,
+    transform: "scale(1)",
+    borderClass: baseBorderClass(ctx.configured, hit),
+    labelColor: hit ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.45)",
+    velText: velText(hit, ctx.velocity),
+    overlay: overlay
+  };
+}
+
+/** Hard white flash, then fades to the accent color. Camera-shutter vibe. */
+export fn padAnim_shutter(ctx) {
+  const level = levelFromAge(ctx.age, ctx.velocity);
+  const hit = level > 0.02;
+  let bg;
+  let labelColor;
+  let scale = 1;
+  if (!hit) {
+    bg = rgba(ctx.color, IDLE_ALPHA);
+    labelColor = "rgba(255,255,255,0.45)";
+  } else if (ctx.age < 80) {
+    bg = "rgba(255,255,255," + String(0.88 + ctx.velocity * 0.1) + ")";
+    labelColor = "rgba(0,0,0,0.9)";
+    scale = 0.93;
+  } else {
+    bg = rgba(ctx.color, 0.35 + level * 0.6);
+    labelColor = "rgba(255,255,255,1)";
+  }
+  return {
+    bg: bg,
+    shadow: hit
+      ? "0 0 30px rgba(255,255,255," + String(0.6 * level) + ")"
+        + ", 0 0 16px " + rgba(ctx.color, 0.45 + level * 0.5)
+      : IDLE_SHADOW,
+    transform: "scale(" + String(scale) + ")",
+    borderClass: baseBorderClass(ctx.configured, hit),
+    labelColor: labelColor,
+    velText: velText(hit, ctx.velocity),
+    overlay: null
+  };
+}
+
+/** Rainbow hue sweep -- base color ignored during the flash. */
+export fn padAnim_rainbow(ctx) {
+  const level = levelFromAge(ctx.age, ctx.velocity);
+  const hit = level > 0.02;
+  let bg;
+  if (hit) {
+    const hue = ((ctx.now != null ? ctx.now : 0) * 0.3 + ctx.padIndex * 45 + ctx.age * 1.2) % 360;
+    const s = 90;
+    const l = 55 - level * 10;
+    bg = "hsla(" + String(hue) + ", " + String(s) + "%, " + String(l) + "%, " + String(0.45 + level * 0.55) + ")";
+  } else {
+    bg = rgba(ctx.color, IDLE_ALPHA);
+  }
+  return {
+    bg: bg,
+    shadow: hit
+      ? "0 0 26px rgba(255,255,255," + String(0.45 * level) + "), inset 0 0 20px rgba(255,255,255," + String(0.3 + level * 0.3) + ")"
+      : IDLE_SHADOW,
+    transform: hit ? "scale(" + String(0.95 + (1 - level) * 0.04) + ")" : "scale(1)",
+    borderClass: baseBorderClass(ctx.configured, hit),
+    labelColor: hit ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.45)",
+    velText: velText(hit, ctx.velocity),
+    overlay: null
+  };
+}
+
+export const PAD_ANIMATIONS = [
+  { id: "pulse", label: "Pulse", render: padAnim_pulse },
+  { id: "ripple", label: "Ripple", render: padAnim_ripple },
+  { id: "starburst", label: "Starburst", render: padAnim_starburst },
+  { id: "shockwave", label: "Shockwave", render: padAnim_shockwave },
+  { id: "hologram", label: "Hologram", render: padAnim_hologram },
+  { id: "shutter", label: "Shutter", render: padAnim_shutter },
+  { id: "rainbow", label: "Rainbow", render: padAnim_rainbow }
+];
+
+export fn getPadAnimation(id) {
+  let i = 0;
+  while (i < PAD_ANIMATIONS.length) {
+    if (PAD_ANIMATIONS[i].id === id) {
+      return PAD_ANIMATIONS[i];
+    }
+    i = i + 1;
+  }
+  return PAD_ANIMATIONS[0];
+}
+
+export fn getNextPadAnimation(id) {
+  let i = 0;
+  while (i < PAD_ANIMATIONS.length) {
+    if (PAD_ANIMATIONS[i].id === id) {
+      return PAD_ANIMATIONS[(i + 1) % PAD_ANIMATIONS.length];
+    }
+    i = i + 1;
+  }
+  return PAD_ANIMATIONS[0];
+}

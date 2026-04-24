@@ -8,6 +8,7 @@ import { HARDWARE_MVAVE_SMK25_FAMILY } from "../../inputDevices/midiHardwareVisu
 import { loadMidiLayoutProfile, saveMidiLayoutProfile } from "../../midi/midiLayoutTraining.tish"
 import { isMidiDebugEnabled, midiDebugLog } from "../../midi/midiDebug.tish"
 import { createMidiLearnSession } from "../../midi/midiLearn.tish"
+import { PAD_ANIMATIONS, getPadAnimation, getNextPadAnimation } from "./padAnimations.tish"
 
 export const smk25_face_type = "smk25_face";
 export const smk25_face_category = "UTILITY";
@@ -41,14 +42,20 @@ const PAD_SLOT_IDS_B = ["padB1", "padB2", "padB3", "padB4", "padB5", "padB6", "p
 const KNOB_SLOT_IDS_A = ["knobA1", "knobA2", "knobA3", "knobA4", "knobA5", "knobA6", "knobA7", "knobA8"];
 const KNOB_SLOT_IDS_B = ["knobB1", "knobB2", "knobB3", "knobB4", "knobB5", "knobB6", "knobB7", "knobB8"];
 
-// Observed on the M-VAVE SMK-25 II: 8 physical pads send two groups of 4 notes on MIDI channel 10 (wire 9).
-//   top row (pads 1-4): 40, 41, 42, 43
-//   bottom row (pads 5-8): 36, 37, 38, 39
-// PAD-B is a device-side bank switch that remaps these notes; its alternate set varies by firmware,
-// so we leave bank B empty by default and expect the user to learn it via "Cfg B".
+// Observed on the M-VAVE SMK-25 II:
+//   PAD-A bank (port 1/2, MIDI ch 10 / wire 9):
+//     top row    pads 1-4 -> 40, 41, 42, 43
+//     bottom row pads 5-8 -> 36, 37, 38, 39
+//   PAD-B bank (port 3, MIDI ch 1 / wire 0):
+//     top row    pads 1-4 -> 96, 97, 91, 92
+//     bottom row pads 5-8 -> 0, 1, 2, 3
 const BUILTIN_PAD_SLOTS_A = [
   { note: 40, channel: 9 }, { note: 41, channel: 9 }, { note: 42, channel: 9 }, { note: 43, channel: 9 },
   { note: 36, channel: 9 }, { note: 37, channel: 9 }, { note: 38, channel: 9 }, { note: 39, channel: 9 }
+];
+const BUILTIN_PAD_SLOTS_B = [
+  { note: 96, channel: 0 }, { note: 97, channel: 0 }, { note: 91, channel: 0 }, { note: 92, channel: 0 },
+  { note: 0, channel: 0 }, { note: 1, channel: 0 }, { note: 2, channel: 0 }, { note: 3, channel: 0 }
 ];
 // KNOB-B layer: firmware may send high-note taps per encoder slot; pitch bend on encoder channel then updates last touched slot.
 const SMK_KNOB_B_NOTES_DEFAULT = [104, 105, 106, 107, 108, 109, 110, 111];
@@ -613,9 +620,13 @@ export fn smk25_face_buildAudio(ctx, node) {
   }
 
   const savedPadVersion = train && Number.isFinite(train.smkPadSlotsVersion) ? train.smkPadSlotsVersion : 0;
-  // v2 = dropped the Mixxx-style bank-B seed (36..47) and moved 36-39 to bank-A bottom row.
-  const padSlotsA = savedPadVersion >= 2 ? parsePadSlotsFromProfile(train && train.padSlotsA) : parsePadSlotsFromProfile(null);
-  const padSlotsB = savedPadVersion >= 2 ? parsePadSlotsFromProfile(train && train.padSlotsB) : parsePadSlotsFromProfile(null);
+  // v2 = dropped Mixxx-style bank-B seed, moved 36-39 to bank-A bottom row.
+  // v3 = seeded bank-B from observed hardware (96,97,91,92 / 0,1,2,3 on MIDI ch 1).
+  const CURRENT_PAD_SLOTS_VERSION = 3;
+  const padSlotsA = savedPadVersion >= CURRENT_PAD_SLOTS_VERSION ? parsePadSlotsFromProfile(train && train.padSlotsA) : parsePadSlotsFromProfile(null);
+  const padSlotsB = savedPadVersion >= CURRENT_PAD_SLOTS_VERSION ? parsePadSlotsFromProfile(train && train.padSlotsB) : parsePadSlotsFromProfile(null);
+
+  let padAnimationId = train && typeof train.padAnimationId === "string" && train.padAnimationId.length ? train.padAnimationId : "pulse";
 
   const seedPadSlotsIfAllEmpty = (target, defaults) => {
     if (!Array.isArray(target) || !Array.isArray(defaults)) {
@@ -647,6 +658,7 @@ export fn smk25_face_buildAudio(ctx, node) {
   };
 
   seedPadSlotsIfAllEmpty(padSlotsA, BUILTIN_PAD_SLOTS_A);
+  seedPadSlotsIfAllEmpty(padSlotsB, BUILTIN_PAD_SLOTS_B);
 
   const smkMidiOpts = {
     keybedRoot: keybedRoot,
@@ -686,13 +698,13 @@ export fn smk25_face_buildAudio(ctx, node) {
 
   const persistPadMaps = () => {
     mergeProfilePatch({
-      smkPadSlotsVersion: 2,
+      smkPadSlotsVersion: CURRENT_PAD_SLOTS_VERSION,
       padSlotsA: serializePadSlots(padSlotsA),
       padSlotsB: serializePadSlots(padSlotsB)
     });
   };
 
-  if (savedPadVersion < 2) {
+  if (savedPadVersion < CURRENT_PAD_SLOTS_VERSION) {
     persistPadMaps();
   }
 
@@ -985,6 +997,29 @@ export fn smk25_face_buildAudio(ctx, node) {
         lastCc: { port: lastCcInfo.port, ch1: lastCcInfo.ch1, cc: lastCcInfo.cc, val: lastCcInfo.val },
         lastNote: { port: lastNoteInfo.port, ch1: lastNoteInfo.ch1, note: lastNoteInfo.note, vel: lastNoteInfo.vel }
       };
+    },
+    getPadAnimationState: () => {
+      const anim = getPadAnimation(padAnimationId);
+      return {
+        current: { id: anim.id, label: anim.label },
+        available: PAD_ANIMATIONS.map((a) => ({ id: a.id, label: a.label }))
+      };
+    },
+    setPadAnimationId: (id) => {
+      const next = getPadAnimation(id).id;
+      if (padAnimationId === next) {
+        return;
+      }
+      padAnimationId = next;
+      mergeProfilePatch({ padAnimationId: padAnimationId });
+    },
+    cyclePadAnimation: () => {
+      const next = getNextPadAnimation(padAnimationId);
+      if (padAnimationId === next.id) {
+        return;
+      }
+      padAnimationId = next.id;
+      mergeProfilePatch({ padAnimationId: padAnimationId });
     },
     getPadConfigState: () => {
       return {
@@ -1337,26 +1372,19 @@ export fn smk25_face_View(props) {
   const padBActive = vis.padBankB === true;
   const activeSlotsCount = padBActive ? configuredB : configuredA;
   const nowView = vis.nowMs || (typeof performance !== "undefined" && performance.now ? performance.now() : 0);
-  const FLASH_MS = 160;
-  const FADE_MS = 340;
+  const animState = sink && typeof sink.getPadAnimationState === "function"
+    ? sink.getPadAnimationState()
+    : { current: { id: "pulse", label: "Pulse" }, available: PAD_ANIMATIONS.map((a) => ({ id: a.id, label: a.label })) };
+  const padAnim = getPadAnimation(animState.current.id);
   let pi = 0;
   while (pi < SMK_PADS) {
     const pa = vis.padsA && vis.padsA[pi] != null ? vis.padsA[pi] : vis.pads && vis.pads[pi] != null ? vis.pads[pi] : 0;
     const pb = vis.padsB && vis.padsB[pi] != null ? vis.padsB[pi] : 0;
-    const hitA = vis.padsAHitAt && vis.padsAHitAt[pi] != null ? vis.padsAHitAt[pi] : 0;
-    const hitB = vis.padsBHitAt && vis.padsBHitAt[pi] != null ? vis.padsBHitAt[pi] : 0;
+    const hitTimeA = vis.padsAHitAt && vis.padsAHitAt[pi] != null ? vis.padsAHitAt[pi] : 0;
+    const hitTimeB = vis.padsBHitAt && vis.padsBHitAt[pi] != null ? vis.padsBHitAt[pi] : 0;
     const rawLevel = padBActive ? pb : pa;
-    const hitAt = padBActive ? hitB : hitA;
-    let visualLevel = 0;
-    if (rawLevel > 0 && hitAt > 0) {
-      const age = nowView - hitAt;
-      if (age < FLASH_MS) {
-        visualLevel = rawLevel;
-      } else if (age < FLASH_MS + FADE_MS) {
-        visualLevel = rawLevel * (1 - (age - FLASH_MS) / FADE_MS);
-      }
-    }
-    const level = visualLevel;
+    const hitAt = padBActive ? hitTimeB : hitTimeA;
+    const age = hitAt > 0 ? nowView - hitAt : 999999;
     const row = pi < 4 ? 0 : 1;
     const slotA = padCfg.padSlotsA && padCfg.padSlotsA[pi] ? padCfg.padSlotsA[pi] : null;
     const slotB = padCfg.padSlotsB && padCfg.padSlotsB[pi] ? padCfg.padSlotsB[pi] : null;
@@ -1372,23 +1400,26 @@ export fn smk25_face_View(props) {
       if (row === 0) { rr = 20; gg = 184; bb = 166; }
       else { rr = 217; gg = 70; bb = 239; }
     }
-    const hit = level > 0.02;
-    const alpha = hit ? 0.35 + level * 0.65 : 0.14;
-    const bg = "rgba(" + String(rr) + ", " + String(gg) + ", " + String(bb) + ", " + String(alpha) + ")";
-    const glow = hit ? "0 0 24px rgba(" + String(rr) + ", " + String(gg) + ", " + String(bb) + ", " + String(0.5 + level * 0.5) + "), inset 0 0 16px rgba(255,255,255," + String(0.3 + level * 0.3) + ")" : "inset 0 2px 4px rgba(0,0,0,0.6)";
-    const borderCls = configured ? (hit ? "border-2 border-white" : "border border-neutral-700") : "border border-dashed border-neutral-600/60";
-    const scale = hit ? (0.94 + (1 - level) * 0.05) : 1.0;
-    const labelColor = hit ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.45)";
-    const velTxt = hit ? String(Math.round(Math.max(rawLevel, level) * 127)) : "";
+    const animCtx = {
+      age: age,
+      velocity: rawLevel,
+      color: { r: rr, g: gg, b: bb },
+      configured: configured,
+      padIndex: pi,
+      isBankB: padBActive,
+      now: nowView
+    };
+    const style = padAnim.render(animCtx);
     padEls.push(
       <div
         key={"p" + String(pi)}
-        class={"relative rounded-lg overflow-hidden flex flex-col items-center justify-center transition-all duration-75 " + borderCls}
-        style={{ background: bg, boxShadow: glow, transform: "scale(" + String(scale) + ")" }}
+        class={"relative rounded-lg overflow-hidden flex flex-col items-center justify-center transition-[transform,box-shadow,background-color] duration-75 " + style.borderClass}
+        style={{ background: style.bg, boxShadow: style.shadow, transform: style.transform }}
       >
-        <span class="text-[10px] font-black leading-none select-none pointer-events-none tracking-wide" style={{ color: labelColor }}>{"Pad " + String(pi + 1)}</span>
-        {hit ? (
-          <span class="text-[7px] font-mono text-white/80 leading-none pt-0.5 select-none pointer-events-none">{velTxt}</span>
+        {style.overlay}
+        <span class="text-[10px] font-black leading-none select-none pointer-events-none tracking-wide relative z-10" style={{ color: style.labelColor }}>{"Pad " + String(pi + 1)}</span>
+        {style.velText && style.velText.length ? (
+          <span class="text-[7px] font-mono text-white/80 leading-none pt-0.5 select-none pointer-events-none relative z-10">{style.velText}</span>
         ) : null}
       </div>
     );
@@ -1584,11 +1615,16 @@ export fn smk25_face_View(props) {
                   onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.beginPadLearn) { sink.beginPadLearn("B"); } }}
                   class="px-1.5 py-0.5 rounded border border-amber-500/60 bg-amber-900/40 text-amber-100 font-bold text-[6px] hover:bg-amber-800/60 pointer-events-auto"
                 >{"Cfg B " + String(configuredB) + "/8"}</button>
-                <button
-                  title="Clear all learned pad mappings"
-                  onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.resetPadMap) { sink.resetPadMap("ALL"); } }}
-                  class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 font-bold text-[6px] hover:bg-neutral-700 pointer-events-auto"
-                >Reset</button>
+              <button
+                title="Clear all learned pad mappings"
+                onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.resetPadMap) { sink.resetPadMap("ALL"); } }}
+                class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 font-bold text-[6px] hover:bg-neutral-700 pointer-events-auto"
+              >Reset</button>
+              <button
+                title={"Pad hit animation: " + animState.current.label + " (click to cycle)"}
+                onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.cyclePadAnimation) { sink.cyclePadAnimation(); } }}
+                class="px-1.5 py-0.5 rounded border border-violet-500/60 bg-violet-900/40 text-violet-100 font-bold text-[6px] hover:bg-violet-800/60 pointer-events-auto"
+              >{"Anim: " + animState.current.label}</button>
               </div>
               <span class={"font-semibold " + (vis.padBankB ? "text-amber-200" : "text-teal-300")}>
                 {vis.padBankB ? "PAD-B" : "PAD-A"}
