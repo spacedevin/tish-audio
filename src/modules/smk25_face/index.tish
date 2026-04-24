@@ -57,6 +57,9 @@ const BUILTIN_PAD_SLOTS_B = [
   { note: 96, channel: 0 }, { note: 97, channel: 0 }, { note: 91, channel: 0 }, { note: 92, channel: 0 },
   { note: 0, channel: 0 }, { note: 1, channel: 0 }, { note: 2, channel: 0 }, { note: 3, channel: 0 }
 ];
+// Observed on the M-VAVE SMK-25 II:
+//   KNOB-A (ports 1/2, MIDI ch 1): CC 20..27 for knobs 1..8.
+const BUILTIN_KNOB_CCS_A = [20, 21, 22, 23, 24, 25, 26, 27];
 // KNOB-B layer: firmware may send high-note taps per encoder slot; pitch bend on encoder channel then updates last touched slot.
 const SMK_KNOB_B_NOTES_DEFAULT = [104, 105, 106, 107, 108, 109, 110, 111];
 // Transport (firmware): Play A#6, Stop A6, Rec B6 — remap for passthrough so downstream synths / MIDI Recorder see low “button” notes.
@@ -543,7 +546,8 @@ export fn smk25_face_buildAudio(ctx, node) {
     if (Number.isFinite(train.keybedRoot)) {
       keybedRoot = train.keybedRoot;
     }
-    if (Array.isArray(train.knobCcs) && train.knobCcs.length >= SMK_KNOB_DIGITAL) {
+    const savedKnobCcsVersion = Number.isFinite(train.smkKnobCcsVersion) ? train.smkKnobCcsVersion : 0;
+    if (savedKnobCcsVersion >= 1 && Array.isArray(train.knobCcs) && train.knobCcs.length >= SMK_KNOB_DIGITAL) {
       let ki = 0;
       while (ki < SMK_KNOB_DIGITAL) {
         const v = train.knobCcs[ki];
@@ -660,6 +664,33 @@ export fn smk25_face_buildAudio(ctx, node) {
   seedPadSlotsIfAllEmpty(padSlotsA, BUILTIN_PAD_SLOTS_A);
   seedPadSlotsIfAllEmpty(padSlotsB, BUILTIN_PAD_SLOTS_B);
 
+  const seedKnobCcsIfAllEmpty = (target, defaults) => {
+    if (!Array.isArray(target) || !Array.isArray(defaults)) {
+      return;
+    }
+    let allEmpty = true;
+    let i = 0;
+    while (i < target.length) {
+      if (Number.isFinite(target[i]) && target[i] >= 0) {
+        allEmpty = false;
+        break;
+      }
+      i = i + 1;
+    }
+    if (!allEmpty) {
+      return;
+    }
+    let j = 0;
+    while (j < target.length && j < defaults.length) {
+      if (Number.isFinite(defaults[j]) && defaults[j] >= 0) {
+        target[j] = defaults[j];
+      }
+      j = j + 1;
+    }
+  };
+
+  seedKnobCcsIfAllEmpty(knobCcs, BUILTIN_KNOB_CCS_A);
+
   const smkMidiOpts = {
     keybedRoot: keybedRoot,
     knobCcs: knobCcs,
@@ -708,12 +739,21 @@ export fn smk25_face_buildAudio(ctx, node) {
     persistPadMaps();
   }
 
+  const CURRENT_KNOB_CCS_VERSION = 1;
   const persistKnobMaps = () => {
     mergeProfilePatch({
+      smkKnobCcsVersion: CURRENT_KNOB_CCS_VERSION,
       knobCcs: knobCcs.slice(0, SMK_KNOB_DIGITAL),
       knobBCcs: knobBCcsOpt ? knobBCcsOpt.slice(0, SMK_KNOB_DIGITAL) : null
     });
   };
+
+  {
+    const savedKnobVer = train && Number.isFinite(train.smkKnobCcsVersion) ? train.smkKnobCcsVersion : 0;
+    if (savedKnobVer < CURRENT_KNOB_CCS_VERSION) {
+      persistKnobMaps();
+    }
+  }
 
   const writeCapturedPadsIntoBank = (captured, slotIds, target) => {
     let j = 0;
@@ -901,48 +941,6 @@ export fn smk25_face_buildAudio(ctx, node) {
         learnSession.capture(ev);
       }
       return;
-    }
-    if (isMidiDebugEnabled() && ev.kind === "mvaveSmk25SysexBtn" && smkDbgSysexLeft > 0) {
-      smkDbgSysexLeft = smkDbgSysexLeft - 1;
-      midiDebugLog("smk25_face sysex btn", {
-        key: ev.sysexKey,
-        value: ev.sysexValue,
-        padBankSysexKeyConfigured: padBankSysexKey,
-        knobBankSysexKeyConfigured: knobBankSysexKey,
-        padBankBAfter: state.padBankB === true,
-        knobBankBAfter: state.knobBankB === true,
-        smkInPort: smkInPort
-      });
-    }
-    if (isMidiDebugEnabled() && ev.kind === "cc" && smkDbgCcLeft > 0) {
-      smkDbgCcLeft = smkDbgCcLeft - 1;
-      const cc0 = ev.controller != null ? ev.controller : -1;
-      const ki0 = knobIndexForCc(cc0, knobCcs);
-      const twinKnob = ki0 >= 0 && isKnobCcAllowedForTwin(ev, knobCcRoute);
-      midiDebugLog("smk25_face cc", {
-        ch: ev.channel,
-        cc: cc0,
-        val: ev.value,
-        knobIdx: ki0,
-        twinKnobCcAccepted: twinKnob,
-        sysexDerived: ev.sysexDerived === true,
-        routeAllCh: knobCcRoute.knobMidiChannelAll,
-        routeCh1: knobCcRoute.knobMidiChannel,
-        hasPortFilter: knobCcRoute.knobPortFilter != null,
-        sourcePortName: ev.sourcePortName,
-        sourceNativeDeviceIndex: ev.sourceNativeDeviceIndex,
-        smkInPort: smkInPort
-      });
-    }
-    if (isMidiDebugEnabled() && ev.kind === "pitchBend" && smkDbgPitchLeft > 0) {
-      smkDbgPitchLeft = smkDbgPitchLeft - 1;
-      midiDebugLog("smk25_face pitchBend", {
-        ch: ev.channel,
-        value14: ev.value14,
-        pitchStripCh: pitchStripChannel0,
-        knobLatchCh: knobBPitchLatchChannel0,
-        smkInPort: smkInPort
-      });
     }
     const prevKnobs = state.knobs.slice();
     state = applyMidiToState(state, ev, smkMidiOpts);
