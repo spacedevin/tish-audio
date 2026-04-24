@@ -1,0 +1,83 @@
+// Web Audio graph glue for MIDI_IN: one passthrough sink (legacy) or per-port combo forwards (SMK-25).
+
+const isComboMidiOutPortId = (portId) => {
+  const s = String(portId || "");
+  if (s.length < 5 || s.slice(0, 4) !== "midi") {
+    return false;
+  }
+  const rest = s.slice(4);
+  const n = parseInt(rest, 10);
+  return Number.isFinite(n) && n >= 1;
+};
+
+/**
+ * @param node graph MIDI_IN node (reads params.midiComboLayout + midiInputIds for routing).
+ */
+export fn buildMidiInMidiSink(node) {
+  const p = node && node.params;
+  const combo = p && p.midiComboLayout === "smk25" && p.midiInputIds && p.midiInputIds.length;
+  const forwards = {};
+  forwards._legacy = null;
+  if (combo) {
+    let ci = 0;
+    while (ci < p.midiInputIds.length) {
+      forwards["midi" + String(ci + 1)] = null;
+      ci = ci + 1;
+    }
+  }
+
+  const handleEvent = (ev, ctx2) => {
+    if (!ev || !ctx2) {
+      return;
+    }
+    if (combo && p.midiInputIds) {
+      const ids = p.midiInputIds;
+      let ix = 0;
+      while (ix < ids.length) {
+        if (ids[ix] === ev.inputId) {
+          const fk = "midi" + String(ix + 1);
+          const sub = forwards[fk];
+          if (sub && typeof sub.handleEvent === "function") {
+            sub.handleEvent(ev, ctx2);
+          }
+          return;
+        }
+        ix = ix + 1;
+      }
+      return;
+    }
+    const t = forwards._legacy;
+    if (t && typeof t.handleEvent === "function") {
+      t.handleEvent(ev, ctx2);
+    }
+  };
+
+  const setMidiForward = (sink) => {
+    forwards._legacy = sink && typeof sink.handleEvent === "function" ? sink : null;
+  };
+
+  const setMidiForwardCombo = (portKey, sink) => {
+    if (!portKey || !isComboMidiOutPortId(portKey)) {
+      return;
+    }
+    forwards[String(portKey)] = sink && typeof sink.handleEvent === "function" ? sink : null;
+  };
+
+  const dispose = () => {
+    forwards._legacy = null;
+    if (combo) {
+      let ki = 0;
+      while (ki < p.midiInputIds.length) {
+        forwards["midi" + String(ki + 1)] = null;
+        ki = ki + 1;
+      }
+    }
+  };
+
+  return {
+    handleEvent: handleEvent,
+    setMidiForward: setMidiForward,
+    setMidiForwardCombo: setMidiForwardCombo,
+    dispose: dispose
+  };
+}

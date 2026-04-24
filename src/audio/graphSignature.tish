@@ -6,7 +6,14 @@ const n = nodes[ni];
 stamps.push({ id: n.id, "type": n["type"], bypassed: n.bypassed, isSystem: n.isSystem, params: n.params, label: n.label });
 ni = ni + 1;
 }
-let connBrief = connections.map(c => ({ id: c.id, from: c.from, to: c.to, fromPort: c.fromPort, toPort: c.toPort }));
+let connBrief = connections.map((c) => ({
+  id: c.id,
+  from: c.from,
+  to: c.to,
+  fromPort: c.fromPort,
+  toPort: c.toPort,
+  ctrlParam: c.ctrlParam != null ? String(c.ctrlParam) : ""
+}));
 return JSON.stringify({ stamps: stamps, connections: connBrief });
 }
 
@@ -25,13 +32,23 @@ if (nty === 'MIDI_IN') {
 stamp.midiInputId = n.params && n.params.midiInputId != null ? n.params.midiInputId : "";
 stamp.midiBindingId = n.params && n.params.midiBindingId != null ? n.params.midiBindingId : "";
 stamp.nativeMidi = !!(n.params && n.params.nativeMidi);
+stamp.midiComboLayout = n.params && n.params.midiComboLayout != null ? String(n.params.midiComboLayout) : "";
+const mids = n.params && n.params.midiInputIds;
+stamp.midiInputIdsKey = Array.isArray(mids) ? mids.join("|") : "";
 }
 if (nty === 'console_mixer') stamp.channels = n.params.channels || 4;
 // Audio params must not enter the signature unless they truly require reconnecting the WebAudio graph.
 stamps.push(stamp);
 ni = ni + 1;
 }
-let connBrief = connections.map(c => ({ id: c.id, from: c.from, to: c.to, fromPort: c.fromPort, toPort: c.toPort }));
+let connBrief = connections.map((c) => ({
+  id: c.id,
+  from: c.from,
+  to: c.to,
+  fromPort: c.fromPort,
+  toPort: c.toPort,
+  ctrlParam: c.ctrlParam != null ? String(c.ctrlParam) : ""
+}));
 return JSON.stringify({ stamps: stamps, connections: connBrief });
 }
 

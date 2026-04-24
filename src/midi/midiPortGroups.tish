@@ -1,0 +1,197 @@
+// OS often exposes one physical controller as several MIDI inputs (USB composite / vendor endpoints).
+// SMK-25 family: list each USB port separately so the user can add one MIDI_IN per port and wire them
+// to the SMK-25 layout module jacks midi1 / midi2 / midi3. Other families may still merge by base name.
+
+import { HARDWARE_MVAVE_SMK25_FAMILY } from "../inputDevices/midiHardwareVisuals.tish"
+import { isMidiDebugEnabled, midiDebugLog } from "./midiDebug.tish"
+
+const midiPortBaseLower = (s) => (typeof s === "string" ? s.toLowerCase() : "");
+
+const isDigit = (c) => c >= "0" && c <= "9";
+
+const isAllDigits = (str) => {
+  if (!str || !str.length) {
+    return false;
+  }
+  let i = 0;
+  while (i < str.length) {
+    if (!isDigit(str[i])) {
+      return false;
+    }
+    i = i + 1;
+  }
+  return true;
+};
+
+const collapseInnerSpaces = (t) => {
+  let out = "";
+  let prevSpace = false;
+  let i = 0;
+  while (i < t.length) {
+    const c = t[i];
+    if (c === " ") {
+      if (!prevSpace) {
+        out = out + " ";
+      }
+      prevSpace = true;
+    } else {
+      out = out + c;
+      prevSpace = false;
+    }
+    i = i + 1;
+  }
+  return out.trim();
+};
+
+/** Strip common SMK/SINCO suffixes so "…-Private", "…-Master", "… Port 3" group together. */
+export fn midiPortBaseKeyFromLabel(label) {
+  let s = midiPortBaseLower(String(label || "")).trim();
+  const privMasterEnds = [
+    " - private",
+    "- private",
+    " -private",
+    "-private",
+    " private",
+    " - master",
+    "- master",
+    " -master",
+    "-master",
+    " master"
+  ];
+  let guard = 0;
+  while (guard < 32) {
+    guard = guard + 1;
+    const before = s;
+    let si = 0;
+    while (si < privMasterEnds.length) {
+      const suf = privMasterEnds[si];
+      if (s.length >= suf.length && s.slice(s.length - suf.length) === suf) {
+        s = s.slice(0, s.length - suf.length).trim();
+        break;
+      }
+      si = si + 1;
+    }
+    const lp = s.lastIndexOf(" port ");
+    if (lp >= 0) {
+      const tail = s.slice(lp + 6);
+      if (isAllDigits(tail)) {
+        s = s.slice(0, lp).trim();
+      }
+    }
+    const lp2 = s.lastIndexOf("-port");
+    if (lp2 >= 0) {
+      const tail2 = s.slice(lp2 + 5);
+      if (isAllDigits(tail2)) {
+        s = s.slice(0, lp2).trim();
+      }
+    }
+    if (s === before) {
+      break;
+    }
+  }
+  return collapseInnerSpaces(s);
+}
+
+const groupKeyForRow = (row) => {
+  if (!row || typeof row !== "object") {
+    return "__skip__";
+  }
+  const hid = row.hardwareVisualId != null ? String(row.hardwareVisualId) : "";
+  if (!hid || hid.length === 0) {
+    const idPart =
+      row["native"] === true
+        ? "n:" + String(row.index != null ? row.index : "")
+        : "w:" + String(row.deviceId != null ? row.deviceId : "");
+    return "__single__|" + idPart;
+  }
+  const nat = row["native"] === true ? "1" : "0";
+  if (hid === HARDWARE_MVAVE_SMK25_FAMILY) {
+    return "grp|" + nat + "|" + hid + "|__family__";
+  }
+  const base = midiPortBaseKeyFromLabel(row.label);
+  if (!base.length) {
+    return "__single__|" + nat + "|" + String(row.label || "");
+  }
+  return "grp|" + nat + "|" + hid + "|" + base;
+};
+
+/** Collapse multi-port listings for known hardware (e.g. SMK-25 family) into one connect row. */
+export fn mergeMidiHardwareRows(rows) {
+  if (!rows || !rows.length) {
+    return [];
+  }
+  const buckets = {};
+  let ri = 0;
+  while (ri < rows.length) {
+    const row = rows[ri];
+    const k = groupKeyForRow(row);
+    if (!buckets[k]) {
+      buckets[k] = [];
+    }
+    buckets[k].push(row);
+    ri = ri + 1;
+  }
+  if (isMidiDebugEnabled()) {
+    const bk = Object.keys(buckets);
+    let bi = 0;
+    while (bi < bk.length) {
+      const key = bk[bi];
+      const bkt = buckets[key];
+      const labels = [];
+      let bj = 0;
+      while (bj < bkt.length) {
+        labels.push(bkt[bj].label != null ? String(bkt[bj].label) : "");
+        bj = bj + 1;
+      }
+      midiDebugLog("merge bucket", { key: key, count: bkt.length, labels: labels });
+      bi = bi + 1;
+    }
+  }
+  const out = [];
+  const keys = Object.keys(buckets);
+  let ki = 0;
+  while (ki < keys.length) {
+    const k = keys[ki];
+    const list = buckets[k];
+    if (list.length >= 2 && k.indexOf("grp|") === 0) {
+      const first = list[0];
+      const nPorts = list.length;
+      const baseName =
+        first.hardwareDisplayName && String(first.hardwareDisplayName).length
+          ? String(first.hardwareDisplayName)
+          : midiPortBaseKeyFromLabel(first.label);
+      const hidFirst = first.hardwareVisualId != null ? String(first.hardwareVisualId) : "";
+      const mergedRow = {
+        merged: true,
+        label:
+          hidFirst === HARDWARE_MVAVE_SMK25_FAMILY
+            ? baseName + " — " + String(nPorts) + " MIDI ports (click = layout + patch)"
+            : baseName + " — " + String(nPorts) + " ports (merged)",
+        hardwareVisualId: first.hardwareVisualId,
+        hardwareDisplayName: first.hardwareDisplayName,
+        native: first["native"] === true,
+        members: list
+      };
+      const memberLabels = [];
+      let ml = 0;
+      while (ml < list.length) {
+        memberLabels.push(list[ml].label != null ? String(list[ml].label) : "");
+        ml = ml + 1;
+      }
+      midiDebugLog("merged device row", {
+        label: mergedRow.label,
+        nPorts: nPorts,
+        memberLabels: memberLabels
+      });
+      out.push(mergedRow);
+    } else {
+      let li = 0;
+      while (li < list.length) {
+        out.push(list[li]);
+        li = li + 1;
+      }
+    }
+    ki = ki + 1;
+  }
+  return out;
+}

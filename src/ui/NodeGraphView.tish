@@ -5,7 +5,15 @@
 
 import { h, useState, useRef, useMemo, runBatched } from "lattish"
 import { X } from "../icons.tish"
-import { getNodePorts } from "../modules/registry.tish"
+import {
+  getNodePorts,
+  isSmkControlOutputPort,
+  isControlInputPort,
+  defaultCtrlParamKeyForModuleType,
+  isSmk25FaceMidiInputPort,
+  isComboStyleMidiPort,
+  isMidiGraphPortId
+} from "../modules/registry.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
 import { RotaryKnob } from "./controls.tish"
 import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode, hardwareRemoveClass } from "./nodes.tish"
@@ -26,6 +34,9 @@ if (p && p.uiForm === "rack") {
 return { w: MIDI_RACK_W, h: MIDI_RACK_H };
 }
 return { w: MIDI_PEDAL_W, h: MIDI_PEDAL_H };
+}
+else if (nt === "smk25_face") {
+return { w: 300, h: 460 };
 }
 const mod = MODULE_REGISTRY[nt];
 if (mod && mod.layout) {
@@ -181,7 +192,12 @@ let wi = 0;
 const conns = Array.isArray(connections) ? connections : [];
 while (wi < conns.length) {
 const wc = conns[wi];
-if (wc && wc.from === node.id && wc.fromPort === "midi" && wc.toPort === "midi") {
+if (
+  wc &&
+  wc.from === node.id &&
+  (wc.fromPort === "midi" || isComboStyleMidiPort(wc.fromPort)) &&
+  (wc.toPort === "midi" || isSmk25FaceMidiInputPort(wc.toPort))
+) {
 midiWireToId = wc.to;
 break;
 }
@@ -234,10 +250,18 @@ class="flex flex-col gap-2 w-[240px] min-h-[168px] border-2 border-violet-700 bg
 {patchLine}
 </div>
 <div class="text-[8px] text-neutral-500 text-center leading-snug px-1">To record performance, add <span class="text-amber-400 font-bold">MIDI Recorder</span> on the MIDI chain and arm it on that module.</div>
-{hardwareVisualId ? (
+{hardwareVisualId && !(node.params && node.params.midiComboLayout === "smk25") ? (
 <div class="text-[8px] text-violet-400/90 text-center leading-snug px-1 border border-violet-800/50 rounded bg-black/25 py-1">
-Detected layout profile: <span class="font-bold text-violet-200">{hardwareDisplayNameForId(hardwareVisualId)}</span>
-<span class="text-neutral-500"> — no controls here; use the MIDI jack and downstream modules.</span>
+Detected <span class="font-bold text-violet-200">{hardwareDisplayNameForId(hardwareVisualId)}</span>
+<span class="text-neutral-500"> — in MIDI settings, click the merged SMK-25 row to add the layout and default patch cables (you can rewire anytime).</span>
+</div>
+) : null}
+{node.params && node.params.midiComboLayout === "smk25" ? (
+<div class="text-[8px] text-emerald-400/90 text-center leading-snug px-1 border border-emerald-900/60 rounded bg-black/25 py-1">
+<span class="font-bold text-emerald-200">Combo MIDI in</span>
+<span class="text-neutral-500"> — each amber jack is one hardware port; default wires go to the SMK-25 layout </span>
+<span class="font-bold text-amber-200">midi1–midi3</span>
+<span class="text-neutral-500">; disconnect or reroute as needed.</span>
 </div>
 ) : null}
 <button title="Remove MIDI input" onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); removeNode(node.id); }} class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">{h(X, { "class": "w-4 h-4 text-red-500 hover:text-red-400" })}</button>
@@ -302,22 +326,51 @@ setWiring(prev => {
 if (prev && prev.fromId !== toNodeId) {
 const fp = prev.fromPort;
 const tp = toPortId;
-const fromIsMidi = fp === 'midi';
-const toIsMidi = tp === 'midi';
-if (fromIsMidi || toIsMidi) {
-if (!(fromIsMidi && toIsMidi)) {
+const fromN = nodes.find((n) => n.id === prev.fromId);
+const fromIsMidi =
+  fp === "midi" || !!(fromN && fromN["type"] === "MIDI_IN" && isComboStyleMidiPort(fp));
+const toIsMidiTarget = tp === 'midi' || isSmk25FaceMidiInputPort(tp);
+const fromIsCtrl = isSmkControlOutputPort(fp);
+const toIsCtrl = isControlInputPort(tp);
+if (fromIsMidi || toIsMidiTarget) {
+if (!(fromIsMidi && toIsMidiTarget)) {
 resetWireDraftDomCache();
 return null;
 }
-const fromN = nodes.find(n => n.id === prev.fromId);
 const toN = nodes.find(n => n.id === toNodeId);
 const fromOkMidi = fromN && (fromN["type"] === "MIDI_IN" || !!(MODULE_REGISTRY[fromN["type"]] && MODULE_REGISTRY[fromN["type"]].midiThrough));
-if (!fromOkMidi || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) {
+const toOkMidi =
+  toN &&
+  ((toN["type"] === "smk25_face" && isSmk25FaceMidiInputPort(tp)) ||
+    (!!(MODULE_REGISTRY[toN["type"]] && MODULE_REGISTRY[toN["type"]].acceptsMidiInput) && tp === "midi"));
+if (!fromOkMidi || !toOkMidi) {
 resetWireDraftDomCache();
 return null;
 }
-}
 addConnection(prev.fromId, fp, toNodeId, tp);
+} else if (fromIsCtrl || toIsCtrl) {
+if (!(fromIsCtrl && toIsCtrl)) {
+resetWireDraftDomCache();
+return null;
+}
+const fromNC = nodes.find(n => n.id === prev.fromId);
+const toNC = nodes.find(n => n.id === toNodeId);
+if (!fromNC || fromNC["type"] !== "smk25_face" || !toNC || !MODULE_REGISTRY[toNC["type"]]?.acceptsControlInput) {
+resetWireDraftDomCache();
+return null;
+}
+const defKey = defaultCtrlParamKeyForModuleType(toNC["type"]);
+let chosen = defKey;
+if (typeof window !== "undefined" && window.prompt) {
+const ans = window.prompt("Control target parameter key (module defaultParams):", defKey);
+if (ans != null && String(ans).trim().length) {
+chosen = String(ans).trim();
+}
+}
+addConnection(prev.fromId, fp, toNodeId, tp, chosen);
+} else {
+addConnection(prev.fromId, fp, toNodeId, tp);
+}
 }
 resetWireDraftDomCache();
 return null;
@@ -370,12 +423,16 @@ i = i + 1;
 const cableBlocks = connections.filter(c => m[c.from] && m[c.to]).map(c => {
 const fromNode = m[c.from];
 const toNode = m[c.to];
-const isMidiCable = c.fromPort === 'midi' && c.toPort === 'midi';
+const fromIsMidiOut =
+  c.fromPort === "midi" ||
+  !!(fromNode["type"] === "MIDI_IN" && isComboStyleMidiPort(c.fromPort));
+const isMidiCable = fromIsMidiOut && (c.toPort === "midi" || isSmk25FaceMidiInputPort(c.toPort));
+const isCtrlCable = isSmkControlOutputPort(c.fromPort) && isControlInputPort(c.toPort);
 const start = getJackCoords(fromNode, true, c.fromPort);
 const end = getJackCoords(toNode, false, c.toPort);
 const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
 const d = "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y);
-const accentStroke = isMidiCable ? '#fbbf24' : '#a855f7';
+const accentStroke = isMidiCable ? '#fbbf24' : isCtrlCable ? '#2dd4bf' : '#a855f7';
 return (
 <g key={c.id} class="pointer-events-auto group tf-placed-conn" id={"tf_placed_" + String(c.id)}>
 <path d={d} class="cursor-grab active:cursor-grabbing pointer-events-auto" onPointerDown={(e) => grabCable(e, c)} style={{ fill: 'none', stroke: 'transparent', "stroke-width": 24 }} />
@@ -383,7 +440,7 @@ return (
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#0d0d0d', "stroke-width": 12, "stroke-linecap": 'round' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#2a2a2a', "stroke-width": 7, "stroke-linecap": 'round' }} />
 <path d={d} class="pointer-events-none" style={{ fill: 'none', stroke: '#141414', "stroke-width": 5, "stroke-linecap": 'round' }} />
-<path d={d} id={"c_" + String(c.id)} class={(isMidiCable ? "midi-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150 " : "audio-cable-path animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150 ")} style={{ fill: 'none', stroke: accentStroke, "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
+<path d={d} id={"c_" + String(c.id)} class={((isMidiCable || isCtrlCable) ? (isMidiCable ? "midi-cable-path " : "ctrl-cable-path ") : "audio-cable-path ") + "animate-dash-flow pointer-events-none opacity-80 transition-colors duration-150 "} style={{ fill: 'none', stroke: accentStroke, "stroke-width": 2, "stroke-linecap": 'round', "stroke-dasharray": '4 12' }} />
 <circle cx={start.x} cy={start.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
 <circle cx={start.x} cy={start.y} r="2.2" fill="#090909" class="pointer-events-none" />
 <circle cx={end.x} cy={end.y} r="5" fill="#222" stroke="#4a4a4a" style={{ "stroke-width": 0.8 }} class="pointer-events-none" />
@@ -507,13 +564,16 @@ const wm = wireMouseRef.current;
 if (fromNode && wm) {
 const wModel = { fromId: wiring.fromId, fromPort: wiring.fromPort, x: wm.x, y: wm.y };
 const d = draftWireD(fromNode, wModel);
-const draftMidi = wiring.fromPort === 'midi';
-const draftBlur = draftMidi ? '#78350f' : '#6b21a8';
-const draftStroke = draftMidi ? '#f59e0b' : '#a855f7';
-const draftTip = draftMidi ? '#fef3c7' : '#ffffff';
-const draftRing = draftMidi ? '#fbbf24' : '#a855f7';
-const draftFill = draftMidi ? '#422006' : '#4c1d95';
-const draftDot = draftMidi ? '#1c0a02' : '#1a0a2e';
+const draftMidi =
+  wiring.fromPort === "midi" ||
+  !!(fromNode["type"] === "MIDI_IN" && isComboStyleMidiPort(wiring.fromPort));
+const draftCtrl = isSmkControlOutputPort(wiring.fromPort);
+const draftBlur = draftMidi ? '#78350f' : draftCtrl ? '#134e4a' : '#6b21a8';
+const draftStroke = draftMidi ? '#f59e0b' : draftCtrl ? '#2dd4bf' : '#a855f7';
+const draftTip = draftMidi ? '#fef3c7' : draftCtrl ? '#ccfbf1' : '#ffffff';
+const draftRing = draftMidi ? '#fbbf24' : draftCtrl ? '#5eead4' : '#a855f7';
+const draftFill = draftMidi ? '#422006' : draftCtrl ? '#042f2e' : '#4c1d95';
+const draftDot = draftMidi ? '#1c0a02' : draftCtrl ? '#022c22' : '#1a0a2e';
 draftCableGroup = (
 <g id="tf_draft_cable">
 <path d={d} class="blur-sm transition-colors duration-150 pointer-events-none" style={{ fill: 'none', stroke: draftBlur, "stroke-width": 10, "stroke-linecap": 'round', opacity: 0.7 }} />
@@ -550,31 +610,36 @@ let hasOutWire = false;
 let hi = 0;
 while (hi < connections.length) {
 const hc = connections[hi];
-if (hc.from === node.id && hc.fromPort !== 'midi') {
+if (hc.from === node.id && !isMidiGraphPortId(hc.fromPort)) {
 hasOutWire = true;
 break;
 }
 hi = hi + 1;
 }
+const liveDrag = dragLiveRef.current;
+const rootX = liveDrag && liveDrag.id === node.id ? liveDrag.lastSnapX : node.x;
+const rootY = liveDrag && liveDrag.id === node.id ? liveDrag.lastSnapY : node.y;
 return (
-<div key={node.id} class="tf-node-root absolute z-20 pointer-events-auto touch-manipulation" style={{ transform: "translate(" + String(node.x) + "px, " + String(node.y) + "px)" }}>
+<div key={node.id} class="tf-node-root absolute z-20 pointer-events-auto touch-manipulation" style={{ transform: "translate(" + String(rootX) + "px, " + String(rootY) + "px)" }}>
 
 
 {nt !== 'SYS_IN' && nt !== 'MIDI_IN' && ports["in"].map(port => {
 const coords = getJackCoords(node, false, port);
 const leftPx = coords.x - node.x;
 const topPx = coords.y - node.y;
-const isMidiJack = port === 'midi';
+const isMidiJackIn = port === "midi" || isSmk25FaceMidiInputPort(port);
+const isCtrlJackIn = isControlInputPort(port);
+const midiInShort = isSmk25FaceMidiInputPort(port) ? port.replace("midi", "IN") : "MIDI";
 return (
 <div 
 key={"in-" + port}
 class="jack-wrapper absolute w-7 h-7 z-40 cursor-crosshair"
 style={{ left: String(leftPx) + "px", top: String(topPx) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerUp={(e) => dropWire(e, node.id, port)}
-title={isMidiJack ? "MIDI in (from MIDI input node)" : "Patch In"}
+title={isMidiJackIn ? "MIDI in" : isCtrlJackIn ? "Control in (from SMK-25 ctrl)" : "Patch In"}
 >
-<div class={"w-7 h-7 rounded-full shadow-inner " + (isMidiJack ? "bg-violet-950 border-2 border-amber-400/90" : "bg-neutral-800 border border-neutral-600")} />
-{ports["in"].length > 1 || isMidiJack ? (<span class="jack-label">{isMidiJack ? "MIDI" : port.toUpperCase()}</span>) : null}
+<div class={"w-7 h-7 rounded-full shadow-inner " + (isMidiJackIn ? "bg-violet-950 border-2 border-amber-400/90" : isCtrlJackIn ? "bg-teal-950 border-2 border-teal-400/90" : "bg-neutral-800 border border-neutral-600")} />
+{ports["in"].length > 1 || isMidiJackIn || isCtrlJackIn ? (<span class="jack-label">{isMidiJackIn ? midiInShort : isCtrlJackIn ? "CTL" : port.toUpperCase()}</span>) : null}
 </div>
 );
 })}
@@ -584,17 +649,19 @@ title={isMidiJack ? "MIDI in (from MIDI input node)" : "Patch In"}
 const coords = getJackCoords(node, true, port);
 const leftPxOut = coords.x - node.x;
 const topPxOut = coords.y - node.y;
-const isMidiJack = port === 'midi';
+const isMidiJack = port === "midi" || isComboStyleMidiPort(port);
+const isCtrlJackOut = isSmkControlOutputPort(port);
+const midiOutShort = port === "midi" ? "MIDI" : isComboStyleMidiPort(port) ? port : "";
 return (
 <div 
 key={"out-" + port}
 class="jack-wrapper absolute w-7 h-7 z-40 cursor-crosshair"
 style={{ left: String(leftPxOut) + "px", top: String(topPxOut) + "px", transform: 'translate(-50%, -50%)' }}
 onPointerDown={(e) => startWire(e, node.id, port)}
-title={isMidiJack ? "MIDI out (to synth)" : "Drag out"}
+title={isMidiJack ? "MIDI out" : isCtrlJackOut ? "Control out (map to pedal param)" : "Drag out"}
 >
-<div class={"w-7 h-7 rounded-full shadow-inner " + (isMidiJack ? "bg-violet-950 border-2 border-amber-400/90" : "bg-neutral-800 border border-neutral-600")} />
-{ports["out"].length > 1 || isMidiJack || nt === 'SYS_IN' ? (<span class="jack-label">{isMidiJack ? "MIDI" : port.toUpperCase()}</span>) : null}
+<div class={"w-7 h-7 rounded-full shadow-inner " + (isMidiJack ? "bg-violet-950 border-2 border-amber-400/90" : isCtrlJackOut ? "bg-teal-950 border-2 border-teal-400/90" : "bg-neutral-800 border border-neutral-600")} />
+{ports["out"].length > 1 || isMidiJack || isCtrlJackOut || nt === 'SYS_IN' ? (<span class="jack-label">{isMidiJack ? midiOutShort : isCtrlJackOut ? port.slice(0, 5).toUpperCase() : port.toUpperCase()}</span>) : null}
 </div>
 );
 })}

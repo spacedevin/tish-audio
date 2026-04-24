@@ -3,6 +3,7 @@ import { BaseDirectory, exists, mkdir, writeTextFile, readTextFile, writeFile, r
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 window.__OTA_BRIDGE__ = {
   unzipSync,
@@ -19,4 +20,11 @@ window.__OTA_BRIDGE__ = {
     listen("native-midi-chunk", (event) => {
       handler(event.payload);
     }),
+  /** macOS overlay title bar: CSS drag regions are unreliable; use Tauri 2 `startDragging` from a pointer event. */
+  startWindowDrag: () => {
+    if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
+      return Promise.resolve();
+    }
+    return getCurrentWindow().startDragging();
+  },
 };

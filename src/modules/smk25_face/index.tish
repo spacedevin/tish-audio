@@ -1,0 +1,1675 @@
+// M-VAVE SMK-25 family — full layout mirror on the patch (not on MIDI_IN).
+// 25 keys, 8×2 pad layers, 16 encoders (A + KNOB-B), pitch strip (bend ch1) + mod (CC1). MIDI in → mirror → MIDI out (passthrough).
+// Note / CC map is heuristic (CubeSuite / firmware may differ).
+
+import { h, useEffect, useState } from "lattish"
+import { PedalChassis } from "../../moduleKit/ui/index.tish"
+import { HARDWARE_MVAVE_SMK25_FAMILY } from "../../inputDevices/midiHardwareVisuals.tish"
+import { loadMidiLayoutProfile, saveMidiLayoutProfile } from "../../midi/midiLayoutTraining.tish"
+import { isMidiDebugEnabled, midiDebugLog } from "../../midi/midiDebug.tish"
+import { createMidiLearnSession } from "../../midi/midiLearn.tish"
+
+export const smk25_face_type = "smk25_face";
+export const smk25_face_category = "UTILITY";
+
+export const smk25_face_metadata = {
+  label: "SMK-25 layout",
+  color: "from-violet-900 via-purple-950 to-neutral-950",
+  theme: "dark",
+  defaultParams: {}
+};
+
+const SMK_KEYS = 25;
+const SMK_PADS = 8;
+const SMK_KNOB_DIGITAL = 8;
+const SMK_KNOB_TOTAL = 16;
+const DEFAULT_KEYBED_ROOT = 48;
+// Knob CC numbers are NOT guessed — learn per-device via the "Cfg Knobs A" flow in the twin UI.
+// -1 at a slot means "no mapping yet" and CC events for that slot are ignored.
+const UNMAPPED_KNOB_CCS = [-1, -1, -1, -1, -1, -1, -1, -1];
+const MOD_CC = 1;
+// Optional 1-based MIDI channel lock for encoder CCs (profile). Default: accept all channels — USB composite ports often differ in channelization.
+const SMK25_DEFAULT_KNOB_MIDI_CHANNEL = 3;
+// Pitch strip: only bend on this MIDI channel (0-based) updates the twin pitch bar (default ch 1).
+const SMK25_DEFAULT_PITCH_STRIP_CHANNEL0 = 0;
+
+// Pad slot ids persisted per bank. Learned per device via the in-pedal "Configure" flow;
+// built-in defaults (Mixxx MVave-SMK-25-II mapping) cover the common case so the twin works
+// without configuration, and a user-learned map overrides them.
+const PAD_SLOT_IDS_A = ["padA1", "padA2", "padA3", "padA4", "padA5", "padA6", "padA7", "padA8"];
+const PAD_SLOT_IDS_B = ["padB1", "padB2", "padB3", "padB4", "padB5", "padB6", "padB7", "padB8"];
+const KNOB_SLOT_IDS_A = ["knobA1", "knobA2", "knobA3", "knobA4", "knobA5", "knobA6", "knobA7", "knobA8"];
+const KNOB_SLOT_IDS_B = ["knobB1", "knobB2", "knobB3", "knobB4", "knobB5", "knobB6", "knobB7", "knobB8"];
+
+// Observed on the M-VAVE SMK-25 II: 8 physical pads send two groups of 4 notes on MIDI channel 10 (wire 9).
+//   top row (pads 1-4): 40, 41, 42, 43
+//   bottom row (pads 5-8): 36, 37, 38, 39
+// PAD-B is a device-side bank switch that remaps these notes; its alternate set varies by firmware,
+// so we leave bank B empty by default and expect the user to learn it via "Cfg B".
+const BUILTIN_PAD_SLOTS_A = [
+  { note: 40, channel: 9 }, { note: 41, channel: 9 }, { note: 42, channel: 9 }, { note: 43, channel: 9 },
+  { note: 36, channel: 9 }, { note: 37, channel: 9 }, { note: 38, channel: 9 }, { note: 39, channel: 9 }
+];
+// KNOB-B layer: firmware may send high-note taps per encoder slot; pitch bend on encoder channel then updates last touched slot.
+const SMK_KNOB_B_NOTES_DEFAULT = [104, 105, 106, 107, 108, 109, 110, 111];
+// Transport (firmware): Play A#6, Stop A6, Rec B6 — remap for passthrough so downstream synths / MIDI Recorder see low “button” notes.
+const SMK_TRANSPORT_NOTES_DEFAULT = [94, 93, 95];
+const SMK_TRANSPORT_RECORDER_NOTES_DEFAULT = [36, 37, 38];
+const SMK_KNOB_LABELS_A = ["Mode", "Oct", "Latch", "Gate", "Swing", "Tempo", "Rate", "Transpose"];
+
+const cloneKeys = (keys) => {
+  const o = {};
+  const ks = Object.keys(keys);
+  let i = 0;
+  while (i < ks.length) {
+    const k = ks[i];
+    o[k] = keys[k];
+    i = i + 1;
+  }
+  return o;
+};
+
+const freshState = () => {
+  const padsA = [];
+  const padsB = [];
+  const padsAHitAt = [];
+  const padsBHitAt = [];
+  let p = 0;
+  while (p < SMK_PADS) {
+    padsA.push(0);
+    padsB.push(0);
+    padsAHitAt.push(0);
+    padsBHitAt.push(0);
+    p = p + 1;
+  }
+  const knobs = [];
+  const knobsChangedAt = [];
+  let k = 0;
+  while (k < SMK_KNOB_TOTAL) {
+    knobs.push(64);
+    knobsChangedAt.push(0);
+    k = k + 1;
+  }
+  return {
+    keys: {},
+    padsA: padsA,
+    padsB: padsB,
+    padsAHitAt: padsAHitAt,
+    padsBHitAt: padsBHitAt,
+    knobs: knobs,
+    knobsChangedAt: knobsChangedAt,
+    pitchNorm: 0.5,
+    modNorm: 0.0,
+    padBankB: false,
+    knobBankB: false,
+    lastKnobBSlot: -1
+  };
+};
+
+const knobIndexForCc = (cc, knobCcs) => {
+  if (!Array.isArray(knobCcs) || !Number.isFinite(cc) || cc < 0) {
+    return -1;
+  }
+  let i = 0;
+  while (i < knobCcs.length) {
+    const k = knobCcs[i];
+    if (Number.isFinite(k) && k >= 0 && k === cc) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return -1;
+};
+
+const smk25StrLower = (s) => (typeof s === "string" ? s.toLowerCase() : "");
+
+/** Encoder CCs are expected on one MIDI channel (default ch 3 → ev.channel === 2). */
+const isKnobEncoderMidiChannel = (ev, route) => {
+  if (!route || route.knobMidiChannelAll === true) {
+    return true;
+  }
+  const ch1 =
+    route.knobMidiChannel != null && Number.isFinite(route.knobMidiChannel)
+      ? route.knobMidiChannel
+      : SMK25_DEFAULT_KNOB_MIDI_CHANNEL;
+  const want = ch1 - 1;
+  const ec = ev.channel != null ? ev.channel : -1;
+  return ec === want;
+};
+
+/** Optional: when set via profile, also require a specific USB MIDI port name / index. */
+const isKnobEncoderSourcePort = (ev, knobPortFilter) => {
+  if (!knobPortFilter || knobPortFilter.knobSourceAllPorts === true) {
+    return true;
+  }
+  const wantIdx =
+    knobPortFilter.knobSourcePortNumber != null && Number.isFinite(knobPortFilter.knobSourcePortNumber)
+      ? knobPortFilter.knobSourcePortNumber - 1
+      : null;
+  const nameNeedle =
+    knobPortFilter.knobSourceNameIncludes != null && String(knobPortFilter.knobSourceNameIncludes).length
+      ? smk25StrLower(String(knobPortFilter.knobSourceNameIncludes))
+      : null;
+  if (wantIdx == null && !nameNeedle) {
+    return true;
+  }
+  const hasNative = ev.sourceNativeDeviceIndex != null && Number.isFinite(ev.sourceNativeDeviceIndex);
+  const hasName = ev.sourcePortName != null && String(ev.sourcePortName).length;
+  if (!hasNative && !hasName) {
+    return true;
+  }
+  if (wantIdx != null && hasNative && ev.sourceNativeDeviceIndex === wantIdx) {
+    return true;
+  }
+  if (nameNeedle && hasName && smk25StrLower(ev.sourcePortName).indexOf(nameNeedle) >= 0) {
+    return true;
+  }
+  return false;
+};
+
+const isKnobCcAllowedForTwin = (ev, route) => {
+  if (!route) {
+    return true;
+  }
+  if (!isKnobEncoderMidiChannel(ev, route)) {
+    return false;
+  }
+  return isKnobEncoderSourcePort(ev, route.knobPortFilter);
+};
+
+/** Match a (note, channel) against a learned pad-slot table. channel -1 means any. */
+const resolvePadSlotIdx = (n, ch, padSlots) => {
+  if (!Array.isArray(padSlots)) {
+    return -1;
+  }
+  const lim = padSlots.length < SMK_PADS ? padSlots.length : SMK_PADS;
+  let i = 0;
+  while (i < lim) {
+    const s = padSlots[i];
+    if (s && Number.isFinite(s.note) && s.note === n) {
+      const sc = Number.isFinite(s.channel) ? s.channel : -1;
+      if (sc < 0 || sc === ch) {
+        return i;
+      }
+    }
+    i = i + 1;
+  }
+  return -1;
+};
+
+const parsePadSlotsFromProfile = (arr) => {
+  const out = [];
+  let i = 0;
+  while (i < SMK_PADS) {
+    let item = null;
+    if (Array.isArray(arr) && i < arr.length) {
+      const it = arr[i];
+      if (it && typeof it === "object" && Number.isFinite(it.note)) {
+        item = {
+          note: it.note,
+          channel: Number.isFinite(it.channel) ? it.channel : -1
+        };
+      }
+    }
+    out.push(item);
+    i = i + 1;
+  }
+  return out;
+};
+
+const serializePadSlots = (padSlots) => {
+  const out = [];
+  let i = 0;
+  while (i < SMK_PADS) {
+    const s = padSlots && i < padSlots.length ? padSlots[i] : null;
+    if (s && Number.isFinite(s.note)) {
+      out.push({
+        note: s.note,
+        channel: Number.isFinite(s.channel) ? s.channel : -1
+      });
+    } else {
+      out.push(null);
+    }
+    i = i + 1;
+  }
+  return out;
+};
+
+const freshPadRow = () => {
+  const r = [];
+  let z = 0;
+  while (z < SMK_PADS) {
+    r.push(0);
+    z = z + 1;
+  }
+  return r;
+};
+
+const indexInIntList = (n, list) => {
+  if (!list || !list.length) {
+    return -1;
+  }
+  let i = 0;
+  while (i < list.length) {
+    if (list[i] === n) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return -1;
+};
+
+const value14ToMidi7 = (value14) => {
+  const v14 = value14 != null ? value14 : 8192;
+  return Math.min(127, Math.max(0, Math.round((v14 / 16383) * 127)));
+};
+
+const ensureKnobArray = (kn) => {
+  const o = kn && kn.slice ? kn.slice() : [];
+  while (o.length < SMK_KNOB_TOTAL) {
+    o.push(64);
+  }
+  return o;
+};
+
+const ensurePadRow = (row) => {
+  if (row && row.length === SMK_PADS) {
+    return row.slice();
+  }
+  return freshPadRow();
+};
+
+const nowMs = () => (typeof performance !== "undefined" && performance.now ? performance.now() : 0);
+
+const shortInputId = (id) => {
+  const s = String(id || "");
+  if (s.length <= 16) { return s; }
+  return s.slice(0, 14) + "..";
+};
+
+const freshKnobChangedAt = () => {
+  const a = [];
+  let i = 0;
+  while (i < SMK_KNOB_TOTAL) {
+    a.push(0);
+    i = i + 1;
+  }
+  return a;
+};
+
+/** opts: keybedRoot, knobCcs, knobCcRoute, padBankSysexKey, knobBankSysexKey, pitchStripChannel0, knobBPitchLatchChannel0, knobBNotes, knobBCcs, padSlotsA, padSlotsB */
+const applyMidiToState = (prev, ev, opts) => {
+  const keybedRoot = opts.keybedRoot;
+  const knobCcs = opts.knobCcs;
+  const knobCcRoute = opts.knobCcRoute;
+  const padBankSysexKey = opts.padBankSysexKey;
+  const knobBankSysexKey = opts.knobBankSysexKey;
+  const pitchStripCh = opts.pitchStripChannel0 != null && Number.isFinite(opts.pitchStripChannel0) ? opts.pitchStripChannel0 : SMK25_DEFAULT_PITCH_STRIP_CHANNEL0;
+  const knobPitchLatchCh =
+    opts.knobBPitchLatchChannel0 != null && Number.isFinite(opts.knobBPitchLatchChannel0) ? opts.knobBPitchLatchChannel0 : SMK25_DEFAULT_KNOB_MIDI_CHANNEL - 1;
+  const knobBNotes = opts.knobBNotes && opts.knobBNotes.length ? opts.knobBNotes : SMK_KNOB_B_NOTES_DEFAULT;
+  const knobBCcs = opts.knobBCcs && opts.knobBCcs.length >= SMK_KNOB_DIGITAL ? opts.knobBCcs : null;
+  const padSlotsA = opts.padSlotsA;
+  const padSlotsB = opts.padSlotsB;
+
+  const padASrc = prev.padsA && prev.padsA.length === SMK_PADS ? prev.padsA : prev.pads && prev.pads.length === SMK_PADS ? prev.pads : freshPadRow();
+  const padBSrc = prev.padsB && prev.padsB.length === SMK_PADS ? prev.padsB : freshPadRow();
+  const padsAHitAtSrc = prev.padsAHitAt && prev.padsAHitAt.length === SMK_PADS ? prev.padsAHitAt : freshPadRow();
+  const padsBHitAtSrc = prev.padsBHitAt && prev.padsBHitAt.length === SMK_PADS ? prev.padsBHitAt : freshPadRow();
+  const knobsChangedAtSrc = prev.knobsChangedAt && prev.knobsChangedAt.length === SMK_KNOB_TOTAL ? prev.knobsChangedAt : freshKnobChangedAt();
+
+  const next = {
+    keys: cloneKeys(prev.keys),
+    padsA: padASrc.slice(),
+    padsB: padBSrc.slice(),
+    padsAHitAt: padsAHitAtSrc.slice(),
+    padsBHitAt: padsBHitAtSrc.slice(),
+    knobs: ensureKnobArray(prev.knobs),
+    knobsChangedAt: knobsChangedAtSrc.slice(),
+    pitchNorm: prev.pitchNorm,
+    modNorm: prev.modNorm,
+    padBankB: prev.padBankB === true,
+    knobBankB: prev.knobBankB === true,
+    lastKnobBSlot: prev.lastKnobBSlot != null && Number.isFinite(prev.lastKnobBSlot) ? prev.lastKnobBSlot : -1
+  };
+
+  if (!ev || ev.kind == null) {
+    return next;
+  }
+
+  if (ev.kind === "mvaveSmk25SysexBtn") {
+    const k = ev.sysexKey != null ? ev.sysexKey : -1;
+    const v = ev.sysexValue != null ? ev.sysexValue : 0;
+    if (padBankSysexKey != null && Number.isFinite(padBankSysexKey) && k === padBankSysexKey && v >= 64) {
+      next.padBankB = !prev.padBankB;
+    }
+    if (knobBankSysexKey != null && Number.isFinite(knobBankSysexKey) && k === knobBankSysexKey && v >= 64) {
+      next.knobBankB = !prev.knobBankB;
+    }
+    return next;
+  }
+
+  if (ev.kind === "noteOn") {
+    const n = ev.note;
+    const vel = ev.velocity != null ? ev.velocity : 127;
+    const evCh = ev.channel != null ? ev.channel : -1;
+    const bSlot = indexInIntList(n, knobBNotes);
+    if (bSlot >= 0) {
+      next.lastKnobBSlot = bSlot;
+      next.knobs[SMK_KNOB_DIGITAL + bSlot] = Math.min(127, Math.max(0, vel));
+      return next;
+    }
+    const hitA = resolvePadSlotIdx(n, evCh, padSlotsA);
+    if (hitA >= 0) {
+      const a = Math.min(1, Math.max(0, vel / 127));
+      next.padsA[hitA] = a;
+      next.padsAHitAt[hitA] = nowMs();
+      next.padBankB = false;
+      return next;
+    }
+    const hitB = resolvePadSlotIdx(n, evCh, padSlotsB);
+    if (hitB >= 0) {
+      const b = Math.min(1, Math.max(0, vel / 127));
+      next.padsB[hitB] = b;
+      next.padsBHitAt[hitB] = nowMs();
+      next.padBankB = true;
+      return next;
+    }
+    if (n >= keybedRoot && n < keybedRoot + SMK_KEYS) {
+      next.keys[String(n)] = vel;
+    }
+    return next;
+  }
+
+  if (ev.kind === "noteOff") {
+    const n = ev.note;
+    const evCh = ev.channel != null ? ev.channel : -1;
+    const bSlot = indexInIntList(n, knobBNotes);
+    if (bSlot >= 0) {
+      next.knobs[SMK_KNOB_DIGITAL + bSlot] = 0;
+      return next;
+    }
+    const hitA = resolvePadSlotIdx(n, evCh, padSlotsA);
+    if (hitA >= 0) {
+      return next;
+    }
+    const hitB = resolvePadSlotIdx(n, evCh, padSlotsB);
+    if (hitB >= 0) {
+      return next;
+    }
+    if (n >= keybedRoot && n < keybedRoot + SMK_KEYS) {
+      Reflect.deleteProperty(next.keys, String(n));
+    }
+    return next;
+  }
+
+  if (ev.kind === "cc") {
+    const cc = ev.controller;
+    const v = ev.value != null ? ev.value : 0;
+    if (cc === MOD_CC) {
+      next.modNorm = Math.min(1, Math.max(0, v / 127));
+    }
+    const kiA = knobIndexForCc(cc, knobCcs);
+    if (kiA >= 0 && isKnobCcAllowedForTwin(ev, knobCcRoute)) {
+      next.knobs[kiA] = v;
+      next.knobsChangedAt[kiA] = nowMs();
+    }
+    if (knobBCcs) {
+      const kiB = knobIndexForCc(cc, knobBCcs);
+      if (kiB >= 0 && isKnobCcAllowedForTwin(ev, knobCcRoute)) {
+        next.knobs[SMK_KNOB_DIGITAL + kiB] = v;
+        next.knobsChangedAt[SMK_KNOB_DIGITAL + kiB] = nowMs();
+      }
+    }
+    return next;
+  }
+
+  if (ev.kind === "pitchBend") {
+    const ch = ev.channel != null ? ev.channel : -1;
+    if (ch === pitchStripCh) {
+      const v14 = ev.value14 != null ? ev.value14 : 8192;
+      next.pitchNorm = Math.min(1, Math.max(0, v14 / 16383));
+      return next;
+    }
+    if (knobPitchLatchCh >= 0 && ch === knobPitchLatchCh && next.lastKnobBSlot >= 0 && next.lastKnobBSlot < SMK_KNOB_DIGITAL) {
+      const v7 = value14ToMidi7(ev.value14);
+      next.knobs[SMK_KNOB_DIGITAL + next.lastKnobBSlot] = v7;
+      return next;
+    }
+    return next;
+  }
+
+  return next;
+};
+
+const copyEvHints = (base, ev) => {
+  const o = base;
+  if (ev.sourcePortName != null && String(ev.sourcePortName).length) {
+    o.sourcePortName = String(ev.sourcePortName);
+  }
+  if (ev.sourceNativeDeviceIndex != null && Number.isFinite(ev.sourceNativeDeviceIndex)) {
+    o.sourceNativeDeviceIndex = ev.sourceNativeDeviceIndex;
+  }
+  if (ev.sourceWebInputId != null && String(ev.sourceWebInputId).length) {
+    o.sourceWebInputId = String(ev.sourceWebInputId);
+  }
+  if (ev.sysexDerived === true) {
+    o.sysexDerived = true;
+  }
+  return o;
+};
+
+const transformSmkForwardMidi = (ev, transportFrom, transportTo, knobBNotes) => {
+  if (!ev || ev.kind == null) {
+    return ev;
+  }
+  if (ev.kind === "noteOn" || ev.kind === "noteOff") {
+    const n = ev.note;
+    if (indexInIntList(n, knobBNotes) >= 0) {
+      return null;
+    }
+    const ti = indexInIntList(n, transportFrom);
+    if (ti >= 0 && transportTo && transportTo[ti] != null) {
+      const o = {
+        kind: ev.kind,
+        inputId: ev.inputId,
+        channel: ev.channel,
+        note: transportTo[ti],
+        when: ev.when
+      };
+      if (ev.velocity != null) {
+        o.velocity = ev.velocity;
+      }
+      return copyEvHints(o, ev);
+    }
+  }
+  return ev;
+};
+
+export fn smk25_face_buildAudio(ctx, node) {
+  void node;
+  const inNode = ctx.createGain();
+  inNode.gain.value = 0;
+  const outNode = ctx.createGain();
+  outNode.gain.value = 0;
+  inNode.connect(outNode);
+
+  let state = freshState();
+  let forwardSink = null;
+  let controlRoutes = {};
+  let controlApply = null;
+
+  const mapMidi7ToRange = (v7, min, max) => {
+    const lo = Number(min);
+    const hi = Number(max);
+    const a = Number.isFinite(lo) ? lo : 0;
+    const b = Number.isFinite(hi) ? hi : 1;
+    const span = b - a;
+    const t = Math.min(127, Math.max(0, v7)) / 127;
+    if (!Number.isFinite(span) || span === 0) {
+      return a;
+    }
+    return a + t * span;
+  };
+
+  const emitControlForSlot = (slot1, value7) => {
+    const r = controlRoutes[String(slot1)];
+    if (!r || !r.toNodeId || !r.paramKey) {
+      return;
+    }
+    if (!controlApply || typeof controlApply !== "function") {
+      return;
+    }
+    const mapped = mapMidi7ToRange(value7, r.min, r.max);
+    controlApply(r.toNodeId, r.paramKey, mapped);
+  };
+
+  const train = loadMidiLayoutProfile(HARDWARE_MVAVE_SMK25_FAMILY);
+  let keybedRoot = DEFAULT_KEYBED_ROOT;
+  let knobCcs = UNMAPPED_KNOB_CCS.slice();
+  let knobCcRoute = {
+    knobMidiChannel: SMK25_DEFAULT_KNOB_MIDI_CHANNEL,
+    knobMidiChannelAll: true,
+    knobPortFilter: null
+  };
+  if (train && typeof train === "object") {
+    if (Number.isFinite(train.keybedRoot)) {
+      keybedRoot = train.keybedRoot;
+    }
+    if (Array.isArray(train.knobCcs) && train.knobCcs.length >= SMK_KNOB_DIGITAL) {
+      let ki = 0;
+      while (ki < SMK_KNOB_DIGITAL) {
+        const v = train.knobCcs[ki];
+        knobCcs[ki] = Number.isFinite(v) ? v : -1;
+        ki = ki + 1;
+      }
+    }
+    if (Number.isFinite(train.knobMidiChannel)) {
+      knobCcRoute.knobMidiChannel = train.knobMidiChannel;
+      knobCcRoute.knobMidiChannelAll = false;
+    }
+    if (train.knobMidiChannelAll === true) {
+      knobCcRoute.knobMidiChannelAll = true;
+    }
+    if (train.knobMidiChannelAll === false && !Number.isFinite(train.knobMidiChannel)) {
+      knobCcRoute.knobMidiChannelAll = false;
+    }
+    if (train.knobSourceAllPorts === true) {
+      knobCcRoute.knobPortFilter = null;
+    } else if (
+      Number.isFinite(train.knobSourcePortNumber) ||
+      (train.knobSourceNameIncludes != null && String(train.knobSourceNameIncludes).length)
+    ) {
+      knobCcRoute.knobPortFilter = {
+        knobSourcePortNumber: Number.isFinite(train.knobSourcePortNumber) ? train.knobSourcePortNumber : 3,
+        knobSourceNameIncludes:
+          train.knobSourceNameIncludes != null && String(train.knobSourceNameIncludes).length
+            ? String(train.knobSourceNameIncludes)
+            : "port 3"
+      };
+    }
+  }
+
+  let padBankSysexKey = null;
+  if (train && typeof train === "object" && Number.isFinite(train.padBankSysexData4)) {
+    padBankSysexKey = train.padBankSysexData4;
+  }
+
+  let knobBankSysexKey = null;
+  if (train && typeof train === "object" && Number.isFinite(train.knobBankBSysexData4)) {
+    knobBankSysexKey = train.knobBankBSysexData4;
+  }
+
+  let pitchStripChannel0 = SMK25_DEFAULT_PITCH_STRIP_CHANNEL0;
+  if (train && typeof train === "object" && Number.isFinite(train.pitchStripMidiChannel)) {
+    pitchStripChannel0 = train.pitchStripMidiChannel - 1;
+  }
+
+  let knobBPitchLatchChannel0 = SMK25_DEFAULT_KNOB_MIDI_CHANNEL - 1;
+  if (train && typeof train === "object" && Number.isFinite(train.knobBPitchMidiChannel)) {
+    knobBPitchLatchChannel0 = train.knobBPitchMidiChannel - 1;
+  }
+  if (train && train.knobBPitchLatchOff === true) {
+    knobBPitchLatchChannel0 = -1;
+  }
+
+  let knobBNotesOpt = SMK_KNOB_B_NOTES_DEFAULT;
+  if (train && Array.isArray(train.knobBNotes) && train.knobBNotes.length >= SMK_KNOB_DIGITAL) {
+    knobBNotesOpt = train.knobBNotes.slice(0, SMK_KNOB_DIGITAL);
+  }
+
+  let knobBCcsOpt = null;
+  if (train && Array.isArray(train.knobBCcs) && train.knobBCcs.length >= SMK_KNOB_DIGITAL) {
+    knobBCcsOpt = train.knobBCcs.slice(0, SMK_KNOB_DIGITAL);
+  }
+
+  let transportFromNotes = SMK_TRANSPORT_NOTES_DEFAULT;
+  let transportToNotes = SMK_TRANSPORT_RECORDER_NOTES_DEFAULT;
+  if (train && Array.isArray(train.smkTransportNotes) && train.smkTransportNotes.length >= 3) {
+    transportFromNotes = train.smkTransportNotes.slice(0, 3);
+  }
+  if (train && Array.isArray(train.smkTransportRecorderNotes) && train.smkTransportRecorderNotes.length >= 3) {
+    transportToNotes = train.smkTransportRecorderNotes.slice(0, 3);
+  }
+
+  const savedPadVersion = train && Number.isFinite(train.smkPadSlotsVersion) ? train.smkPadSlotsVersion : 0;
+  // v2 = dropped the Mixxx-style bank-B seed (36..47) and moved 36-39 to bank-A bottom row.
+  const padSlotsA = savedPadVersion >= 2 ? parsePadSlotsFromProfile(train && train.padSlotsA) : parsePadSlotsFromProfile(null);
+  const padSlotsB = savedPadVersion >= 2 ? parsePadSlotsFromProfile(train && train.padSlotsB) : parsePadSlotsFromProfile(null);
+
+  const seedPadSlotsIfAllEmpty = (target, defaults) => {
+    if (!Array.isArray(target) || !Array.isArray(defaults)) {
+      return;
+    }
+    let allEmpty = true;
+    let i = 0;
+    while (i < target.length) {
+      if (target[i] && Number.isFinite(target[i].note)) {
+        allEmpty = false;
+        break;
+      }
+      i = i + 1;
+    }
+    if (!allEmpty) {
+      return;
+    }
+    let j = 0;
+    while (j < target.length && j < defaults.length) {
+      const d = defaults[j];
+      if (d && Number.isFinite(d.note)) {
+        target[j] = {
+          note: d.note,
+          channel: Number.isFinite(d.channel) ? d.channel : -1
+        };
+      }
+      j = j + 1;
+    }
+  };
+
+  seedPadSlotsIfAllEmpty(padSlotsA, BUILTIN_PAD_SLOTS_A);
+
+  const smkMidiOpts = {
+    keybedRoot: keybedRoot,
+    knobCcs: knobCcs,
+    knobCcRoute: knobCcRoute,
+    padBankSysexKey: padBankSysexKey,
+    knobBankSysexKey: knobBankSysexKey,
+    pitchStripChannel0: pitchStripChannel0,
+    knobBPitchLatchChannel0: knobBPitchLatchChannel0,
+    knobBNotes: knobBNotesOpt,
+    knobBCcs: knobBCcsOpt,
+    padSlotsA: padSlotsA,
+    padSlotsB: padSlotsB
+  };
+
+  let learnSession = null;
+  let learnBank = null;
+  let learnKind = null;
+
+  const mergeProfilePatch = (patch) => {
+    const existing = loadMidiLayoutProfile(HARDWARE_MVAVE_SMK25_FAMILY) || {};
+    const merged = {};
+    const ks = Object.keys(existing);
+    let i = 0;
+    while (i < ks.length) {
+      merged[ks[i]] = existing[ks[i]];
+      i = i + 1;
+    }
+    const pks = Object.keys(patch);
+    let j = 0;
+    while (j < pks.length) {
+      merged[pks[j]] = patch[pks[j]];
+      j = j + 1;
+    }
+    saveMidiLayoutProfile(HARDWARE_MVAVE_SMK25_FAMILY, merged);
+  };
+
+  const persistPadMaps = () => {
+    mergeProfilePatch({
+      smkPadSlotsVersion: 2,
+      padSlotsA: serializePadSlots(padSlotsA),
+      padSlotsB: serializePadSlots(padSlotsB)
+    });
+  };
+
+  if (savedPadVersion < 2) {
+    persistPadMaps();
+  }
+
+  const persistKnobMaps = () => {
+    mergeProfilePatch({
+      knobCcs: knobCcs.slice(0, SMK_KNOB_DIGITAL),
+      knobBCcs: knobBCcsOpt ? knobBCcsOpt.slice(0, SMK_KNOB_DIGITAL) : null
+    });
+  };
+
+  const writeCapturedPadsIntoBank = (captured, slotIds, target) => {
+    let j = 0;
+    while (j < slotIds.length) {
+      const snap = captured[slotIds[j]];
+      if (snap && Number.isFinite(snap.note)) {
+        target[j] = {
+          note: snap.note,
+          channel: Number.isFinite(snap.channel) ? snap.channel : -1
+        };
+      }
+      j = j + 1;
+    }
+  };
+
+  const writeCapturedKnobCcsInto = (captured, slotIds, target) => {
+    let j = 0;
+    while (j < slotIds.length && j < SMK_KNOB_DIGITAL) {
+      const snap = captured[slotIds[j]];
+      if (snap && Number.isFinite(snap.controller)) {
+        target[j] = snap.controller;
+      }
+      j = j + 1;
+    }
+  };
+
+  let rxCounts = { noteOn: 0, noteOff: 0, cc: 0, pitchBend: 0, sysex: 0, other: 0 };
+  let rxByPort = {
+    "1": { noteOn: 0, cc: 0, pitchBend: 0, sysex: 0 },
+    "2": { noteOn: 0, cc: 0, pitchBend: 0, sysex: 0 },
+    "3": { noteOn: 0, cc: 0, pitchBend: 0, sysex: 0 }
+  };
+  let lastCcInfo = { port: 0, ch1: 0, cc: 0, val: 0 };
+  let lastNoteInfo = { port: 0, ch1: 0, note: 0, vel: 0 };
+
+  const EVENT_LOG_CAP = 80;
+  let eventLog = [];
+  let eventLogSeq = 0;
+  let eventLogConsole = true;
+
+  const bumpPortCount = (portKey, kindKey) => {
+    const bucket = rxByPort[portKey];
+    if (!bucket) {
+      return;
+    }
+    if (kindKey === "noteOn") { bucket.noteOn = bucket.noteOn + 1; return; }
+    if (kindKey === "cc") { bucket.cc = bucket.cc + 1; return; }
+    if (kindKey === "pitchBend") { bucket.pitchBend = bucket.pitchBend + 1; return; }
+    if (kindKey === "sysex") { bucket.sysex = bucket.sysex + 1; return; }
+  };
+
+  /** Returns a string describing the UI component this event maps to. */
+  const classifyEvent = (ev, padBankBState, knobBankBState) => {
+    if (!ev || ev.kind == null) { return "unknown"; }
+    const ch0 = ev.channel != null ? ev.channel : -1;
+    if (ev.kind === "mvaveSmk25SysexBtn") {
+      const k = ev.sysexKey != null ? ev.sysexKey : -1;
+      if (padBankSysexKey != null && k === padBankSysexKey) { return "SYSEX -> PAD-B toggle (key=" + String(k) + ")"; }
+      if (knobBankSysexKey != null && k === knobBankSysexKey) { return "SYSEX -> KNOB-B toggle (key=" + String(k) + ")"; }
+      return "SYSEX button (key=" + String(k) + " val=" + String(ev.sysexValue) + ")";
+    }
+    if (ev.kind === "pitchBend") {
+      if (ch0 === pitchStripChannel0) { return "PITCH strip"; }
+      if (knobBPitchLatchChannel0 >= 0 && ch0 === knobBPitchLatchChannel0) { return "KNOB-B pitch latch"; }
+      return "pitchBend (ch=" + String(ch0 + 1) + " ignored)";
+    }
+    if (ev.kind === "cc") {
+      const cc = ev.controller != null ? ev.controller : -1;
+      if (cc === MOD_CC) { return "MOD strip (CC 1)"; }
+      const kiA = knobIndexForCc(cc, knobCcs);
+      if (kiA >= 0) { return "KNOB-A slot " + String(kiA) + " (" + SMK_KNOB_LABELS_A[kiA] + ")"; }
+      if (knobBCcsOpt) {
+        const kiB = knobIndexForCc(cc, knobBCcsOpt);
+        if (kiB >= 0) { return "KNOB-B slot " + String(kiB) + " (" + SMK_KNOB_LABELS_A[kiB] + ")"; }
+      }
+      return "CC " + String(cc) + " unmapped";
+    }
+    if (ev.kind === "noteOn" || ev.kind === "noteOff") {
+      const n = ev.note;
+      const bSlot = indexInIntList(n, knobBNotesOpt);
+      if (bSlot >= 0) { return "KNOB-B tap slot " + String(bSlot); }
+      const hitA = resolvePadSlotIdx(n, ch0, padSlotsA);
+      if (hitA >= 0) { return "PAD-A slot " + String(hitA) + " (Pad " + String(hitA + 1) + ")"; }
+      const hitB = resolvePadSlotIdx(n, ch0, padSlotsB);
+      if (hitB >= 0) { return "PAD-B slot " + String(hitB) + " (Pad " + String(hitB + 1) + ")"; }
+      if (n >= keybedRoot && n < keybedRoot + SMK_KEYS) {
+        const idx = n - keybedRoot;
+        return "KEYBED key " + String(idx + 1) + " (note " + String(n) + ")";
+      }
+      if (Array.isArray(transportFromNotes) && indexInIntList(n, transportFromNotes) >= 0) {
+        return "TRANSPORT button (note " + String(n) + ")";
+      }
+      return "note " + String(n) + " unmapped";
+    }
+    return ev.kind;
+  };
+
+  const recordEvent = (ev, smkInPort) => {
+    const ek = ev.kind != null ? ev.kind : "?";
+    const target = classifyEvent(ev, state.padBankB === true, state.knobBankB === true);
+    let detail = "";
+    if (ek === "noteOn" || ek === "noteOff") {
+      detail = "note=" + String(ev.note) + " vel=" + String(ev.velocity != null ? ev.velocity : 0);
+    } else if (ek === "cc") {
+      detail = "cc=" + String(ev.controller) + " val=" + String(ev.value);
+    } else if (ek === "pitchBend") {
+      detail = "value14=" + String(ev.value14);
+    } else if (ek === "mvaveSmk25SysexBtn") {
+      detail = "key=" + String(ev.sysexKey) + " val=" + String(ev.sysexValue);
+    }
+    const entry = {
+      seq: eventLogSeq,
+      t: nowMs(),
+      port: Number.isFinite(smkInPort) ? smkInPort : 0,
+      inputId: ev.inputId != null ? String(ev.inputId) : "",
+      kind: ek,
+      ch1: (ev.channel != null ? ev.channel : 0) + 1,
+      detail: detail,
+      target: target,
+      duringLearn: !!(learnSession && learnSession.isActive()),
+      learnKind: learnSession && learnSession.isActive() ? learnKind : null
+    };
+    eventLogSeq = eventLogSeq + 1;
+    eventLog.push(entry);
+    if (eventLog.length > EVENT_LOG_CAP) {
+      eventLog = eventLog.slice(eventLog.length - EVENT_LOG_CAP);
+    }
+    if (eventLogConsole && (ek === "noteOn" || ek === "cc" || ek === "pitchBend" || ek === "mvaveSmk25SysexBtn")) {
+      console.log(
+        "[smk25_face] #" + String(entry.seq)
+          + " p" + String(entry.port)
+          + " " + shortInputId(entry.inputId)
+          + " " + ek
+          + " ch" + String(entry.ch1)
+          + " " + detail
+          + " -> " + target
+          + (entry.duringLearn ? " [LEARN-" + String(entry.learnKind) + "]" : "")
+      );
+    }
+  };
+
+  const processMidiEvent = (ev, ctx2, smkInPort) => {
+    if (!ev || !ctx2) {
+      return;
+    }
+    if (smkInPort != null && Number.isFinite(smkInPort)) {
+      ev.smkMidiInPort = smkInPort;
+    }
+    const ek = ev.kind;
+    const portKey = Number.isFinite(smkInPort) ? String(smkInPort) : null;
+    if (ek === "noteOn") {
+      rxCounts.noteOn = rxCounts.noteOn + 1;
+      if (portKey) { bumpPortCount(portKey, "noteOn"); }
+      lastNoteInfo = {
+        port: Number.isFinite(smkInPort) ? smkInPort : 0,
+        ch1: (ev.channel != null ? ev.channel : 0) + 1,
+        note: ev.note != null ? ev.note : 0,
+        vel: ev.velocity != null ? ev.velocity : 0
+      };
+    } else if (ek === "noteOff") {
+      rxCounts.noteOff = rxCounts.noteOff + 1;
+    } else if (ek === "cc") {
+      rxCounts.cc = rxCounts.cc + 1;
+      if (portKey) { bumpPortCount(portKey, "cc"); }
+      lastCcInfo = {
+        port: Number.isFinite(smkInPort) ? smkInPort : 0,
+        ch1: (ev.channel != null ? ev.channel : 0) + 1,
+        cc: ev.controller != null ? ev.controller : 0,
+        val: ev.value != null ? ev.value : 0
+      };
+    } else if (ek === "pitchBend") {
+      rxCounts.pitchBend = rxCounts.pitchBend + 1;
+      if (portKey) { bumpPortCount(portKey, "pitchBend"); }
+    } else if (ek === "mvaveSmk25SysexBtn") {
+      rxCounts.sysex = rxCounts.sysex + 1;
+      if (portKey) { bumpPortCount(portKey, "sysex"); }
+    } else {
+      rxCounts.other = rxCounts.other + 1;
+    }
+    recordEvent(ev, smkInPort);
+    if (learnSession && learnSession.isActive()) {
+      if (learnKind === "pad" && ev.kind === "noteOn") {
+        learnSession.capture(ev);
+      } else if (learnKind === "knob" && ev.kind === "cc") {
+        learnSession.capture(ev);
+      }
+      return;
+    }
+    if (isMidiDebugEnabled() && ev.kind === "mvaveSmk25SysexBtn" && smkDbgSysexLeft > 0) {
+      smkDbgSysexLeft = smkDbgSysexLeft - 1;
+      midiDebugLog("smk25_face sysex btn", {
+        key: ev.sysexKey,
+        value: ev.sysexValue,
+        padBankSysexKeyConfigured: padBankSysexKey,
+        knobBankSysexKeyConfigured: knobBankSysexKey,
+        padBankBAfter: state.padBankB === true,
+        knobBankBAfter: state.knobBankB === true,
+        smkInPort: smkInPort
+      });
+    }
+    if (isMidiDebugEnabled() && ev.kind === "cc" && smkDbgCcLeft > 0) {
+      smkDbgCcLeft = smkDbgCcLeft - 1;
+      const cc0 = ev.controller != null ? ev.controller : -1;
+      const ki0 = knobIndexForCc(cc0, knobCcs);
+      const twinKnob = ki0 >= 0 && isKnobCcAllowedForTwin(ev, knobCcRoute);
+      midiDebugLog("smk25_face cc", {
+        ch: ev.channel,
+        cc: cc0,
+        val: ev.value,
+        knobIdx: ki0,
+        twinKnobCcAccepted: twinKnob,
+        sysexDerived: ev.sysexDerived === true,
+        routeAllCh: knobCcRoute.knobMidiChannelAll,
+        routeCh1: knobCcRoute.knobMidiChannel,
+        hasPortFilter: knobCcRoute.knobPortFilter != null,
+        sourcePortName: ev.sourcePortName,
+        sourceNativeDeviceIndex: ev.sourceNativeDeviceIndex,
+        smkInPort: smkInPort
+      });
+    }
+    if (isMidiDebugEnabled() && ev.kind === "pitchBend" && smkDbgPitchLeft > 0) {
+      smkDbgPitchLeft = smkDbgPitchLeft - 1;
+      midiDebugLog("smk25_face pitchBend", {
+        ch: ev.channel,
+        value14: ev.value14,
+        pitchStripCh: pitchStripChannel0,
+        knobLatchCh: knobBPitchLatchChannel0,
+        smkInPort: smkInPort
+      });
+    }
+    const prevKnobs = state.knobs.slice();
+    state = applyMidiToState(state, ev, smkMidiOpts);
+    let si = 0;
+    while (si < SMK_KNOB_TOTAL) {
+      if (state.knobs[si] !== prevKnobs[si]) {
+        emitControlForSlot(si + 1, state.knobs[si]);
+      }
+      si = si + 1;
+    }
+    const fwd = transformSmkForwardMidi(ev, transportFromNotes, transportToNotes, knobBNotesOpt);
+    if (forwardSink && typeof forwardSink.handleEvent === "function" && fwd) {
+      forwardSink.handleEvent(fwd, ctx2);
+    }
+  };
+
+  const midiSink = {
+    installControlRoutes: (routes, applyFn) => {
+      controlRoutes = routes && typeof routes === "object" ? routes : {};
+      controlApply = applyFn && typeof applyFn === "function" ? applyFn : null;
+    },
+    setMidiForward: (sink) => {
+      forwardSink = sink && typeof sink.handleEvent === "function" ? sink : null;
+    },
+    getTwinVisual: () => {
+      return {
+        keys: cloneKeys(state.keys),
+        padsA: ensurePadRow(state.padsA),
+        padsB: ensurePadRow(state.padsB),
+        padsAHitAt: state.padsAHitAt ? state.padsAHitAt.slice() : freshPadRow(),
+        padsBHitAt: state.padsBHitAt ? state.padsBHitAt.slice() : freshPadRow(),
+        knobs: ensureKnobArray(state.knobs),
+        knobsChangedAt: state.knobsChangedAt ? state.knobsChangedAt.slice() : freshKnobChangedAt(),
+        nowMs: nowMs(),
+        pitchNorm: state.pitchNorm,
+        modNorm: state.modNorm,
+        padBankB: state.padBankB === true,
+        knobBankB: state.knobBankB === true,
+        rxCounts: {
+          noteOn: rxCounts.noteOn,
+          noteOff: rxCounts.noteOff,
+          cc: rxCounts.cc,
+          pitchBend: rxCounts.pitchBend,
+          sysex: rxCounts.sysex,
+          other: rxCounts.other
+        },
+        rxByPort: {
+          "1": { noteOn: rxByPort["1"].noteOn, cc: rxByPort["1"].cc, pitchBend: rxByPort["1"].pitchBend, sysex: rxByPort["1"].sysex },
+          "2": { noteOn: rxByPort["2"].noteOn, cc: rxByPort["2"].cc, pitchBend: rxByPort["2"].pitchBend, sysex: rxByPort["2"].sysex },
+          "3": { noteOn: rxByPort["3"].noteOn, cc: rxByPort["3"].cc, pitchBend: rxByPort["3"].pitchBend, sysex: rxByPort["3"].sysex }
+        },
+        lastCc: { port: lastCcInfo.port, ch1: lastCcInfo.ch1, cc: lastCcInfo.cc, val: lastCcInfo.val },
+        lastNote: { port: lastNoteInfo.port, ch1: lastNoteInfo.ch1, note: lastNoteInfo.note, vel: lastNoteInfo.vel }
+      };
+    },
+    getPadConfigState: () => {
+      return {
+        learning: !!(learnSession && learnSession.isActive() && learnKind === "pad"),
+        learnBank: learnSession && learnSession.isActive() && learnKind === "pad" ? learnBank : null,
+        learnCursor: learnSession && learnSession.isActive() && learnKind === "pad" ? learnSession.getCursor() : 0,
+        learnTotal: learnSession && learnSession.isActive() && learnKind === "pad" ? learnSession.getTotal() : 0,
+        padSlotsA: serializePadSlots(padSlotsA),
+        padSlotsB: serializePadSlots(padSlotsB)
+      };
+    },
+    getKnobConfigState: () => {
+      const hasBCcs = !!(knobBCcsOpt && knobBCcsOpt.length >= SMK_KNOB_DIGITAL);
+      return {
+        learning: !!(learnSession && learnSession.isActive() && learnKind === "knob"),
+        learnBank: learnSession && learnSession.isActive() && learnKind === "knob" ? learnBank : null,
+        learnCursor: learnSession && learnSession.isActive() && learnKind === "knob" ? learnSession.getCursor() : 0,
+        learnTotal: learnSession && learnSession.isActive() && learnKind === "knob" ? learnSession.getTotal() : 0,
+        knobCcsA: knobCcs.slice(0, SMK_KNOB_DIGITAL),
+        knobCcsB: hasBCcs ? knobBCcsOpt.slice(0, SMK_KNOB_DIGITAL) : [null, null, null, null, null, null, null, null]
+      };
+    },
+    beginPadLearn: (bank) => {
+      if (learnSession && learnSession.isActive()) {
+        learnSession.cancel();
+      }
+      const bankKey = bank === "B" ? "B" : "A";
+      const slotIds = bankKey === "B" ? PAD_SLOT_IDS_B : PAD_SLOT_IDS_A;
+      const target = bankKey === "B" ? padSlotsB : padSlotsA;
+      learnBank = bankKey;
+      learnKind = "pad";
+      learnSession = createMidiLearnSession({
+        slotIds: slotIds,
+        captureKinds: ["noteOn"],
+        dedupKeyOf: (ev) => "note:" + String(ev.note) + ":ch:" + String(ev.channel),
+        onComplete: (captured) => {
+          writeCapturedPadsIntoBank(captured, slotIds, target);
+          persistPadMaps();
+          learnSession = null;
+          learnBank = null;
+          learnKind = null;
+        },
+        onCancel: () => {
+          learnSession = null;
+          learnBank = null;
+          learnKind = null;
+        }
+      });
+    },
+    beginKnobLearn: (bank) => {
+      if (learnSession && learnSession.isActive()) {
+        learnSession.cancel();
+      }
+      const bankKey = bank === "B" ? "B" : "A";
+      const slotIds = bankKey === "B" ? KNOB_SLOT_IDS_B : KNOB_SLOT_IDS_A;
+      if (bankKey === "B" && !knobBCcsOpt) {
+        knobBCcsOpt = [-1, -1, -1, -1, -1, -1, -1, -1];
+      }
+      const target = bankKey === "B" ? knobBCcsOpt : knobCcs;
+      learnBank = bankKey;
+      learnKind = "knob";
+      learnSession = createMidiLearnSession({
+        slotIds: slotIds,
+        captureKinds: ["cc"],
+        dedupKeyOf: (ev) => "cc:" + String(ev.controller) + ":ch:" + String(ev.channel),
+        onComplete: (captured) => {
+          writeCapturedKnobCcsInto(captured, slotIds, target);
+          persistKnobMaps();
+          learnSession = null;
+          learnBank = null;
+          learnKind = null;
+        },
+        onCancel: () => {
+          learnSession = null;
+          learnBank = null;
+          learnKind = null;
+        }
+      });
+    },
+    cancelPadLearn: () => {
+      if (learnSession) {
+        learnSession.cancel();
+      }
+      learnSession = null;
+      learnBank = null;
+      learnKind = null;
+    },
+    cancelKnobLearn: () => {
+      if (learnSession) {
+        learnSession.cancel();
+      }
+      learnSession = null;
+      learnBank = null;
+      learnKind = null;
+    },
+    skipPadLearnSlot: () => {
+      if (learnSession && learnSession.isActive()) {
+        learnSession.skip();
+      }
+    },
+    skipKnobLearnSlot: () => {
+      if (learnSession && learnSession.isActive()) {
+        learnSession.skip();
+      }
+    },
+    resetPadMap: (bank) => {
+      const bankKey = bank === "B" ? "B" : bank === "A" ? "A" : "ALL";
+      let i = 0;
+      while (i < SMK_PADS) {
+        if (bankKey === "A" || bankKey === "ALL") {
+          padSlotsA[i] = null;
+        }
+        if (bankKey === "B" || bankKey === "ALL") {
+          padSlotsB[i] = null;
+        }
+        i = i + 1;
+      }
+      persistPadMaps();
+    },
+    getMidiLog: (limit) => {
+      const lim = Number.isFinite(limit) && limit > 0 ? limit : EVENT_LOG_CAP;
+      const src = eventLog.length > lim ? eventLog.slice(eventLog.length - lim) : eventLog.slice();
+      return src;
+    },
+    clearMidiLog: () => {
+      eventLog = [];
+      eventLogSeq = 0;
+    },
+    setMidiLogConsole: (enabled) => {
+      eventLogConsole = enabled === true;
+    },
+    resetKnobMap: (bank) => {
+      const bankKey = bank === "B" ? "B" : bank === "A" ? "A" : "ALL";
+      let i = 0;
+      while (i < SMK_KNOB_DIGITAL) {
+        if (bankKey === "A" || bankKey === "ALL") {
+          knobCcs[i] = -1;
+        }
+        if ((bankKey === "B" || bankKey === "ALL") && knobBCcsOpt) {
+          knobBCcsOpt[i] = -1;
+        }
+        i = i + 1;
+      }
+      persistKnobMaps();
+    },
+    handleEvent: (ev, ctx2) => {
+      processMidiEvent(ev, ctx2, null);
+    },
+    dispose: () => {
+      forwardSink = null;
+      state = freshState();
+      controlRoutes = {};
+      controlApply = null;
+      if (learnSession) {
+        learnSession.cancel();
+      }
+      learnSession = null;
+      learnBank = null;
+      learnKind = null;
+    }
+  };
+
+  const smkMidiInbound = {
+    midi1: { handleEvent: (ev, ctx2) => processMidiEvent(ev, ctx2, 1) },
+    midi2: { handleEvent: (ev, ctx2) => processMidiEvent(ev, ctx2, 2) },
+    midi3: { handleEvent: (ev, ctx2) => processMidiEvent(ev, ctx2, 3) }
+  };
+
+  return {
+    "in": inNode,
+    "out": outNode,
+    lfo: null,
+    nodeAnalyser: null,
+    inPorts: null,
+    outPorts: null,
+    analysers: {},
+    nodeParamSync: null,
+    smartGateRuntime: null,
+    midiSink: midiSink,
+    smkMidiInbound: smkMidiInbound
+  };
+}
+
+const PANEL_W = 720;
+const PANEL_H = 560;
+
+const BLACK_KEY_OFFSETS = [1, 3, 6, 8, 10];
+
+const isBlackKeyNote = (n) => {
+  const off = ((n % 12) + 12) % 12;
+  let i = 0;
+  while (i < BLACK_KEY_OFFSETS.length) {
+    if (BLACK_KEY_OFFSETS[i] === off) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+};
+
+const countWhitesBefore = (localIdx, root) => {
+  let c = 0;
+  let i = 0;
+  while (i < localIdx) {
+    if (!isBlackKeyNote(root + i)) {
+      c = c + 1;
+    }
+    i = i + 1;
+  }
+  return c;
+};
+
+export fn smk25_face_View(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const audioDataMap = props.audioDataMap;
+  const meterSync = props.meterSync;
+
+  let [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setTick((t) => t + 1);
+    }, 50);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, []);
+
+  const box = audioDataMap && audioDataMap[node.id];
+  const sink = box && box.midiSink;
+  let vis = freshState();
+  if (sink && typeof sink.getTwinVisual === "function") {
+    vis = sink.getTwinVisual();
+  }
+  const padCfg = sink && typeof sink.getPadConfigState === "function"
+    ? sink.getPadConfigState()
+    : { learning: false, learnBank: null, learnCursor: 0, learnTotal: 0, padSlotsA: [], padSlotsB: [] };
+  const knobCfg = sink && typeof sink.getKnobConfigState === "function"
+    ? sink.getKnobConfigState()
+    : { learning: false, learnBank: null, learnCursor: 0, learnTotal: 0, knobCcsA: [], knobCcsB: [] };
+  const midiLog = sink && typeof sink.getMidiLog === "function" ? sink.getMidiLog(40) : [];
+  let [showLog, setShowLog] = useState(true);
+  let [consoleOn, setConsoleOn] = useState(true);
+  void tick;
+  void meterSync;
+
+  const countConfigured = (arr) => {
+    if (!Array.isArray(arr)) { return 0; }
+    let c = 0;
+    let i = 0;
+    while (i < arr.length) {
+      const s = arr[i];
+      if (s && Number.isFinite(s.note)) { c = c + 1; }
+      i = i + 1;
+    }
+    return c;
+  };
+  const configuredA = countConfigured(padCfg.padSlotsA);
+  const configuredB = countConfigured(padCfg.padSlotsB);
+  const learnActive = padCfg.learning === true;
+  const learnBankLabel = padCfg.learnBank === "B" ? "PAD-B" : "PAD-A";
+  const learnPadNum = padCfg.learnCursor + 1;
+  const learnTotal = padCfg.learnTotal || SMK_PADS;
+
+  const countKnobSlots = (arr) => {
+    if (!Array.isArray(arr)) { return 0; }
+    let c = 0;
+    let i = 0;
+    while (i < arr.length) {
+      const x = arr[i];
+      if (Number.isFinite(x) && x >= 0) { c = c + 1; }
+      i = i + 1;
+    }
+    return c;
+  };
+  const knobCfgCountA = countKnobSlots(knobCfg.knobCcsA);
+  const knobCfgCountB = countKnobSlots(knobCfg.knobCcsB);
+  const knobLearning = knobCfg.learning === true;
+  const knobLearnNum = knobCfg.learnCursor + 1;
+  const knobLearnTotal = knobCfg.learnTotal || SMK_KNOB_DIGITAL;
+  const knobLearnBankLabel = knobCfg.learnBank === "B" ? "KNOB-B" : "KNOB-A";
+
+  const kbLo = DEFAULT_KEYBED_ROOT;
+  const whiteKeyEls = [];
+  const blackKeyEls = [];
+  let whiteCount = 0;
+  let ki = 0;
+  while (ki < SMK_KEYS) {
+    if (!isBlackKeyNote(kbLo + ki)) {
+      whiteCount = whiteCount + 1;
+    }
+    ki = ki + 1;
+  }
+  const whiteWidthPct = whiteCount > 0 ? 100 / whiteCount : 0;
+  const blackWidthPct = whiteWidthPct * 0.58;
+
+  let kw = 0;
+  let wi = 0;
+  while (kw < SMK_KEYS) {
+    const n = kbLo + kw;
+    if (!isBlackKeyNote(n)) {
+      const on = vis.keys[String(n)] != null;
+      const vel = on ? vis.keys[String(n)] : 0;
+      const glow = on ? 0.35 + (vel / 127) * 0.65 : 0;
+      const litStyle = on
+        ? { background: "linear-gradient(to bottom, #c4b5fd, #8b5cf6)", boxShadow: "0 0 10px rgba(167,139,250," + String(glow) + ")" }
+        : {};
+      whiteKeyEls.push(
+        <div
+          key={"w" + String(wi)}
+          class={"relative h-full border border-neutral-400 rounded-b-md " + (on ? "" : "bg-gradient-to-b from-neutral-50 to-neutral-200")}
+          style={{ flex: "1 1 0", minWidth: "0", ...litStyle }}
+        />
+      );
+      wi = wi + 1;
+    }
+    kw = kw + 1;
+  }
+
+  let kb = 0;
+  while (kb < SMK_KEYS) {
+    const n = kbLo + kb;
+    if (isBlackKeyNote(n)) {
+      const whitesBefore = countWhitesBefore(kb, kbLo);
+      const leftPct = whitesBefore * whiteWidthPct - blackWidthPct / 2;
+      const on = vis.keys[String(n)] != null;
+      const vel = on ? vis.keys[String(n)] : 0;
+      const glow = on ? 0.35 + (vel / 127) * 0.65 : 0;
+      const litStyle = on
+        ? { background: "linear-gradient(to bottom, #a78bfa, #6d28d9)", boxShadow: "0 0 8px rgba(167,139,250," + String(glow) + ")" }
+        : {};
+      blackKeyEls.push(
+        <div
+          key={"b" + String(kb)}
+          class={"absolute top-0 h-[62%] rounded-b-md z-10 border border-black " + (on ? "" : "bg-gradient-to-b from-neutral-900 to-black")}
+          style={{
+            left: String(leftPct) + "%",
+            width: String(blackWidthPct) + "%",
+            ...litStyle
+          }}
+        />
+      );
+    }
+    kb = kb + 1;
+  }
+
+  const padEls = [];
+  const padBActive = vis.padBankB === true;
+  const activeSlotsCount = padBActive ? configuredB : configuredA;
+  const nowView = vis.nowMs || (typeof performance !== "undefined" && performance.now ? performance.now() : 0);
+  const FLASH_MS = 160;
+  const FADE_MS = 340;
+  let pi = 0;
+  while (pi < SMK_PADS) {
+    const pa = vis.padsA && vis.padsA[pi] != null ? vis.padsA[pi] : vis.pads && vis.pads[pi] != null ? vis.pads[pi] : 0;
+    const pb = vis.padsB && vis.padsB[pi] != null ? vis.padsB[pi] : 0;
+    const hitA = vis.padsAHitAt && vis.padsAHitAt[pi] != null ? vis.padsAHitAt[pi] : 0;
+    const hitB = vis.padsBHitAt && vis.padsBHitAt[pi] != null ? vis.padsBHitAt[pi] : 0;
+    const rawLevel = padBActive ? pb : pa;
+    const hitAt = padBActive ? hitB : hitA;
+    let visualLevel = 0;
+    if (rawLevel > 0 && hitAt > 0) {
+      const age = nowView - hitAt;
+      if (age < FLASH_MS) {
+        visualLevel = rawLevel;
+      } else if (age < FLASH_MS + FADE_MS) {
+        visualLevel = rawLevel * (1 - (age - FLASH_MS) / FADE_MS);
+      }
+    }
+    const level = visualLevel;
+    const row = pi < 4 ? 0 : 1;
+    const slotA = padCfg.padSlotsA && padCfg.padSlotsA[pi] ? padCfg.padSlotsA[pi] : null;
+    const slotB = padCfg.padSlotsB && padCfg.padSlotsB[pi] ? padCfg.padSlotsB[pi] : null;
+    const activeSlot = padBActive ? slotB : slotA;
+    const configured = !!(activeSlot && Number.isFinite(activeSlot.note));
+    let rr = 20;
+    let gg = 184;
+    let bb = 166;
+    if (padBActive) {
+      if (row === 0) { rr = 250; gg = 204; bb = 21; }
+      else { rr = 59; gg = 130; bb = 246; }
+    } else {
+      if (row === 0) { rr = 20; gg = 184; bb = 166; }
+      else { rr = 217; gg = 70; bb = 239; }
+    }
+    const hit = level > 0.02;
+    const alpha = hit ? 0.35 + level * 0.65 : 0.14;
+    const bg = "rgba(" + String(rr) + ", " + String(gg) + ", " + String(bb) + ", " + String(alpha) + ")";
+    const glow = hit ? "0 0 24px rgba(" + String(rr) + ", " + String(gg) + ", " + String(bb) + ", " + String(0.5 + level * 0.5) + "), inset 0 0 16px rgba(255,255,255," + String(0.3 + level * 0.3) + ")" : "inset 0 2px 4px rgba(0,0,0,0.6)";
+    const borderCls = configured ? (hit ? "border-2 border-white" : "border border-neutral-700") : "border border-dashed border-neutral-600/60";
+    const scale = hit ? (0.94 + (1 - level) * 0.05) : 1.0;
+    const labelColor = hit ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.45)";
+    const velTxt = hit ? String(Math.round(Math.max(rawLevel, level) * 127)) : "";
+    padEls.push(
+      <div
+        key={"p" + String(pi)}
+        class={"relative rounded-lg overflow-hidden flex flex-col items-center justify-center transition-all duration-75 " + borderCls}
+        style={{ background: bg, boxShadow: glow, transform: "scale(" + String(scale) + ")" }}
+      >
+        <span class="text-[10px] font-black leading-none select-none pointer-events-none tracking-wide" style={{ color: labelColor }}>{"Pad " + String(pi + 1)}</span>
+        {hit ? (
+          <span class="text-[7px] font-mono text-white/80 leading-none pt-0.5 select-none pointer-events-none">{velTxt}</span>
+        ) : null}
+      </div>
+    );
+    pi = pi + 1;
+  }
+
+  const knobsBankB = vis.knobBankB === true;
+  const knobCells = [];
+  let kbi = 0;
+  while (kbi < SMK_KNOB_DIGITAL) {
+    const ci = knobsBankB ? kbi + SMK_KNOB_DIGITAL : kbi;
+    const v = vis.knobs && vis.knobs[ci] != null ? vis.knobs[ci] : 64;
+    const deg = (v / 127) * 270 - 135;
+    const pct = Math.max(0, Math.min(100, Math.round((v / 127) * 100)));
+    const mapped = Array.isArray(knobCfg.knobCcsA) && kbi < knobCfg.knobCcsA.length && Number.isFinite(knobCfg.knobCcsA[kbi]) && knobCfg.knobCcsA[kbi] >= 0;
+    const knobChAt = vis.knobsChangedAt && vis.knobsChangedAt[ci] != null ? vis.knobsChangedAt[ci] : 0;
+    const knobAge = knobChAt > 0 ? nowView - knobChAt : 99999;
+    const knobActive = knobAge < 400;
+    const accentFill = knobsBankB ? "#e879f9" : "#a78bfa";
+    const needleFill = knobsBankB ? "#f0abfc" : "#c4b5fd";
+    const dimArc = "rgba(255,255,255,0.08)";
+    const labBase = SMK_KNOB_LABELS_A[kbi];
+    const size = 34;
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size / 2 - 3;
+    const startAngle = 135;
+    const sweepDeg = (v / 127) * 270;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const polarX = (deg2) => cx + r * Math.cos(toRad(deg2 + 90));
+    const polarY = (deg2) => cy + r * Math.sin(toRad(deg2 + 90));
+    const fullEndAngle = startAngle + 270;
+    const valueEndAngle = startAngle + sweepDeg;
+    const largeArcFull = 270 > 180 ? 1 : 0;
+    const largeArcVal = sweepDeg > 180 ? 1 : 0;
+    const arcFullD = "M " + String(polarX(startAngle)) + " " + String(polarY(startAngle))
+      + " A " + String(r) + " " + String(r) + " 0 " + String(largeArcFull) + " 1 "
+      + String(polarX(fullEndAngle)) + " " + String(polarY(fullEndAngle));
+    const arcValD = "M " + String(polarX(startAngle)) + " " + String(polarY(startAngle))
+      + " A " + String(r) + " " + String(r) + " 0 " + String(largeArcVal) + " 1 "
+      + String(polarX(valueEndAngle)) + " " + String(polarY(valueEndAngle));
+    knobCells.push(
+      <div key={"kn" + String(kbi)} class="flex flex-col items-center gap-0.5">
+        <div class="relative" style={{ width: String(size) + "px", height: String(size) + "px", boxShadow: knobActive ? "0 0 14px " + accentFill : "none", borderRadius: "999px", transition: "box-shadow 120ms" }}>
+          <svg width={String(size)} height={String(size)} viewBox={"0 0 " + String(size) + " " + String(size)} class="absolute inset-0 pointer-events-none">
+            <path d={arcFullD} fill="none" style={{ stroke: dimArc, "stroke-width": 3, "stroke-linecap": "round" }} />
+            {mapped ? (
+              <path d={arcValD} fill="none" style={{ stroke: accentFill, "stroke-width": knobActive ? 4 : 3, "stroke-linecap": "round" }} />
+            ) : null}
+          </svg>
+          <div class="absolute inset-[4px] rounded-full border border-neutral-500 bg-gradient-to-br from-neutral-700 via-neutral-800 to-black shadow-md flex items-center justify-center">
+            <div
+              class="absolute rounded-full"
+              style={{ width: "2px", height: "12px", bottom: "50%", left: "50%", marginLeft: "-1px", transformOrigin: "50% 100%", transform: "rotate(" + String(deg) + "deg)", background: knobActive ? "#ffffff" : needleFill, boxShadow: "0 0 " + String(knobActive ? 8 : 3) + "px " + accentFill }}
+            />
+          </div>
+        </div>
+        <span class="text-[6px] uppercase tracking-wider leading-none font-bold" style={{ color: mapped ? "rgba(196,181,253,0.9)" : "rgba(115,115,115,0.9)" }}>{labBase}</span>
+        <span class="text-[6px] font-mono leading-none" style={{ color: mapped ? "rgba(196,181,253,0.9)" : "rgba(115,115,115,0.6)" }}>{mapped ? String(pct) + "%" : "--"}</span>
+      </div>
+    );
+    kbi = kbi + 1;
+  }
+
+  const pitchPct = Math.round(vis.pitchNorm * 100);
+  const modPct = Math.round(vis.modNorm * 100);
+
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={props.previewOnly}
+      panelW={PANEL_W}
+      panelH={PANEL_H}
+      isAmpSim={false}
+      isCompact={true}
+      visualStyle={{ footswitch: "none", screws: "none", border: "smooth", shape: "wide" }}
+    >
+      <div class="flex flex-col gap-1 w-full flex-1 min-h-0 text-[9px]" dataMeterSync={meterSync}>
+        <div class="flex gap-2 items-stretch w-full shrink-0" style={{ height: "56%" }}>
+          <div class="flex gap-1 shrink-0 w-[68px]">
+            <div class="flex flex-col items-center gap-0.5 flex-1 min-w-0">
+              <span class="text-[6px] uppercase tracking-wider text-neutral-400">PITCH</span>
+              <div class="relative flex-1 w-3 rounded-full bg-neutral-800 border border-neutral-700 overflow-visible">
+                <div
+                  class="absolute left-1/2 w-3 h-1.5 bg-amber-400 rounded-sm shadow"
+                  style={{ top: String(100 - pitchPct) + "%", transform: "translate(-50%, -50%)" }}
+                />
+              </div>
+            </div>
+            <div class="flex flex-col items-center gap-0.5 flex-1 min-w-0">
+              <span class="text-[6px] uppercase tracking-wider text-neutral-400">MOD</span>
+              <div class="relative flex-1 w-3 rounded-full bg-neutral-800 border border-neutral-700 overflow-hidden">
+                <div class="absolute left-0 right-0 bottom-0 bg-violet-400 rounded-b-full" style={{ height: String(modPct) + "%" }} />
+              </div>
+            </div>
+          </div>
+
+          <div class="flex-1 flex flex-col gap-1 min-w-0 items-center">
+            <div class="flex items-center gap-1.5 shrink-0 pointer-events-auto">
+              <div class="px-2 py-0.5 rounded bg-red-950/80 border border-red-900/80 text-red-400 font-mono text-[12px] font-black tracking-widest shadow-inner">127</div>
+              <div class="flex gap-0.5">
+                <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">PLAY</span>
+                <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">STOP</span>
+                <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">REC</span>
+                <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider " + (vis.padBankB ? "border-amber-400 bg-amber-700/70 text-white" : "border-neutral-600 bg-neutral-800 text-neutral-300")}>B1</span>
+              </div>
+            </div>
+            <div class="flex gap-0.5 shrink-0">
+              <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">ARP</span>
+              <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">SC/CH</span>
+              <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider " + (vis.knobBankB ? "border-fuchsia-400 bg-fuchsia-700/70 text-white" : "border-neutral-600 bg-neutral-800 text-neutral-300")}>KNOB-B</span>
+              <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider " + (vis.padBankB ? "border-amber-400 bg-amber-700/70 text-white" : "border-neutral-600 bg-neutral-800 text-neutral-300")}>PAD-B</span>
+            </div>
+            {knobLearning ? (
+              <div class="rounded-md border-2 border-fuchsia-400/70 bg-neutral-950/95 flex flex-col items-center justify-center gap-0.5 px-2 py-1 pointer-events-auto shadow-[0_0_18px_rgba(232,121,249,0.35)] w-full">
+                <span class={"text-[7px] uppercase tracking-widest font-bold " + (knobCfg.learnBank === "B" ? "text-fuchsia-300" : "text-violet-300")}>{"Learn " + knobLearnBankLabel}</span>
+                <span class="text-white text-[18px] font-black tracking-widest leading-none">{"KNOB " + String(knobLearnNum)}</span>
+                <span class="text-[8px] text-neutral-300">{"Twist knob " + String(knobLearnNum) + " on the device"}</span>
+                <span class="text-[7px] text-neutral-500 font-mono">{String(knobCfg.learnCursor) + " / " + String(knobLearnTotal) + " captured"}</span>
+                <div class="flex gap-1 pt-0.5">
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.skipKnobLearnSlot) { sink.skipKnobLearnSlot(); } }}
+                    class="px-2 py-0.5 rounded border border-neutral-500 bg-neutral-800 text-neutral-100 text-[6px] font-bold uppercase tracking-wider pointer-events-auto"
+                  >Skip</button>
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.cancelKnobLearn) { sink.cancelKnobLearn(); } }}
+                    class="px-2 py-0.5 rounded border border-red-600 bg-red-900/70 text-red-100 text-[6px] font-bold uppercase tracking-wider pointer-events-auto"
+                  >Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div class="grid grid-cols-4 gap-2 shrink-0">
+                {knobCells.slice(0, 4)}
+                {knobCells.slice(4, 8)}
+              </div>
+            )}
+            <div class="flex gap-0.5 shrink-0 pointer-events-auto">
+              <button
+                title="Twist each knob in order to map CCs to slots 1..8 on KNOB-A"
+                onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.beginKnobLearn) { sink.beginKnobLearn("A"); } }}
+                class="px-1.5 py-0.5 rounded border border-violet-500/60 bg-violet-900/40 text-violet-100 font-bold text-[6px] hover:bg-violet-800/60 pointer-events-auto"
+              >{"Cfg Knobs A " + String(knobCfgCountA) + "/8"}</button>
+              <button
+                title="Twist each knob in order on KNOB-B"
+                onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.beginKnobLearn) { sink.beginKnobLearn("B"); } }}
+                class="px-1.5 py-0.5 rounded border border-fuchsia-500/60 bg-fuchsia-900/40 text-fuchsia-100 font-bold text-[6px] hover:bg-fuchsia-800/60 pointer-events-auto"
+              >{"Cfg Knobs B " + String(knobCfgCountB) + "/8"}</button>
+              <button
+                title="Clear all knob CC mappings"
+                onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.resetKnobMap) { sink.resetKnobMap("ALL"); } }}
+                class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 font-bold text-[6px] hover:bg-neutral-700 pointer-events-auto"
+              >Reset</button>
+            </div>
+            <div class="mt-auto text-white font-black tracking-[0.25em] text-[11px] shrink-0">M-VAVE</div>
+            <div class="text-[6px] font-mono text-neutral-500 shrink-0 leading-tight text-center">
+              {"rx n:" + String((vis.rxCounts && vis.rxCounts.noteOn) || 0)
+                + " cc:" + String((vis.rxCounts && vis.rxCounts.cc) || 0)
+                + " pb:" + String((vis.rxCounts && vis.rxCounts.pitchBend) || 0)
+                + " sx:" + String((vis.rxCounts && vis.rxCounts.sysex) || 0)}
+            </div>
+            <div class="text-[6px] font-mono text-neutral-500 shrink-0 leading-tight text-center">
+              {"p1 n:" + String((vis.rxByPort && vis.rxByPort["1"] && vis.rxByPort["1"].noteOn) || 0) + " cc:" + String((vis.rxByPort && vis.rxByPort["1"] && vis.rxByPort["1"].cc) || 0)
+                + " | p2 n:" + String((vis.rxByPort && vis.rxByPort["2"] && vis.rxByPort["2"].noteOn) || 0) + " cc:" + String((vis.rxByPort && vis.rxByPort["2"] && vis.rxByPort["2"].cc) || 0)
+                + " | p3 n:" + String((vis.rxByPort && vis.rxByPort["3"] && vis.rxByPort["3"].noteOn) || 0) + " cc:" + String((vis.rxByPort && vis.rxByPort["3"] && vis.rxByPort["3"].cc) || 0)}
+            </div>
+            <div class="text-[6px] font-mono text-neutral-500 shrink-0 leading-tight text-center">
+              {"last CC p" + String((vis.lastCc && vis.lastCc.port) || 0)
+                + " ch" + String((vis.lastCc && vis.lastCc.ch1) || 0)
+                + " #" + String((vis.lastCc && vis.lastCc.cc) || 0)
+                + "=" + String((vis.lastCc && vis.lastCc.val) || 0)}
+            </div>
+            <div class="text-[6px] font-mono text-neutral-500 shrink-0 leading-tight text-center">
+              {"last note p" + String((vis.lastNote && vis.lastNote.port) || 0)
+                + " ch" + String((vis.lastNote && vis.lastNote.ch1) || 0)
+                + " #" + String((vis.lastNote && vis.lastNote.note) || 0)
+                + "=" + String((vis.lastNote && vis.lastNote.vel) || 0)}
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-1 w-[236px] shrink-0">
+            <div class="flex items-center justify-between text-[7px] uppercase tracking-wider shrink-0">
+              <div class="flex gap-0.5 pointer-events-auto">
+                <button
+                  title="Press each pad in order on PAD-A"
+                  onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.beginPadLearn) { sink.beginPadLearn("A"); } }}
+                  class="px-1.5 py-0.5 rounded border border-teal-500/60 bg-teal-900/40 text-teal-100 font-bold text-[6px] hover:bg-teal-800/60 pointer-events-auto"
+                >{"Cfg A " + String(configuredA) + "/8"}</button>
+                <button
+                  title="Press each pad in order on PAD-B"
+                  onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.beginPadLearn) { sink.beginPadLearn("B"); } }}
+                  class="px-1.5 py-0.5 rounded border border-amber-500/60 bg-amber-900/40 text-amber-100 font-bold text-[6px] hover:bg-amber-800/60 pointer-events-auto"
+                >{"Cfg B " + String(configuredB) + "/8"}</button>
+                <button
+                  title="Clear all learned pad mappings"
+                  onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.resetPadMap) { sink.resetPadMap("ALL"); } }}
+                  class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 font-bold text-[6px] hover:bg-neutral-700 pointer-events-auto"
+                >Reset</button>
+              </div>
+              <span class={"font-semibold " + (vis.padBankB ? "text-amber-200" : "text-teal-300")}>
+                {vis.padBankB ? "PAD-B" : "PAD-A"}
+              </span>
+            </div>
+            {learnActive ? (
+              <div class="flex-1 rounded-md border-2 border-teal-400/70 bg-neutral-950/95 flex flex-col items-center justify-center gap-0.5 px-2 pointer-events-auto shadow-[0_0_18px_rgba(45,212,191,0.35)]">
+                <span class={"text-[7px] uppercase tracking-widest font-bold " + (padCfg.learnBank === "B" ? "text-amber-300" : "text-teal-300")}>{"Learn " + learnBankLabel}</span>
+                <span class="text-white text-[20px] font-black tracking-widest leading-none">{"PAD " + String(learnPadNum)}</span>
+                <span class="text-[8px] text-neutral-300">{"Press pad " + String(learnPadNum) + " on the device"}</span>
+                <span class="text-[7px] text-neutral-500 font-mono">{String(padCfg.learnCursor) + " / " + String(learnTotal) + " captured"}</span>
+                <div class="flex gap-1 pt-0.5">
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.skipPadLearnSlot) { sink.skipPadLearnSlot(); } }}
+                    class="px-2 py-0.5 rounded border border-neutral-500 bg-neutral-800 text-neutral-100 text-[6px] font-bold uppercase tracking-wider pointer-events-auto"
+                  >Skip</button>
+                  <button
+                    onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.cancelPadLearn) { sink.cancelPadLearn(); } }}
+                    class="px-2 py-0.5 rounded border border-red-600 bg-red-900/70 text-red-100 text-[6px] font-bold uppercase tracking-wider pointer-events-auto"
+                  >Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div class="flex-1 grid grid-cols-4 grid-rows-2 gap-1 w-full">{padEls}</div>
+            )}
+            {!learnActive && activeSlotsCount === 0 ? (
+              <p class="text-[7px] text-center text-amber-300/80 leading-tight shrink-0">
+                {"No " + (vis.padBankB ? "PAD-B" : "PAD-A") + " map - tap Cfg " + (vis.padBankB ? "B" : "A")}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div class="relative w-full shrink-0 h-[80px] bg-neutral-900 rounded-md border border-neutral-700 overflow-hidden shadow-inner">
+          <div class="relative w-full h-full flex items-stretch">
+            {whiteKeyEls}
+            {blackKeyEls}
+          </div>
+        </div>
+
+        <div class="flex-1 min-h-0 flex flex-col gap-0.5 w-full pointer-events-auto">
+          <div class="flex items-center gap-1 shrink-0">
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); setShowLog(prev => !prev); }}
+              class="px-1.5 py-0.5 rounded border border-amber-500/60 bg-amber-900/40 text-amber-100 font-bold text-[7px] uppercase tracking-wider pointer-events-auto"
+            >{showLog ? "Hide MIDI Log" : "Show MIDI Log"}</button>
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); const next = !consoleOn; setConsoleOn(next); if (sink && sink.setMidiLogConsole) { sink.setMidiLogConsole(next); } }}
+              class={"px-1.5 py-0.5 rounded border font-bold text-[7px] uppercase tracking-wider pointer-events-auto " + (consoleOn ? "border-teal-500/60 bg-teal-900/40 text-teal-100" : "border-neutral-600 bg-neutral-800 text-neutral-400")}
+            >{"Console " + (consoleOn ? "ON" : "OFF")}</button>
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.clearMidiLog) { sink.clearMidiLog(); } }}
+              class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 font-bold text-[7px] uppercase tracking-wider pointer-events-auto"
+            >Clear</button>
+            <span class="text-[7px] font-mono text-neutral-500 ml-auto">
+              {"log:" + String(midiLog.length)
+                + " rxN:" + String((vis.rxCounts && vis.rxCounts.noteOn) || 0)
+                + " rxCC:" + String((vis.rxCounts && vis.rxCounts.cc) || 0)
+                + " rxPB:" + String((vis.rxCounts && vis.rxCounts.pitchBend) || 0)
+                + " rxSX:" + String((vis.rxCounts && vis.rxCounts.sysex) || 0)}
+            </span>
+          </div>
+          {showLog ? (
+            <div class="flex-1 min-h-[60px] overflow-y-auto rounded-sm border border-neutral-800 bg-black/80 font-mono text-[8px] leading-tight">
+              {midiLog.length === 0 ? (
+                <div class="p-1 text-neutral-500">No events. Touch the device.</div>
+              ) : midiLog.slice().reverse().map((entry) => (
+                <div key={"log-" + String(entry.seq)} class="flex gap-1 px-1 py-[1px] border-b border-neutral-900/80">
+                  <span class="text-neutral-500 w-10 shrink-0">{"#" + String(entry.seq)}</span>
+                  <span class="text-amber-300 w-7 shrink-0">{"p" + String(entry.port)}</span>
+                  <span class="text-neutral-400 w-24 shrink-0 truncate" title={entry.inputId}>{shortInputId(entry.inputId)}</span>
+                  <span class={"w-14 shrink-0 " + (entry.kind === "noteOn" ? "text-emerald-300" : entry.kind === "noteOff" ? "text-neutral-500" : entry.kind === "cc" ? "text-violet-300" : entry.kind === "pitchBend" ? "text-amber-300" : "text-fuchsia-300")}>{entry.kind}</span>
+                  <span class="text-neutral-400 w-10 shrink-0">{"ch" + String(entry.ch1)}</span>
+                  <span class="text-neutral-200 flex-1 shrink min-w-0 truncate" title={entry.detail}>{entry.detail}</span>
+                  <span class={"shrink-0 " + (entry.duringLearn ? "text-teal-300" : (entry.target && entry.target.indexOf("unmapped") >= 0 ? "text-red-300" : "text-white"))} title={entry.target}>{"-> " + entry.target + (entry.duringLearn ? " [LEARN-" + String(entry.learnKind) + "]" : "")}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </PedalChassis>
+  );
+}

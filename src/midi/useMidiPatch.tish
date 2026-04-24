@@ -2,9 +2,21 @@
 
 import { useState, useEffect, useRef, runBatched } from "lattish"
 import { isTauriApp } from "../platform/tauriEnv.tish"
-import { subscribeMidiDispatch, attachWebMidiInput, detachWebMidiInput, requestWebMidiAccess, feedNativeMidiPayload } from "./router.tish"
+import {
+  subscribeMidiDispatch,
+  attachWebMidiInput,
+  attachWebMidiMerged,
+  detachWebMidiInput,
+  requestWebMidiAccess,
+  feedNativeMidiPayload
+} from "./router.tish"
 import { applyMidiLikeToGeneratorSink } from "./voiceApi.tish"
 import { enrichMidiDeviceRow } from "../inputDevices/midiHardwareVisuals.tish"
+import { mergeMidiHardwareRows } from "./midiPortGroups.tish"
+import { isMidiDebugEnabled, midiDebugLog } from "./midiDebug.tish"
+import { deviceRowIsSmk25FamilyCombo, buildSmk25LayoutNode, smk25DefaultComboEdges } from "./deviceAutoLayout.tish"
+
+let __midiDispatchDebugCount = 0;
 
 const randomBindingId = () => Math.random().toString(36).substr(2, 11);
 
@@ -19,6 +31,7 @@ export fn useMidiPatch(
   pitchAnalyserRef,
   outGainRef,
   setNodes,
+  setConnections,
   setAudioReady,
   setHardwareMenuOpen,
   setShowModuleLibrary
@@ -58,6 +71,17 @@ export fn useMidiPatch(
     } catch (eR) {}
   };
 
+  /** WKWebView can leave `requestMIDIAccess()` pending indefinitely; never block the UI on it. */
+  async fn requestWebMidiAccessWithTimeout() {
+    const deadlineMs = 10000;
+    const timeout = new Promise((_, rej) => {
+      window.setTimeout(() => {
+        rej(new Error("Web MIDI access timed out"));
+      }, deadlineMs);
+    });
+    return await Promise.race([requestWebMidiAccess(), timeout]);
+  }
+
   async fn ensureNativeMidiListener() {
     if (nativeMidiUnlistenRef.current) {
       return;
@@ -81,36 +105,76 @@ export fn useMidiPatch(
     setMidiFlowBusy(true);
     try {
       if (isTauriApp()) {
-        const ota = window.__OTA_BRIDGE__;
-        if (!ota || !ota.invoke) {
-          setMidiDevices([]);
-          return;
-        }
         await ensureNativeMidiListener();
-        const list = await ota.invoke("list_midi_inputs");
-        const rows = [];
-        const rawList = list && list.length != null ? list : [];
-        let li = 0;
-        while (li < rawList.length) {
-          const it = rawList[li];
-          const idx = it.index != null ? it.index : it.Index;
-          const nm = it.name != null ? it.name : it.Name;
-          rows.push(
-            enrichMidiDeviceRow({
-              "native": true,
-              "index": idx,
-              "label": typeof nm === "string" ? nm : "MIDI " + String(idx)
-            })
-          );
-          li = li + 1;
+        let rows = [];
+        const ota = window.__OTA_BRIDGE__;
+        if (ota && ota.invoke) {
+          try {
+            const list = await ota.invoke("list_midi_inputs");
+            const rawList = list && list.length != null ? list : [];
+            let li = 0;
+            while (li < rawList.length) {
+              const it = rawList[li];
+              const idx = it.index != null ? it.index : it.Index;
+              const nm = it.name != null ? it.name : it.Name;
+              rows.push(
+                enrichMidiDeviceRow({
+                  "native": true,
+                  "index": idx,
+                  "label": typeof nm === "string" ? nm : "MIDI " + String(idx)
+                })
+              );
+              li = li + 1;
+            }
+          } catch (eNat) {
+            if (typeof console !== "undefined" && console.warn) {
+              console.warn("[TishAudio:midi] native list_midi_inputs failed; trying Web MIDI", eNat);
+            }
+          }
+        } else {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("[TishAudio:midi] OTA bridge missing; trying Web MIDI for device list");
+          }
         }
-        setMidiDevices(rows);
+        if (!rows.length) {
+          if (typeof window !== "undefined" && window.isSecureContext === false) {
+            setMidiDevices([]);
+            return;
+          }
+          try {
+            const access = await requestWebMidiAccessWithTimeout();
+            midiAccessRef.current = access;
+            access.inputs.forEach((inp) => {
+              rows.push(
+                enrichMidiDeviceRow({
+                  "native": false,
+                  "deviceId": inp.id,
+                  "label": inp.name && inp.name.length ? inp.name : inp.id
+                })
+              );
+            });
+            if (typeof console !== "undefined" && console.info) {
+              console.info(
+                "[TishAudio:midi] desktop MIDI device list via Web MIDI (" + String(rows.length) + " inputs)"
+              );
+            }
+          } catch (eWeb) {
+            if (typeof console !== "undefined" && console.error) {
+              console.error("[TishAudio:midi] Web MIDI fallback failed", eWeb);
+            }
+          }
+        }
+        const mergedRows = mergeMidiHardwareRows(rows);
+        if (isMidiDebugEnabled()) {
+          midiDebugLog("refresh MIDI device list (desktop)", { rawCount: rows.length, menuCount: mergedRows.length });
+        }
+        setMidiDevices(mergedRows);
       } else {
         if (typeof window !== "undefined" && window.isSecureContext === false) {
           setMidiDevices([]);
           return;
         }
-        const access = await requestWebMidiAccess();
+        const access = await requestWebMidiAccessWithTimeout();
         midiAccessRef.current = access;
         const rows = [];
         access.inputs.forEach((inp) => {
@@ -122,7 +186,11 @@ export fn useMidiPatch(
             })
           );
         });
-        setMidiDevices(rows);
+        const mergedRowsW = mergeMidiHardwareRows(rows);
+        if (isMidiDebugEnabled()) {
+          midiDebugLog("refresh MIDI device list (web)", { rawCount: rows.length, menuCount: mergedRowsW.length });
+        }
+        setMidiDevices(mergedRowsW);
       }
     } catch (e) {
       console.error("[TishAudio:midi] refresh device list", e);
@@ -142,6 +210,164 @@ export fn useMidiPatch(
       let label = row.label != null && String(row.label).length ? String(row.label) : "MIDI";
       const hardwareVisualId =
         row.hardwareVisualId != null && String(row.hardwareVisualId).length ? String(row.hardwareVisualId) : null;
+      let mergedPortIds = null;
+
+      if (row.merged === true && row.members && row.members.length) {
+        label = row.label != null && String(row.label).length ? String(row.label) : "MIDI (merged)";
+        nativeMidi = row["native"] === true && isTauriApp();
+        if (nativeMidi) {
+          const otaM = window.__OTA_BRIDGE__;
+          if (!otaM || !otaM.invoke) {
+            alert("Native MIDI requires the OTA bridge.");
+            return;
+          }
+          await ensureNativeMidiListener();
+          mergedPortIds = [];
+          let qi = 0;
+          while (qi < row.members.length) {
+            const m = row.members[qi];
+            const idx = m.index != null ? m.index : m.Index;
+            const oneId = "native:" + String(idx) + ":" + bindingId.slice(0, 8);
+            await otaM.invoke("start_native_midi_input", { args: { deviceIndex: idx, inputId: oneId } });
+            mergedPortIds.push(oneId);
+            qi = qi + 1;
+          }
+          midiDebugLog("connect merged (native)", {
+            bindingSlice: bindingId.slice(0, 8),
+            nativeInputIds: mergedPortIds,
+            memberCount: row.members.length
+          });
+          midiInputId = mergedPortIds[0];
+          portKey = "merged-native-" + bindingId.slice(0, 8);
+        } else {
+          let access = midiAccessRef.current;
+          if (!access) {
+            try {
+              access = await requestWebMidiAccess();
+              midiAccessRef.current = access;
+            } catch (eAcc) {
+              console.warn("[TishAudio:midi] merged row MIDIAccess", eAcc);
+            }
+          }
+          const inputs = [];
+          let wi = 0;
+          while (wi < row.members.length) {
+            const m = row.members[wi];
+            const did = m.deviceId;
+            const inp = access && did != null ? access.inputs.get(did) : null;
+            if (inp) {
+              inputs.push(inp);
+            }
+            wi = wi + 1;
+          }
+          if (!inputs.length) {
+            alert("Merged MIDI inputs not found. Open Connect hardware again.");
+            return;
+          }
+          if (inputs.length < row.members.length) {
+            console.warn(
+              "[TishAudio:midi] merged connect: opened " +
+                String(inputs.length) +
+                " of " +
+                String(row.members.length) +
+                " Web MIDI ports — some endpoints missing from MIDIAccess. Set localStorage tish_midi_debug=1 for details."
+            );
+          }
+          const portNamesDbg = [];
+          let pi = 0;
+          while (pi < inputs.length) {
+            const inpD = inputs[pi];
+            portNamesDbg.push(inpD && inpD.name != null ? String(inpD.name) : "");
+            pi = pi + 1;
+          }
+          midiDebugLog("connect merged (web)", {
+            bindingSlice: bindingId.slice(0, 8),
+            membersListed: row.members.length,
+            inputsAttached: inputs.length,
+            portNames: portNamesDbg
+          });
+          midiInputId = "web:grp:" + bindingId;
+          mergedPortIds = [];
+          let wj = 0;
+          while (wj < inputs.length) {
+            const inpW = inputs[wj];
+            const devId = inpW && inpW.id != null ? String(inpW.id) : "m" + String(wj);
+            mergedPortIds.push("web:" + devId + ":" + bindingId.slice(0, 8));
+            wj = wj + 1;
+          }
+          attachWebMidiMerged(midiInputId, inputs, mergedPortIds);
+          portKey = midiInputId;
+        }
+
+        const smkAutoLayout = deviceRowIsSmk25FamilyCombo(row);
+        let smkLayoutId = null;
+        let smkEdges = [];
+        if (smkAutoLayout && mergedPortIds && mergedPortIds.length) {
+          smkLayoutId = Math.random().toString(36).substr(2, 9);
+          smkEdges = smk25DefaultComboEdges("midi_in_" + bindingId, smkLayoutId, mergedPortIds.length);
+        }
+
+        runBatched(() => {
+          setMidiBindings((prev) => [
+            ...asArray(prev),
+            {
+              id: bindingId,
+              midiInputId: midiInputId,
+              midiInputIds: mergedPortIds,
+              targetNodeId: smkLayoutId,
+              channelMask: -1
+            }
+          ]);
+          setNodes((prev) => {
+            const prevList = asArray(prev);
+            let nMidi = 0;
+            let pi = 0;
+            while (pi < prevList.length) {
+              const rowN = prevList[pi];
+              if (rowN["type"] === "MIDI_IN") {
+                nMidi = nMidi + 1;
+              }
+              pi = pi + 1;
+            }
+            const midiParams = {
+              midiInputId: midiInputId,
+              midiBindingId: bindingId,
+              portKey: portKey,
+              nativeMidi: nativeMidi
+            };
+            if (mergedPortIds && mergedPortIds.length) {
+              midiParams["midiInputIds"] = mergedPortIds;
+            }
+            if (hardwareVisualId) {
+              midiParams["hardwareVisualId"] = hardwareVisualId;
+            }
+            if (smkAutoLayout && mergedPortIds && mergedPortIds.length) {
+              midiParams["midiComboLayout"] = "smk25";
+              midiParams["autoLayoutDeviceId"] = hardwareVisualId != null ? String(hardwareVisualId) : "";
+            }
+            const midiNode = {
+              id: "midi_in_" + bindingId,
+              "type": "MIDI_IN",
+              x: 50,
+              y: 360 + nMidi * 72,
+              label: label.substring(0, 22),
+              isSystem: true,
+              params: midiParams
+            };
+            if (smkLayoutId) {
+              const smkNode = buildSmk25LayoutNode(smkLayoutId, 280, 320 + nMidi * 72);
+              return [...prevList, midiNode, smkNode];
+            }
+            return [...prevList, midiNode];
+          });
+          if (smkEdges.length) {
+            setConnections((prev) => [...asArray(prev), ...smkEdges]);
+          }
+          setAudioReady(true);
+          setHardwareMenuOpen(false);
+        });
+        return;
+      }
 
       if (isTauriApp() && row["native"] === true) {
         nativeMidi = true;
@@ -176,7 +402,7 @@ export fn useMidiPatch(
       }
 
       runBatched(() => {
-        setMidiBindings((prev) => [...asArray(prev), { id: bindingId, midiInputId: midiInputId, targetNodeId: null, channelMask: -1 }]);
+        setMidiBindings((prev) => [...asArray(prev), { id: bindingId, midiInputId: midiInputId, midiInputIds: null, targetNodeId: null, channelMask: -1 }]);
         setNodes((prev) => {
           const prevList = asArray(prev);
           let nMidi = 0;
@@ -243,7 +469,12 @@ export fn useMidiPatch(
     if (p.nativeMidi === true && isTauriApp()) {
       const otaM = window.__OTA_BRIDGE__;
       if (otaM && otaM.invoke) {
-        void otaM.invoke("stop_native_midi_input", { args: { inputId: mid } });
+        const ids = p.midiInputIds && p.midiInputIds.length ? p.midiInputIds : [mid];
+        let si = 0;
+        while (si < ids.length) {
+          void otaM.invoke("stop_native_midi_input", { args: { inputId: ids[si] } });
+          si = si + 1;
+        }
       }
     } else if (mid) {
       detachWebMidiInput(mid);
@@ -258,12 +489,43 @@ export fn useMidiPatch(
       return;
     }
     const unsub = subscribeMidiDispatch((ev) => {
+      if (isMidiDebugEnabled() && ev && ev.kind != null) {
+        __midiDispatchDebugCount = __midiDispatchDebugCount + 1;
+        if (__midiDispatchDebugCount <= 20 || __midiDispatchDebugCount % 60 === 0) {
+          midiDebugLog("midi dispatch", {
+            n: __midiDispatchDebugCount,
+            kind: ev.kind,
+            inputId: ev.inputId,
+            ch: ev.channel,
+            note: ev.note,
+            cc: ev.controller,
+            val: ev.value,
+            value14: ev.value14,
+            sysexKey: ev.sysexKey
+          });
+        }
+      }
       const bindings = midiBindingsRef.current;
       const ctx = audioCtxRef.current;
       let bi = 0;
       while (bi < bindings.length) {
         const b = bindings[bi];
-        if (!b || b.midiInputId !== ev.inputId) {
+        if (!b) {
+          bi = bi + 1;
+          continue;
+        }
+        let idMatch = b.midiInputId === ev.inputId;
+        if (!idMatch && b.midiInputIds && b.midiInputIds.length) {
+          let ii = 0;
+          while (ii < b.midiInputIds.length) {
+            if (b.midiInputIds[ii] === ev.inputId) {
+              idMatch = true;
+              break;
+            }
+            ii = ii + 1;
+          }
+        }
+        if (!idMatch) {
           bi = bi + 1;
           continue;
         }
@@ -271,7 +533,11 @@ export fn useMidiPatch(
           bi = bi + 1;
           continue;
         }
-        if (b.targetNodeId) {
+        const midiInNodeId = "midi_in_" + b.id;
+        const inBox = nodeAudioMapRef.current[midiInNodeId];
+        if (inBox && inBox.midiSink && typeof inBox.midiSink.handleEvent === "function") {
+          applyMidiLikeToGeneratorSink(inBox.midiSink, ctx, ev);
+        } else if (b.targetNodeId) {
           const box = nodeAudioMapRef.current[b.targetNodeId];
           const sink = box && box.midiSink;
           if (sink && ctx) {

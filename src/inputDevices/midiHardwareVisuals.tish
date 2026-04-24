@@ -1,5 +1,5 @@
 // Fingerprint MIDI port names for menu badges (Twin) and optional copy on MIDI_IN nodes.
-// SMK-25 family: used only for detection / labeling — MIDI_IN does not render a hardware "face" (patching stays on jacks + downstream modules).
+// SMK-25 family: detection / labeling only on MIDI_IN. Full 25-key + 8-pad + 8-knob + 2-strip layout lives on the patchable **smk25_face** module (+MODULES → Utility → "SMK-25 layout").
 
 export const HARDWARE_MVAVE_SMK25_FAMILY = "mvave_smk25_family"
 

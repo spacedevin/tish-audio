@@ -1,6 +1,15 @@
 import { useState, useEffect, useLayoutEffect, useRef, h, runBatched, useMemo } from "lattish"
 import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2 } from "./icons.tish"
-import { PEDAL_LIBRARY, MODULE_REGISTRY } from "./modules/registry.tish"
+import {
+  PEDAL_LIBRARY,
+  MODULE_REGISTRY,
+  isSmkControlOutputPort,
+  isControlInputPort,
+  defaultCtrlParamKeyForModuleType,
+  isSmk25FaceMidiInputPort,
+  isMidiGraphPortId,
+  isComboStyleMidiPort
+} from "./modules/registry.tish"
 import { audioGraphTopologySignature } from "./audio/graphSignature.tish"
 import { rebuildAudioGraph } from "./audio/rebuildAudioGraph.tish"
 import { syncAudioNodeParams } from "./audio/syncAudioNodeParams.tish"
@@ -45,13 +54,47 @@ nodesRef.current = nodes;
 const connectionsRef = useRef(connections);
 connectionsRef.current = connections;
 const patchBoardMeterTickRef = useRef(0);
+const windowDragRegionRef = useRef(null);
 if (activeTab === 'pedalboard') {
 patchBoardMeterTickRef.current = audioGraphTick;
 }
+useLayoutEffect(() => {
+const el = windowDragRegionRef.current;
+if (!el) {
+return;
+}
+if (isTauriApp()) {
+el.setAttribute("data-tauri-drag-region", "");
+} else {
+el.removeAttribute("data-tauri-drag-region");
+}
+}, []);
 const nodeGraphMeterTick = activeTab === 'pedalboard' ? audioGraphTick : patchBoardMeterTickRef.current;
 
-let midi = useMidiPatch(audioReady, nodeAudioMapRef, audioCtxRef, analyserRef, pitchAnalyserRef, outGainRef, setNodes, setAudioReady, setShowHardwareMenu, setShowModuleLibrary);
+let midi = useMidiPatch(audioReady, nodeAudioMapRef, audioCtxRef, analyserRef, pitchAnalyserRef, outGainRef, setNodes, setConnections, setAudioReady, setShowHardwareMenu, setShowModuleLibrary);
 let midiDeviceRows = Array.isArray(midi.midiDevices) ? midi.midiDevices : [];
+
+fn midiHardwareRowKey(row, ri) {
+  if (row.merged === true && row.members && row.members.length) {
+    const parts = [];
+    let mi = 0;
+    while (mi < row.members.length) {
+      const m = row.members[mi];
+      if (m["native"] === true) {
+        parts.push("n" + String(m.index != null ? m.index : ""));
+      } else {
+        parts.push("w" + String(m.deviceId != null ? m.deviceId : ""));
+      }
+      mi = mi + 1;
+    }
+    parts.sort();
+    return "midi-merged-" + String(row.hardwareVisualId != null ? row.hardwareVisualId : "x") + "-" + parts.join("|");
+  }
+  if (row["native"] === true) {
+    return "midi-native-" + String(row.index);
+  }
+  return "midi-web-" + String(row.deviceId != null ? row.deviceId : ri);
+}
 
 async fn getDevices() {
 const log = (m, x) => {
@@ -109,11 +152,9 @@ const list = await ota.invoke("list_audio_inputs");
 const mapped = list.map((row) => ({ deviceId: row.id, label: row.name, kind: "audioinput" }));
 setDevices(mapped);
 setShowModuleLibrary(false);
-try {
-await midi.refreshMidiDevices();
-} catch (eMidiList) {
+void midi.refreshMidiDevices().then(undefined, (eMidiList) => {
 console.warn("[TishAudio:input] refreshMidiDevices (native)", eMidiList);
-}
+});
 setShowHardwareMenu(true);
 log("getDevices: hardware menu", { count: mapped.length });
 } catch (eNative) {
@@ -171,11 +212,9 @@ const audioDevs = devs.filter(d => d.kind === 'audioinput');
 log("getDevices: enumerateDevices", { total: devs.length, audioInputs: audioDevs.length, sample: audioDevs.slice(0, 3).map(d => ({ idLen: (d.deviceId || "").length, label: d.label })) });
 setDevices(audioDevs);
 setShowModuleLibrary(false);
-try {
-await midi.refreshMidiDevices();
-} catch (eMidiList2) {
+void midi.refreshMidiDevices().then(undefined, (eMidiList2) => {
 console.warn("[TishAudio:input] refreshMidiDevices (browser)", eMidiList2);
-}
+});
 setShowHardwareMenu(true);
 log("getDevices: opened hardware menu");
 } catch (e) {
@@ -415,7 +454,20 @@ return;
 const sig = audioGraphTopologySignature(nodes, connections);
 if (sig !== audioRebuildSigRef.current) {
 audioRebuildSigRef.current = sig;
-const audioDeps = { nodeAudioMapRef: nodeAudioMapRef, sourcesRef: sourcesRef, analyserRef: analyserRef, pitchAnalyserRef: pitchAnalyserRef, outGainRef: outGainRef };
+const audioDeps = {
+  nodeAudioMapRef: nodeAudioMapRef,
+  sourcesRef: sourcesRef,
+  analyserRef: analyserRef,
+  pitchAnalyserRef: pitchAnalyserRef,
+  outGainRef: outGainRef,
+  applyNodeParam: (nodeId, paramKey, value) => {
+    const v = Number(value);
+    if (!Number.isFinite(v)) {
+      return;
+    }
+    updateNodeParam(nodeId, paramKey, v);
+  }
+};
 rebuildAudioGraph(audioCtxRef.current, audioDeps, nodes, connections);
 // Bump meterSync only when topology/rebuild runs — not on every param tweak. Otherwise each knob
 // move schedules a second full flush right after layout, which races pointer capture + Lattish patch
@@ -465,7 +517,10 @@ if (nodeAudioMapRef.current && patchBoard) {
     let port = 'main';
     if (idStr.startsWith('c_')) {
       const c = connById[idStr.slice(2)];
-      if (c && (c.fromPort === 'midi' || c.toPort === 'midi')) {
+      if (c && (isMidiGraphPortId(c.fromPort) || isMidiGraphPortId(c.toPort))) {
+        continue;
+      }
+      if (c && (isSmkControlOutputPort(c.fromPort) || isControlInputPort(c.toPort))) {
         continue;
       }
       if (c) {
@@ -583,6 +638,20 @@ setConnections([]);
 });
 };
 
+fn onTauriTitlebarPointerDown(e) {
+if (!isTauriApp()) {
+return;
+}
+if (!e || e.button !== 0) {
+return;
+}
+const ota = window.__OTA_BRIDGE__;
+if (!ota || typeof ota.startWindowDrag !== "function") {
+return;
+}
+void ota.startWindowDrag();
+}
+
 const updateNodeParam = (id, param, value) => {
 setNodes((prev) =>
   prev.map((n) => {
@@ -614,15 +683,26 @@ const toggleNodeBypass = (id) => {
 setNodes(prev => prev.map(n => n.id === id ? { ...n, bypassed: !n.bypassed } : n));
 };
 
-const addConnection = (fromId, fromPort, toId, toPort) => {
+const addConnection = (fromId, fromPort, toId, toPort, ctrlParamOpt) => {
 if (fromId === toId) return;
-const fromIsMidi = fromPort === 'midi';
-const toIsMidi = toPort === 'midi';
-if (fromIsMidi !== toIsMidi) return;
-if (fromIsMidi && toIsMidi) {
-const fromN = nodesRef.current.find(n => n.id === fromId);
-const toN = nodesRef.current.find(n => n.id === toId);
-if (!fromN || !toN || !MODULE_REGISTRY[toN["type"]]?.acceptsMidiInput) {
+const fromNHead = nodesRef.current.find((n) => n.id === fromId);
+const fromIsMidi =
+  fromPort === "midi" ||
+  !!(fromNHead && fromNHead["type"] === "MIDI_IN" && isComboStyleMidiPort(fromPort));
+const toIsMidiJack = toPort === "midi" || isSmk25FaceMidiInputPort(toPort);
+const fromIsCtrl = isSmkControlOutputPort(fromPort);
+const toIsCtrl = isControlInputPort(toPort);
+
+if (fromIsMidi || toIsMidiJack) {
+if (!(fromIsMidi && toIsMidiJack)) {
+return;
+}
+const fromN = nodesRef.current.find((n) => n.id === fromId);
+const toN = nodesRef.current.find((n) => n.id === toId);
+const toAcceptsMidi =
+  (toN && toN["type"] === "smk25_face" && isSmk25FaceMidiInputPort(toPort)) ||
+  !!(toN && MODULE_REGISTRY[toN["type"]] && MODULE_REGISTRY[toN["type"]].acceptsMidiInput && toPort === "midi");
+if (!fromN || !toN || !toAcceptsMidi) {
 return;
 }
 const fromOk = fromN["type"] === "MIDI_IN" || !!(MODULE_REGISTRY[fromN["type"]] && MODULE_REGISTRY[fromN["type"]].midiThrough);
@@ -636,25 +716,88 @@ return;
 }
 midi.updateMidiBindingTarget(bid, toId);
 }
+setConnections((prev) => {
+let base = prev.filter((c) => !(c.from === fromId && c.fromPort === fromPort));
+if (base.some((c) => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) {
+return base;
 }
-setConnections(prev => {
-let base = prev;
-if (fromIsMidi && toIsMidi) {
-base = prev.filter(c => !(c.from === fromId && c.fromPort === 'midi'));
+return [...base, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort: fromPort, to: toId, toPort: toPort }];
+});
+return;
 }
-if (base.some(c => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) return base;
-return [...base, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort, to: toId, toPort }];
+
+if (fromIsCtrl || toIsCtrl) {
+if (!(fromIsCtrl && toIsCtrl)) {
+return;
+}
+const fromC = nodesRef.current.find((n) => n.id === fromId);
+const toC = nodesRef.current.find((n) => n.id === toId);
+if (!fromC || fromC["type"] !== "smk25_face" || !toC || !MODULE_REGISTRY[toC["type"]]?.acceptsControlInput) {
+return;
+}
+const pKey =
+  ctrlParamOpt != null && String(ctrlParamOpt).trim().length
+    ? String(ctrlParamOpt).trim()
+    : defaultCtrlParamKeyForModuleType(toC["type"]);
+setConnections((prev) => {
+let base = prev.filter((c) => !(c.from === fromId && c.fromPort === fromPort));
+if (
+  base.some(
+    (c) => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort && c.ctrlParam === pKey
+  )
+) {
+return base;
+}
+return [
+  ...base,
+  {
+    id: Math.random().toString(36).substr(2, 9),
+    from: fromId,
+    fromPort: fromPort,
+    to: toId,
+    toPort: toPort,
+    ctrlParam: pKey
+  }
+];
+});
+return;
+}
+
+if (fromIsMidi || toIsMidiJack || fromIsCtrl || toIsCtrl) {
+return;
+}
+setConnections((prev) => {
+if (prev.some((c) => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) {
+return prev;
+}
+return [...prev, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort: fromPort, to: toId, toPort: toPort }];
 });
 };
 
 const removeConnection = (id) => {
 setConnections(prev => {
 const hit = prev.find(c => c.id === id);
-if (hit && hit.fromPort === 'midi' && hit.toPort === 'midi') {
-const fromN = nodesRef.current.find(n => n.id === hit.from);
+if (hit) {
+const fromN = nodesRef.current.find((n) => n.id === hit.from);
+const fromIsMidiOut =
+  hit.fromPort === "midi" ||
+  !!(fromN && fromN["type"] === "MIDI_IN" && isComboStyleMidiPort(hit.fromPort));
+if (fromIsMidiOut && (hit.toPort === "midi" || isSmk25FaceMidiInputPort(hit.toPort))) {
 if (fromN && fromN["type"] === "MIDI_IN") {
 const bid = fromN.params && fromN.params.midiBindingId;
-if (bid) midi.updateMidiBindingTarget(bid, null);
+if (bid) {
+const next = prev.filter((c) => c.id !== id);
+const stillMidiOut = next.some(
+(c) =>
+  c.from === hit.from &&
+  (c.fromPort === "midi" || isComboStyleMidiPort(c.fromPort)) &&
+  (c.toPort === "midi" || isSmk25FaceMidiInputPort(c.toPort))
+);
+if (!stillMidiOut) {
+midi.updateMidiBindingTarget(bid, null);
+}
+}
+}
 }
 }
 return prev.filter(c => c.id !== id);
@@ -737,20 +880,21 @@ class="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-
 )}
 <AudioMeterProvider analyserRef={analyserRef} pitchAnalyserRef={pitchAnalyserRef} audioCtxRef={audioCtxRef} audioReady={audioReady}>
 <header class="relative z-50 bg-neutral-900 border-b border-neutral-800 shrink-0 shadow-md">
-<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
-<div class="flex flex-wrap items-center gap-3 min-w-0">
+<div ref={windowDragRegionRef} class="toneframe-window-drag h-10 w-full shrink-0 cursor-default select-none border-b border-neutral-800/60 bg-neutral-900" onPointerDown={onTauriTitlebarPointerDown} />
+<div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-3 pt-2">
+<div class="flex flex-wrap items-center gap-3 min-w-0 shrink-0">
 {h(Activity, { "class": "text-orange-500 w-7 h-7 shrink-0" })}
 <h1 class="text-lg sm:text-2xl font-black tracking-tighter text-white shrink-0">TONE<span class="text-orange-500">FRAME</span></h1>
 <button 
-disabled={inputFlowBusy || midi.midiFlowBusy}
+disabled={inputFlowBusy}
 onClick={() => { console.log("[TishAudio:input] Connect hardware onClick"); void getDevices(); }} 
-class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 border " + (inputFlowBusy || midi.midiFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait border-neutral-600 shadow-none" : "border-orange-500/40 bg-gradient-to-r from-orange-500 via-orange-500 to-violet-700 hover:from-orange-400 hover:to-violet-600 text-black shadow-lg")}
+class={"font-bold py-1.5 px-3 sm:px-4 rounded-full flex items-center gap-2 transition-all text-xs sm:text-sm shrink-0 border " + (inputFlowBusy ? "bg-neutral-600 text-neutral-300 cursor-wait border-neutral-600 shadow-none" : "border-orange-500/40 bg-gradient-to-r from-orange-500 via-orange-500 to-violet-700 hover:from-orange-400 hover:to-violet-600 text-black shadow-lg")}
 title="Microphones, audio interfaces, and MIDI controllers"
 >
 {h(Mic, { "class": "w-4 h-4 shrink-0" })}
 {h(Music2, { "class": "w-4 h-4 shrink-0 opacity-90" })}
-<span class="hidden sm:inline">{inputFlowBusy || midi.midiFlowBusy ? "Scanning…" : (Object.keys(sourcesRef.current).length === 0 ? "Connect hardware" : "Add hardware")}</span>
-<span class="sm:hidden">{inputFlowBusy || midi.midiFlowBusy ? "…" : "I/O"}</span>
+<span class="hidden sm:inline">{inputFlowBusy ? "Scanning…" : (Object.keys(sourcesRef.current).length === 0 ? "Connect hardware" : "Add hardware")}</span>
+<span class="sm:hidden">{inputFlowBusy ? "…" : "I/O"}</span>
 </button>
 {activeTab === 'pedalboard' ? (
 <div class="flex items-center gap-2 shrink-0">
@@ -812,17 +956,20 @@ title={d.label || ("Unknown Input (" + d.deviceId.slice(0,5) + ")")}
 {h(Music2, { "class": "w-3.5 h-3.5 text-violet-400" })}
 <span class="text-[11px] font-bold text-violet-200/90 uppercase tracking-wide">MIDI in</span>
 </div>
-<p class="px-3 pt-1 pb-2 text-[10px] text-neutral-500 leading-snug">Controllers and keyboards (USB or Bluetooth). After you pick a port, drag the amber MIDI jack on the MIDI_IN node to your synth or MASTER OUT chain.</p>
+<p class="px-3 pt-1 pb-2 text-[10px] text-neutral-500 leading-snug">Controllers and keyboards (USB or Bluetooth). Some devices expose several host ports; those may appear as one row so you connect once. Then drag the amber MIDI jack on the MIDI_IN node to your synth or MASTER OUT chain.</p>
 {midiDeviceRows.length === 0 ? (
 <div class="px-4 pb-4 text-center text-xs text-neutral-500">No MIDI inputs found.</div>
 ) : (
 midiDeviceRows.map((row, ri) => (
 <button
-key={row["native"] === true ? "midi-native-" + String(row.index) : "midi-web-" + String(row.deviceId != null ? row.deviceId : ri)}
+key={midiHardwareRowKey(row, ri)}
 onClick={() => { void midi.connectMidiChoice(row); }}
 class="w-full text-left px-4 py-2.5 hover:bg-violet-950/35 transition-colors border-b border-neutral-700/40 text-sm text-white flex items-center gap-2 min-w-0"
 >
 <span class="truncate flex-1 min-w-0">{row.label || "MIDI device"}</span>
+{row.merged === true && row.members && row.members.length ? (
+<span class="shrink-0 text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded border border-violet-500/40 text-violet-200 bg-violet-950/50" title="All listed host ports are opened together">{"×" + String(row.members.length)}</span>
+) : null}
 {row.hardwareVisualId ? (
 <span class="shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border border-amber-500/50 text-amber-300 bg-amber-950/40" title={row.hardwareDisplayName || "Known hardware — digital twin on patch"}>Twin</span>
 ) : null}

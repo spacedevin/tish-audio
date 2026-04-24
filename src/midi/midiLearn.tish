@@ -1,0 +1,161 @@
+// Generic MIDI "learn" session. Modules build one with an ordered list of slot
+// ids, capture one MIDI event per slot, and persist the result themselves
+// (pair with midiLayoutTraining.saveMidiLayoutProfile).
+//
+// Usage pattern (inside a module that owns its own midi processor):
+//   let session = createMidiLearnSession({
+//     slotIds: ["padA1","padA2", ...],
+//     captureKinds: ["noteOn"],
+//     onComplete: (captured) => { ...write to runtime + persist... }
+//   });
+//   // in event processor:
+//   if (session && session.isActive()) { session.capture(ev); return; }
+//
+// The session itself has NO knowledge of MIDI transport / DOM / storage —
+// callers decide which kinds count and what to do on complete/cancel. That is
+// what makes the same helper reusable across pads, knobs, keybed, etc.
+
+export fn createMidiLearnSession(opts) {
+  const slotIds = opts && Array.isArray(opts.slotIds) ? opts.slotIds.slice() : [];
+  const captureKindsIn = opts && Array.isArray(opts.captureKinds) && opts.captureKinds.length > 0
+    ? opts.captureKinds.slice()
+    : ["noteOn"];
+  const onAdvance = opts && typeof opts.onAdvance === "function" ? opts.onAdvance : null;
+  const onComplete = opts && typeof opts.onComplete === "function" ? opts.onComplete : null;
+  const onCancel = opts && typeof opts.onCancel === "function" ? opts.onCancel : null;
+  // Dedup key (e.g. "cc:20" or "note:40") prevents a single physical control spamming
+  // many slots in one gesture — each slot must see a NEW key not seen earlier in the session.
+  const dedupKeyOf = opts && typeof opts.dedupKeyOf === "function" ? opts.dedupKeyOf : null;
+  const seenKeys = {};
+
+  const captured = {};
+  let cursor = 0;
+  let active = slotIds.length > 0;
+  let lastCaptureAt = 0;
+
+  const kindAllowed = (k) => {
+    if (k == null) {
+      return false;
+    }
+    let i = 0;
+    while (i < captureKindsIn.length) {
+      if (captureKindsIn[i] === k) {
+        return true;
+      }
+      i = i + 1;
+    }
+    return false;
+  };
+
+  const snapshotEv = (ev) => {
+    return {
+      kind: ev.kind,
+      note: ev.note != null ? ev.note : null,
+      channel: ev.channel != null ? ev.channel : null,
+      velocity: ev.velocity != null ? ev.velocity : null,
+      controller: ev.controller != null ? ev.controller : null,
+      value: ev.value != null ? ev.value : null,
+      sysexKey: ev.sysexKey != null ? ev.sysexKey : null,
+      sysexValue: ev.sysexValue != null ? ev.sysexValue : null,
+      when:
+        typeof performance !== "undefined" && performance.now ? performance.now() : 0
+    };
+  };
+
+  const finishIfDone = () => {
+    if (cursor < slotIds.length) {
+      return;
+    }
+    active = false;
+    if (onComplete) {
+      const snap = {};
+      const ks = Object.keys(captured);
+      let i = 0;
+      while (i < ks.length) {
+        snap[ks[i]] = captured[ks[i]];
+        i = i + 1;
+      }
+      onComplete(snap);
+    }
+  };
+
+  return {
+    isActive: () => active,
+    getCursor: () => cursor,
+    getTotal: () => slotIds.length,
+    getSlotIds: () => slotIds.slice(),
+    getCurrentSlot: () => (active && cursor < slotIds.length ? slotIds[cursor] : null),
+    getLastCaptureAt: () => lastCaptureAt,
+    getCaptured: () => {
+      const out = {};
+      const ks = Object.keys(captured);
+      let i = 0;
+      while (i < ks.length) {
+        out[ks[i]] = captured[ks[i]];
+        i = i + 1;
+      }
+      return out;
+    },
+    capture: (ev) => {
+      if (!active) {
+        return false;
+      }
+      if (cursor >= slotIds.length) {
+        return false;
+      }
+      if (!ev || !kindAllowed(ev.kind)) {
+        return false;
+      }
+      if (dedupKeyOf) {
+        const key = dedupKeyOf(ev);
+        if (key != null && seenKeys[String(key)] === true) {
+          return false;
+        }
+        if (key != null) {
+          seenKeys[String(key)] = true;
+        }
+      }
+      const slotId = slotIds[cursor];
+      const snap = snapshotEv(ev);
+      captured[slotId] = snap;
+      lastCaptureAt = snap.when;
+      const newCursor = cursor + 1;
+      cursor = newCursor;
+      if (onAdvance) {
+        onAdvance(slotId, snap, newCursor);
+      }
+      finishIfDone();
+      return true;
+    },
+    skip: () => {
+      if (!active) {
+        return;
+      }
+      if (cursor >= slotIds.length) {
+        return;
+      }
+      const slotId = slotIds[cursor];
+      cursor = cursor + 1;
+      if (onAdvance) {
+        onAdvance(slotId, null, cursor);
+      }
+      finishIfDone();
+    },
+    cancel: () => {
+      if (!active) {
+        return;
+      }
+      active = false;
+      if (onCancel) {
+        const snap = {};
+        const ks = Object.keys(captured);
+        let i = 0;
+        while (i < ks.length) {
+          snap[ks[i]] = captured[ks[i]];
+          i = i + 1;
+        }
+        onCancel(snap);
+      }
+    }
+  };
+}

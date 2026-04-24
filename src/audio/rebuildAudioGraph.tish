@@ -1,6 +1,48 @@
 import { makeDistortionCurve, makeAsymmetricCurve, makeRectifierCurve, makeBitcrusherCurve, createReverbIR } from "./dsp.tish"
 import { smoothAudioParam } from "./smoothAudioParam.tish"
-import { MODULE_REGISTRY } from "../modules/registry.tish"
+import {
+  MODULE_REGISTRY,
+  isSmkControlOutputPort,
+  isControlInputPort,
+  controlParamRangeForKey,
+  isSmk25FaceMidiInputPort,
+  isMidiGraphPortId,
+  isComboStyleMidiPort
+} from "../modules/registry.tish"
+import { buildMidiInMidiSink } from "../midi/midiInSink.tish"
+
+const buildSmkControlRoutes = (smkNodeId, conns, graphNodes) => {
+  const nodeById = {};
+  let ni = 0;
+  while (ni < graphNodes.length) {
+    const n = graphNodes[ni];
+    nodeById[n.id] = n;
+    ni = ni + 1;
+  }
+  const routes = {};
+  let ci = 0;
+  while (ci < conns.length) {
+    const c = conns[ci];
+    if (c.from === smkNodeId && isSmkControlOutputPort(c.fromPort) && isControlInputPort(c.toPort)) {
+      const fp = String(c.fromPort);
+      const slot = parseInt(fp.slice(4), 10);
+      const paramKey = c.ctrlParam != null && String(c.ctrlParam).length ? String(c.ctrlParam) : "";
+      if (paramKey.length && slot >= 1 && slot <= 16) {
+        const target = nodeById[c.to];
+        const modType = target && target["type"] ? target["type"] : "";
+        const range = controlParamRangeForKey(modType, paramKey);
+        routes[String(slot)] = {
+          toNodeId: c.to,
+          paramKey: paramKey,
+          min: range.min,
+          max: range.max
+        };
+      }
+    }
+    ci = ci + 1;
+  }
+  return routes;
+}
 
 export fn rebuildAudioGraph(ctx, deps, currentNodes, currentConns) {
 if (!ctx) return;
@@ -34,9 +76,10 @@ let analysers = {};
 let nodeParamSync = null;
 let smartGateRuntime = null;
 let midiSink = null;
+let smkMidiInboundBox = null;
 
 // BYPASS LOGIC
-if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter', 'midi_recorder'].includes(node["type"])) {
+if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter', 'midi_recorder', 'smk25_face'].includes(node["type"])) {
 inNode = ctx.createGain();
 outNode = inNode; 
 } 
@@ -69,6 +112,18 @@ if (built.analysers) analysers = built.analysers;
 if (built.nodeParamSync) nodeParamSync = built.nodeParamSync;
 if (built.smartGateRuntime) smartGateRuntime = built.smartGateRuntime;
 if (built.midiSink) midiSink = built.midiSink;
+if (built.smkMidiInbound && typeof built.smkMidiInbound === "object") {
+  smkMidiInboundBox = built.smkMidiInbound;
+}
+if (node["type"] === "smk25_face" && midiSink && typeof midiSink.installControlRoutes === "function") {
+  const routes = buildSmkControlRoutes(node.id, currentConns, currentNodes);
+  const applyFn = deps.applyNodeParam;
+  if (applyFn && typeof applyFn === "function") {
+    midiSink.installControlRoutes(routes, applyFn);
+  } else {
+    midiSink.installControlRoutes({}, null);
+  }
+}
 }
 else if (node["type"] === 'sm57_sim') {
 const hp = ctx.createBiquadFilter(); hp["type"] = 'highpass'; hp.frequency.value = 100;
@@ -675,6 +730,7 @@ inNode.gain.value = 0;
 outNode = ctx.createGain();
 outNode.gain.value = 0;
 inNode.connect(outNode);
+midiSink = buildMidiInMidiSink(node);
 }
 
 const finalOutPorts = outPorts || { main: outNode };
@@ -699,12 +755,16 @@ analyser: nodeAnalyser,
 analysers: analysers,
 _syncLiveParams: nodeParamSync,
 smartGateRuntime: smartGateRuntime,
-midiSink: midiSink
+midiSink: midiSink,
+smkMidiInbound: smkMidiInboundBox
 };
 });
 
 currentConns.forEach(conn => {
-if (conn.fromPort === 'midi' || conn.toPort === 'midi') {
+if (isMidiGraphPortId(conn.fromPort) || isMidiGraphPortId(conn.toPort)) {
+return;
+}
+if (isSmkControlOutputPort(conn.fromPort) || isControlInputPort(conn.toPort)) {
 return;
 }
 const fromData = nodeAudioMapRef.current[conn.from];
@@ -719,14 +779,39 @@ outAudioNode.connect(inAudioNode);
 });
 
 currentConns.forEach((conn) => {
-if (!(conn.fromPort === "midi" && conn.toPort === "midi")) {
-return;
-}
+const fp = conn.fromPort;
+const tp = conn.toPort;
 const fromData = nodeAudioMapRef.current[conn.from];
 const toData = nodeAudioMapRef.current[conn.to];
+if (fp === "midi" && tp === "midi") {
 if (fromData && fromData.midiSink && typeof fromData.midiSink.setMidiForward === "function") {
 const nextSink = toData && toData.midiSink ? toData.midiSink : null;
 fromData.midiSink.setMidiForward(nextSink);
+}
+return;
+}
+if (fp === "midi" && isSmk25FaceMidiInputPort(tp)) {
+if (fromData && fromData.midiSink && typeof fromData.midiSink.setMidiForward === "function" && toData && toData.smkMidiInbound) {
+const inbound = toData.smkMidiInbound[tp];
+if (inbound && typeof inbound.handleEvent === "function") {
+fromData.midiSink.setMidiForward(inbound);
+}
+}
+return;
+}
+if (
+fromData &&
+fromData.midiSink &&
+typeof fromData.midiSink.setMidiForwardCombo === "function" &&
+isComboStyleMidiPort(fp) &&
+isSmk25FaceMidiInputPort(tp) &&
+toData &&
+toData.smkMidiInbound
+) {
+const inbound = toData.smkMidiInbound[tp];
+if (inbound && typeof inbound.handleEvent === "function") {
+fromData.midiSink.setMidiForwardCombo(fp, inbound);
+}
 }
 });
 

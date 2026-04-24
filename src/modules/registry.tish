@@ -20,6 +20,7 @@ import * as hall_verb from './hall_verb/index.tish';
 import * as metal from './metal/index.tish';
 import * as midi_poly from './midi_poly/index.tish';
 import * as midi_recorder from './midi_recorder/index.tish';
+import * as smk25_face from './smk25_face/index.tish';
 import * as muff from './muff/index.tish';
 import * as noise_gate from './noise_gate/index.tish';
 import * as octa_fuzz from './octa_fuzz/index.tish';
@@ -132,6 +133,7 @@ export const MODULE_REGISTRY = {
     layout: compressor.compressor_layout,
     View: compressor.compressor_View,
     buildAudio: compressor.compressor_buildAudio,
+    acceptsControlInput: true,
   },
   'crossover': {
     type: crossover.crossover_type,
@@ -148,6 +150,7 @@ export const MODULE_REGISTRY = {
     layout: delay.delay_layout,
     View: delay.delay_View,
     buildAudio: delay.delay_buildAudio,
+    acceptsControlInput: true,
   },
   'ds1': {
     type: ds1.ds1_type,
@@ -196,6 +199,7 @@ export const MODULE_REGISTRY = {
     layout: hall_verb.hall_verb_layout,
     View: hall_verb.hall_verb_View,
     buildAudio: hall_verb.hall_verb_buildAudio,
+    acceptsControlInput: true,
   },
   'metal': {
     type: metal.metal_type,
@@ -224,6 +228,15 @@ export const MODULE_REGISTRY = {
     /** May emit a second MIDI cable (pass-through to downstream synth). */
     midiThrough: true,
   },
+  'smk25_face': {
+    type: smk25_face.smk25_face_type,
+    category: smk25_face.smk25_face_category,
+    metadata: smk25_face.smk25_face_metadata,
+    View: smk25_face.smk25_face_View,
+    buildAudio: smk25_face.smk25_face_buildAudio,
+    acceptsMidiInput: true,
+    midiThrough: true,
+  },
   'muff': {
     type: muff.muff_type,
     category: muff.muff_category,
@@ -231,6 +244,7 @@ export const MODULE_REGISTRY = {
     layout: muff.muff_layout,
     View: muff.muff_View,
     buildAudio: muff.muff_buildAudio,
+    acceptsControlInput: true,
   },
   'noise_gate': {
     type: noise_gate.noise_gate_type,
@@ -271,6 +285,7 @@ export const MODULE_REGISTRY = {
     layout: plate_verb.plate_verb_layout,
     View: plate_verb.plate_verb_View,
     buildAudio: plate_verb.plate_verb_buildAudio,
+    acceptsControlInput: true,
   },
   'rat': {
     type: rat.rat_type,
@@ -311,6 +326,7 @@ export const MODULE_REGISTRY = {
     layout: shimmer_verb.shimmer_verb_layout,
     View: shimmer_verb.shimmer_verb_View,
     buildAudio: shimmer_verb.shimmer_verb_buildAudio,
+    acceptsControlInput: true,
   },
   'slapback': {
     type: slapback.slapback_type,
@@ -352,6 +368,7 @@ export const MODULE_REGISTRY = {
     layout: spring_verb.spring_verb_layout,
     View: spring_verb.spring_verb_View,
     buildAudio: spring_verb.spring_verb_buildAudio,
+    acceptsControlInput: true,
   },
   'sub_mosh': {
     type: sub_mosh.sub_mosh_type,
@@ -482,6 +499,7 @@ const LEGACY_LIBRARY = {
     { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
     { type: 'midi_poly', label: 'MIDI Poly', color: 'from-violet-600 to-indigo-900', theme: 'dark', defaultParams: { level: 0.35, waveform: 0, brightness: 0.5 } },
     { type: 'midi_recorder', label: 'MIDI Recorder', color: 'from-amber-900 to-neutral-900', theme: 'dark', defaultParams: {} },
+    { type: 'smk25_face', label: 'SMK-25 layout', color: 'from-violet-900 via-purple-950 to-neutral-950', theme: 'dark', defaultParams: {} },
     { type: 'crossover', label: 'Freq Split', color: 'from-blue-800 to-indigo-950', theme: 'dark', defaultParams: { freq: 800 } },
     { type: 'splitter', label: 'Splitter', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { output: 1.0 } }
   ]
@@ -489,11 +507,155 @@ const LEGACY_LIBRARY = {
 
 export const PEDAL_LIBRARY = { ...LEGACY_LIBRARY };
 
+/** SMK-25 layout: encoder interface outputs ctrl1–ctrl16 (not audio; 9–16 = KNOB-B layer). */
+export fn isSmkControlOutputPort(portId) {
+  const s = String(portId || "");
+  if (s.length < 5 || s.slice(0, 4) !== "ctrl") {
+    return false;
+  }
+  const n = parseInt(s.slice(4), 10);
+  return Number.isFinite(n) && n >= 1 && n <= 16;
+}
+
+export fn isControlInputPort(portId) {
+  return portId === "ctrl";
+}
+
+/** SMK-25 layout: three logical MIDI inputs (device USB endpoints → separate patch jacks). */
+export fn isSmk25FaceMidiInputPort(portId) {
+  return portId === "midi1" || portId === "midi2" || portId === "midi3";
+}
+
+/** midi1…midi8 — combo MIDI_IN outs or other multi-leg MIDI edges (never Web Audio). */
+export fn isComboStyleMidiPort(portId) {
+  const s = String(portId || "");
+  if (s.length < 5 || s.slice(0, 4) !== "midi") {
+    return false;
+  }
+  const n = parseInt(s.slice(4), 10);
+  return Number.isFinite(n) && n >= 1 && n <= 8;
+}
+
+export fn isMidiGraphPortId(portId) {
+  return portId === "midi" || isSmk25FaceMidiInputPort(portId) || isComboStyleMidiPort(portId);
+}
+
+export fn getMidiInOutPortIds(node) {
+  if (!node || node["type"] !== "MIDI_IN") {
+    return ["midi"];
+  }
+  const p = node.params;
+  if (p && p.midiComboLayout === "smk25" && p.midiInputIds && p.midiInputIds.length) {
+    const o = [];
+    let j = 0;
+    const cap = p.midiInputIds.length < 8 ? p.midiInputIds.length : 8;
+    while (j < cap) {
+      o.push("midi" + String(j + 1));
+      j = j + 1;
+    }
+    return o;
+  }
+  return ["midi"];
+}
+
+/** First mapped param for a new SMK ctrl→pedal wire (prefers `mix` when present in module defaults). */
+export fn defaultCtrlParamKeyForModuleType(moduleType) {
+  const meta = MODULE_REGISTRY[moduleType] && MODULE_REGISTRY[moduleType].metadata;
+  const dp = meta && meta.defaultParams;
+  if (!dp || typeof dp !== "object") {
+    return "mix";
+  }
+  if (Object.prototype.hasOwnProperty.call(dp, "mix")) {
+    return "mix";
+  }
+  const keys = Object.keys(dp);
+  if (keys.length) {
+    return keys[0];
+  }
+  return "mix";
+}
+
+/** UI knob min/max for SMK ctrl→param mapping (matches RotaryKnob ranges on each module). */
+export fn controlParamRangeForKey(moduleType, paramKey) {
+  const key = String(paramKey || "");
+  const t = String(moduleType || "");
+  if (t === "delay") {
+    if (key === "time") {
+      return { min: 0, max: 8 };
+    }
+    if (key === "feedback" || key === "mix") {
+      return { min: 0, max: 1 };
+    }
+  }
+  if (t === "compressor") {
+    if (key === "threshold") {
+      return { min: -60, max: 0 };
+    }
+    if (key === "ratio") {
+      return { min: 1, max: 20 };
+    }
+    if (key === "makeup") {
+      return { min: 0, max: 5 };
+    }
+  }
+  if (t === "muff") {
+    if (key === "drive") {
+      return { min: 0, max: 1000 };
+    }
+    if (key === "tone") {
+      return { min: 100, max: 5000 };
+    }
+    if (key === "level") {
+      return { min: 0, max: 1 };
+    }
+  }
+  if (t === "hall_verb" || t === "plate_verb" || t === "spring_verb") {
+    if (key === "mix") {
+      return { min: 0, max: 1 };
+    }
+    if (key === "decay") {
+      return { min: 0, max: 8 };
+    }
+  }
+  if (t === "shimmer_verb") {
+    if (key === "mix" || key === "sheen") {
+      return { min: 0, max: 1 };
+    }
+    if (key === "decay") {
+      return { min: 0, max: 8 };
+    }
+  }
+  return { min: 0, max: 1 };
+}
+
+const SMK25_FACE_OUT_PORTS = [
+  "midi",
+  "ctrl1",
+  "ctrl2",
+  "ctrl3",
+  "ctrl4",
+  "ctrl5",
+  "ctrl6",
+  "ctrl7",
+  "ctrl8",
+  "ctrl9",
+  "ctrl10",
+  "ctrl11",
+  "ctrl12",
+  "ctrl13",
+  "ctrl14",
+  "ctrl15",
+  "ctrl16"
+];
+
 export const getNodePorts = (node) => {
   if (!node) return { "in": ['main'], "out": ['main'] };
-  if (node["type"] === 'MIDI_IN') return { "in": [], "out": ['midi'] };
+  if (node["type"] === 'MIDI_IN') return { "in": [], "out": getMidiInOutPortIds(node) };
   if (node["type"] === 'SYS_IN') return { "in": ['main'], "out": ['main'] };
   if (node["type"] === 'midi_recorder') return { "in": ['midi'], "out": ['midi'] };
+  if (node["type"] === 'smk25_face') {
+    return { "in": ['midi1', 'midi2', 'midi3'], "out": SMK25_FACE_OUT_PORTS };
+  }
   if (node["type"] === 'midi_poly') return { "in": ['midi'], "out": ['main'] };
   const regAccept = MODULE_REGISTRY[node["type"]];
   if (regAccept && regAccept.acceptsMidiInput === true) {
@@ -514,6 +676,10 @@ export const getNodePorts = (node) => {
     const ins = [];
     for(let i=1; i<=numCh; i = i + 1) ins.push("ch" + String(i));
     return { "in": ins, "out": ['main'] };
+  }
+  const regMod = MODULE_REGISTRY[node["type"]];
+  if (regMod && regMod.acceptsControlInput === true) {
+    return { "in": ['main', 'ctrl'], "out": ['main'] };
   }
   return { "in": ['main'], "out": ['main'] };
 };

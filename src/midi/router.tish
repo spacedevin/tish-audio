@@ -1,5 +1,7 @@
 // Central dispatch for normalized MIDI events from Web MIDI and native (Tauri) sources.
 
+import { isMidiDebugEnabled, midiDebugLog } from "./midiDebug.tish"
+
 let __midiListeners = [];
 
 export fn subscribeMidiDispatch(listener) {
@@ -31,7 +33,95 @@ export fn dispatchMidiEvent(ev) {
   }
 }
 
-export fn parseMidiBytes(bytes, inputId, whenMs) {
+const mergeMidiEvSourceHints = (ev, hints) => {
+  if (!ev || !hints || typeof hints !== "object") {
+    return ev;
+  }
+  if (hints.sourcePortName != null && String(hints.sourcePortName).length) {
+    ev.sourcePortName = String(hints.sourcePortName);
+  }
+  if (hints.sourceNativeDeviceIndex != null && Number.isFinite(hints.sourceNativeDeviceIndex)) {
+    ev.sourceNativeDeviceIndex = hints.sourceNativeDeviceIndex;
+  }
+  if (hints.sourceWebInputId != null && String(hints.sourceWebInputId).length) {
+    ev.sourceWebInputId = String(hints.sourceWebInputId);
+  }
+  return ev;
+};
+
+/** Device index from logical ids like `native:2:abc` (cpal / merged native ports). */
+export fn nativeMidiInputDeviceIndexFromLogicalId(logicalId) {
+  const s = String(logicalId || "");
+  if (s.indexOf("native:") !== 0) {
+    return null;
+  }
+  const parts = s.split(":");
+  if (parts.length < 2) {
+    return null;
+  }
+  const n = parseInt(parts[1], 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * M-VAVE / SINCO SMK-25 II style vendor packets (Mixxx maps these): F0 35 59 … F7.
+ * Encoders often arrive as sysex "pots" (0x60–0x67) even when Web MIDI sysex is enabled.
+ */
+export fn tryDispatchMvaveSmk25Sysex(bytes, inputId, whenMs, hints) {
+  if (!bytes || bytes.length < 6) {
+    return false;
+  }
+  if (bytes[0] !== 240 || bytes[1] !== 53 || bytes[2] !== 89) {
+    return false;
+  }
+  if (bytes[bytes.length - 1] !== 247) {
+    return false;
+  }
+  const when = typeof whenMs === "number" && Number.isFinite(whenMs) ? whenMs : 0;
+  const id = String(inputId || "");
+  const d3 = bytes[3];
+  if (d3 >= 96 && d3 <= 103) {
+    const cc = 30 + (d3 - 96);
+    const v = bytes[5] != null ? bytes[5] & 127 : 0;
+    const ev = mergeMidiEvSourceHints(
+      { kind: "cc", inputId: id, channel: 0, controller: cc, value: v, when, sysexDerived: true },
+      hints
+    );
+    dispatchMidiEvent(ev);
+    return true;
+  }
+  if (d3 === 16) {
+    const d4 = bytes[4] != null ? bytes[4] : 0;
+    const v5 = bytes[5] != null ? bytes[5] & 127 : 0;
+    if (isMidiDebugEnabled()) {
+      midiDebugLog("mvave sysex button", { inputId: id, key: d4, value: v5 });
+    }
+    dispatchMidiEvent(
+      mergeMidiEvSourceHints(
+        { kind: "mvaveSmk25SysexBtn", inputId: id, when, sysexKey: d4, sysexValue: v5 },
+        hints
+      )
+    );
+    return true;
+  }
+  return false;
+}
+
+/** Web/native raw packet: sysex (M-VAVE) or standard voice bytes. */
+export fn dispatchIncomingMidiBytes(bytes, inputId, whenMs, hints) {
+  if (!bytes || bytes.length < 1) {
+    return;
+  }
+  if (tryDispatchMvaveSmk25Sysex(bytes, inputId, whenMs, hints)) {
+    return;
+  }
+  const ev = parseMidiBytes(bytes, String(inputId), whenMs, hints);
+  if (ev) {
+    dispatchMidiEvent(ev);
+  }
+}
+
+export fn parseMidiBytes(bytes, inputId, whenMs, hints) {
   if (!bytes || bytes.length < 1) {
     return null;
   }
@@ -51,28 +141,28 @@ export fn parseMidiBytes(bytes, inputId, whenMs) {
     const note = u8[1];
     const vel = u8[2];
     if (vel === 0) {
-      return { kind: "noteOff", inputId, channel, note, velocity: 0, when };
+      return mergeMidiEvSourceHints({ kind: "noteOff", inputId, channel, note, velocity: 0, when }, hints);
     }
-    return { kind: "noteOn", inputId, channel, note, velocity: vel, when };
+    return mergeMidiEvSourceHints({ kind: "noteOn", inputId, channel, note, velocity: vel, when }, hints);
   }
   if (cmd === 128) {
     if (u8.length < 3) {
       return null;
     }
-    return { kind: "noteOff", inputId, channel, note: u8[1], velocity: u8[2], when };
+    return mergeMidiEvSourceHints({ kind: "noteOff", inputId, channel, note: u8[1], velocity: u8[2], when }, hints);
   }
   if (cmd === 176) {
     if (u8.length < 3) {
       return null;
     }
-    return { kind: "cc", inputId, channel, controller: u8[1], value: u8[2], when };
+    return mergeMidiEvSourceHints({ kind: "cc", inputId, channel, controller: u8[1], value: u8[2], when }, hints);
   }
   if (cmd === 224) {
     if (u8.length < 3) {
       return null;
     }
     const value14 = u8[1] | (u8[2] << 7);
-    return { kind: "pitchBend", inputId, channel, value14, when };
+    return mergeMidiEvSourceHints({ kind: "pitchBend", inputId, channel, value14, when }, hints);
   }
   return null;
 }
@@ -95,10 +185,12 @@ export fn feedNativeMidiPayload(payload) {
     return;
   }
   const when = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
-  const ev = parseMidiBytes(bytes, String(inputId), when);
-  if (ev) {
-    dispatchMidiEvent(ev);
+  const hints = {};
+  const devIdx = nativeMidiInputDeviceIndexFromLogicalId(String(inputId));
+  if (devIdx != null) {
+    hints.sourceNativeDeviceIndex = devIdx;
   }
+  dispatchIncomingMidiBytes(bytes, String(inputId), when, hints);
 }
 
 const __webCleanups = {};
@@ -136,19 +228,102 @@ export fn attachWebMidiInput(logicalId, midiInput) {
       arr.push(data[i]);
       i = i + 1;
     }
-    const ev = parseMidiBytes(arr, k, when);
-    if (ev) {
-      dispatchMidiEvent(ev);
-    }
+    const webHints = {
+      sourcePortName: midiInput.name != null ? String(midiInput.name) : "",
+      sourceWebInputId: midiInput.id != null ? String(midiInput.id) : ""
+    };
+    dispatchIncomingMidiBytes(arr, k, when, webHints);
   };
   __webCleanups[k] = () => {
     midiInput.onmidimessage = null;
   };
 }
 
+/**
+ * Several Web MIDI inputs under one detach key (`canonicalId`).
+ * If `perPortLogicalIds` is provided and matches `midiInputs.length`, each port dispatches with its own
+ * `inputId` so combo MIDI_IN (`midiInputIds` demux) matches native multi-endpoint behavior.
+ */
+export fn attachWebMidiMerged(canonicalId, midiInputs, perPortLogicalIds) {
+  const k = String(canonicalId);
+  detachWebMidiInput(k);
+  if (!midiInputs || !midiInputs.length) {
+    return;
+  }
+  const ids = perPortLogicalIds;
+  let usePerPort = false;
+  if (ids && ids.length === midiInputs.length) {
+    usePerPort = true;
+    let zi = 0;
+    while (zi < ids.length) {
+      if (ids[zi] == null || !String(ids[zi]).length) {
+        usePerPort = false;
+        break;
+      }
+      zi = zi + 1;
+    }
+  }
+  const cleanups = [];
+  let mi = 0;
+  while (mi < midiInputs.length) {
+    const input = midiInputs[mi];
+    if (input) {
+      const mergedHints = {
+        sourcePortName: input.name != null ? String(input.name) : "",
+        sourceWebInputId: input.id != null ? String(input.id) : ""
+      };
+      const logicalForMsg = usePerPort ? String(ids[mi]) : k;
+      input.onmidimessage = (e) => {
+        const when = e.timeStamp != null ? e.timeStamp : (typeof performance !== "undefined" && performance.now ? performance.now() : 0);
+        const data = e.data;
+        if (!data || data.length < 1) {
+          return;
+        }
+        const arr = [];
+        let i = 0;
+        while (i < data.length) {
+          arr.push(data[i]);
+          i = i + 1;
+        }
+        dispatchIncomingMidiBytes(arr, logicalForMsg, when, mergedHints);
+      };
+      const inpRef = input;
+      cleanups.push(() => {
+        inpRef.onmidimessage = null;
+      });
+    }
+    mi = mi + 1;
+  }
+  __webCleanups[k] = () => {
+    let ci = 0;
+    while (ci < cleanups.length) {
+      try {
+        cleanups[ci]();
+      } catch (eC) {}
+      ci = ci + 1;
+    }
+  };
+  const dbgNames = [];
+  let di = 0;
+  while (di < midiInputs.length) {
+    const inpD = midiInputs[di];
+    dbgNames.push(inpD && inpD.name != null ? String(inpD.name) : "(null)");
+    di = di + 1;
+  }
+  midiDebugLog("attachWebMidiMerged", { canonicalId: k, inputCount: midiInputs.length, names: dbgNames });
+}
+
 export fn requestWebMidiAccess() {
   if (typeof navigator === "undefined" || !navigator.requestMIDIAccess) {
     return Promise.reject(new Error("Web MIDI API not available"));
   }
-  return navigator.requestMIDIAccess({ sysex: false });
+  return navigator.requestMIDIAccess({ sysex: true }).then(
+    (access) => access,
+    (eSy) => {
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("[TishAudio:midi] Web MIDI with sysex denied; retrying without (knobs may be CC-only)", eSy);
+      }
+      return navigator.requestMIDIAccess({ sysex: false });
+    }
+  );
 }

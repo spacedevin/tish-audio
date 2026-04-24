@@ -1,0 +1,42 @@
+// Optional user "training" for MIDI layout maps (no official multi-port split docs from vendors).
+// Persists in localStorage; modules can read defaults and override pad roots / knob CC lists.
+//
+// SMK-25 family (profile id mvave_smk25_family) optional keys:
+// - knobMidiChannel: 1–16 — if set, encoder CCs only on this MIDI channel (overrides default “all channels”).
+// - knobMidiChannelAll: false without knobMidiChannel → lock to default channel 3 only.
+// - knobMidiChannelAll: true — accept encoder CC on any MIDI channel (default when nothing set in profile).
+// - knobSourcePortNumber / knobSourceNameIncludes / knobSourceAllPorts: optional USB port gate (off unless set).
+//
+// Debug: localhost logs by default. Override: tish_midi_debug=1 (on) or =0 (off). ?midi_debug=1 also enables.
+// padBankSysexData4: optional — sysex F0 35 59 … d3=16 button packet data[4] (decimal) to toggle PAD-B bank label (value≥64). Pads still track A/B from pad note map when you strike pads.
+// knobBankBSysexData4: same shape — data[4] for the KNOB-B button so the twin can show the B encoder row as “armed”.
+// pitchStripMidiChannel: 1–16 — which MIDI channel’s pitch bend drives the left strip only (default 1). Other channels’ bend can drive KNOB-B (see knobBPitchMidiChannel).
+// knobBPitchMidiChannel: 1–16 — pitch bend on this channel updates the last KNOB-B slot touched via high-note latching (default 3). Set knobBPitchLatchOff: true to disable latch mapping.
+// knobBNotes: int[8] — firmware “encoder identify” notes for the B row (default 104…111). knobBCcs: int[8] — optional alternate B-row CC numbers on the knob channel.
+// smkTransportNotes / smkTransportRecorderNotes: length-3 arrays — remap Play/Stop/Rec (defaults 94,93,95 → 36,37,38) on MIDI passthrough for MIDI Recorder / synths.
+
+const prefix = "tish_midi_layout_v1:";
+
+export fn loadMidiLayoutProfile(profileId) {
+  if (!profileId || typeof localStorage === "undefined") {
+    return null;
+  }
+  try {
+    const raw = localStorage.getItem(prefix + String(profileId));
+    if (!raw || typeof raw !== "string") {
+      return null;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+export fn saveMidiLayoutProfile(profileId, data) {
+  if (!profileId || typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    localStorage.setItem(prefix + String(profileId), JSON.stringify(data != null ? data : {}));
+  } catch (e) {}
+}

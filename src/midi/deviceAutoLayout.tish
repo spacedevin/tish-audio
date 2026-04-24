@@ -1,0 +1,61 @@
+// Profiles for "click device row → add layout module + default patch cables". SMK-25 lives here; add
+// other `hardwareVisualId` handlers the same way so useMidiPatch stays generic.
+
+import { HARDWARE_MVAVE_SMK25_FAMILY } from "../inputDevices/midiHardwareVisuals.tish"
+import { smk25_face_category, smk25_face_metadata, smk25_face_type } from "../modules/smk25_face/index.tish"
+
+export fn newGraphEdgeId() {
+  return Math.random().toString(36).substr(2, 9);
+}
+
+/** Merged menu row for SMK-25 family (multi-USB composite). */
+export fn deviceRowIsSmk25FamilyCombo(row) {
+  if (!row || row.hardwareVisualId !== HARDWARE_MVAVE_SMK25_FAMILY) {
+    return false;
+  }
+  if (row.merged !== true || !row.members || row.members.length < 2) {
+    return false;
+  }
+  return true;
+}
+
+export fn smk25ComboPortCount(row) {
+  if (!row || !row.members || !row.members.length) {
+    return 0;
+  }
+  return row.members.length;
+}
+
+export fn buildSmk25LayoutNode(smkId, x, y) {
+  const meta = smk25_face_metadata;
+  return {
+    id: smkId,
+    "type": smk25_face_type,
+    label: meta.label,
+    category: smk25_face_category,
+    theme: meta.theme,
+    color: meta.color,
+    params: meta.defaultParams && typeof meta.defaultParams === "object" ? { ...meta.defaultParams } : {},
+    bypassed: false,
+    x: x,
+    y: y
+  };
+}
+
+/** One edge per USB port: MIDI_IN midiN → smk25_face midiN (same logical port id on both sides). */
+export fn smk25DefaultComboEdges(midiInNodeId, smkId, portCount) {
+  const edges = [];
+  let i = 0;
+  while (i < portCount) {
+    const port = "midi" + String(i + 1);
+    edges.push({
+      id: newGraphEdgeId(),
+      from: midiInNodeId,
+      fromPort: port,
+      to: smkId,
+      toPort: port
+    });
+    i = i + 1;
+  }
+  return edges;
+}
