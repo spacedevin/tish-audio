@@ -18,6 +18,7 @@ import { isMidiDebugEnabled, midiDebugLog } from "./midiDebug.tish"
 import { deviceRowIsSmk25FamilyCombo, smk25DefaultComboEdges } from "./deviceAutoLayout.tish"
 import { getHardwareAutoRig, rigPortDescriptor, detectAudioCapabilities } from "./hardwareAutoRig.tish"
 import { perfMarkMidiEvent } from "../ui/PerfHud.tish"
+import { pushRawMidiEvent } from "./midiRawTraceHub.tish"
 import {
   loadSynthQualitySettings,
   saveSynthQualitySettings
@@ -530,7 +531,7 @@ export fn useMidiPatch(
     );
   };
 
-  const onRemoveMidiNode = (node) => {
+  const teardownMidiInputForNode = (node) => {
     if (!node || node["type"] !== "MIDI_IN" || !node.params) {
       return;
     }
@@ -549,8 +550,231 @@ export fn useMidiPatch(
     } else if (mid) {
       detachWebMidiInput(mid);
     }
-    if (p.midiBindingId) {
-      setMidiBindings((prev) => asArray(prev).filter((b) => b.id !== p.midiBindingId));
+  };
+
+  const onRemoveMidiNode = (node) => {
+    if (!node || node["type"] !== "MIDI_IN" || !node.params) {
+      return;
+    }
+    teardownMidiInputForNode(node);
+    if (node.params.midiBindingId) {
+      setMidiBindings((prev) => asArray(prev).filter((b) => b.id !== node.params.midiBindingId));
+    }
+  };
+
+  // Pull `<deviceIndex>` out of "native:<idx>:<bindingPrefix>".
+  const nativeIndexFromLogicalId = (logicalId) => {
+    const s = String(logicalId || "");
+    if (s.indexOf("native:") !== 0) {
+      return null;
+    }
+    const parts = s.split(":");
+    if (parts.length < 2) {
+      return null;
+    }
+    const n = parseInt(parts[1], 10);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // "web:<deviceId>" or "web:<deviceId>:<bindingPrefix>" → <deviceId>.
+  const webDeviceIdFromLogicalId = (logicalId) => {
+    const s = String(logicalId || "");
+    if (s.indexOf("web:") !== 0) {
+      return null;
+    }
+    const tail = s.slice(4);
+    const lastColon = tail.lastIndexOf(":");
+    if (lastColon < 0) {
+      return tail;
+    }
+    return tail.slice(0, lastColon);
+  };
+
+  async fn reopenMidiInputForNode(node) {
+    if (!node || node["type"] !== "MIDI_IN" || !node.params) {
+      return;
+    }
+    const p = node.params;
+    const midiInputId = p.midiInputId;
+    if (!midiInputId) {
+      return;
+    }
+    if (p.nativeMidi === true && isTauriApp()) {
+      const otaM = window.__OTA_BRIDGE__;
+      if (!otaM || !otaM.invoke) {
+        return;
+      }
+      try {
+        await ensureNativeMidiListener();
+      } catch (eL) {
+        console.warn("[TishAudio:midi] reopen: native listener", eL);
+      }
+      const ids = p.midiInputIds && p.midiInputIds.length ? p.midiInputIds : [midiInputId];
+      let si = 0;
+      while (si < ids.length) {
+        const oneId = ids[si];
+        const idx = nativeIndexFromLogicalId(oneId);
+        if (idx != null) {
+          try {
+            await otaM.invoke("start_native_midi_input", { args: { deviceIndex: idx, inputId: oneId } });
+          } catch (eN) {
+            console.warn("[TishAudio:midi] reopen: start_native_midi_input failed", { inputId: oneId, error: eN });
+          }
+        }
+        si = si + 1;
+      }
+      return;
+    }
+    let access = midiAccessRef.current;
+    if (!access) {
+      try {
+        access = await requestWebMidiAccessWithTimeout();
+        midiAccessRef.current = access;
+      } catch (eAcc) {
+        console.warn("[TishAudio:midi] reopen: MIDIAccess unavailable", eAcc);
+        return;
+      }
+    }
+    if (p.midiInputIds && p.midiInputIds.length) {
+      const inputs = [];
+      let mi = 0;
+      while (mi < p.midiInputIds.length) {
+        const did = webDeviceIdFromLogicalId(p.midiInputIds[mi]);
+        const inp = did != null ? access.inputs.get(did) : null;
+        if (inp) {
+          inputs.push(inp);
+        }
+        mi = mi + 1;
+      }
+      if (inputs.length) {
+        attachWebMidiMerged(midiInputId, inputs, p.midiInputIds);
+      } else {
+        console.warn("[TishAudio:midi] reopen: no merged Web MIDI inputs found for binding", p.midiBindingId);
+      }
+      return;
+    }
+    const did = p.portKey != null && String(p.portKey).length
+      ? String(p.portKey)
+      : webDeviceIdFromLogicalId(midiInputId);
+    const inp = did != null ? access.inputs.get(did) : null;
+    if (inp) {
+      attachWebMidiInput(midiInputId, inp);
+    } else {
+      console.warn("[TishAudio:midi] reopen: Web MIDI input not found", { deviceId: did, midiInputId: midiInputId });
+    }
+  };
+
+  // Collect every logical input id a MIDI_IN node owns (single + merged members).
+  const collectLogicalInputIds = (node) => {
+    const out = [];
+    const p = node && node.params;
+    if (!p) return out;
+    if (p.midiInputId) {
+      out.push(String(p.midiInputId));
+    }
+    if (Array.isArray(p.midiInputIds)) {
+      let i = 0;
+      while (i < p.midiInputIds.length) {
+        const v = p.midiInputIds[i];
+        if (v) {
+          out.push(String(v));
+        }
+        i = i + 1;
+      }
+    }
+    return out;
+  };
+
+  /**
+   * Apply a workspace snapshot's MIDI side. Idempotent for MIDI_IN nodes that
+   * exist (with the same logical input ids) in both states: we leave their
+   * OS-level routing alone — tearing it down + restarting it would race the
+   * Tauri side (stop is fire-and-forget, start is awaited) and silently break
+   * the input stream that drives the synths.
+   *
+   * Only nodes that disappear from the snapshot get torn down, and only nodes
+   * that genuinely appear get re-opened. Cross-machine port lookups may miss;
+   * the node stays on the canvas and a warning is logged.
+   */
+  async fn applyWorkspaceSnapshot(opts) {
+    const o = opts || {};
+    const prev = Array.isArray(o.previousMidiInNodes) ? o.previousMidiInNodes : [];
+    const next = Array.isArray(o.midiInNodes) ? o.midiInNodes : [];
+    const bindings = Array.isArray(o.midiBindings) ? o.midiBindings : [];
+
+    const prevAttachedIds = {};
+    let pi = 0;
+    while (pi < prev.length) {
+      const ids = collectLogicalInputIds(prev[pi]);
+      let ii = 0;
+      while (ii < ids.length) {
+        prevAttachedIds[ids[ii]] = true;
+        ii = ii + 1;
+      }
+      pi = pi + 1;
+    }
+
+    const nextAttachedIds = {};
+    let ni0 = 0;
+    while (ni0 < next.length) {
+      const ids = collectLogicalInputIds(next[ni0]);
+      let ji = 0;
+      while (ji < ids.length) {
+        nextAttachedIds[ids[ji]] = true;
+        ji = ji + 1;
+      }
+      ni0 = ni0 + 1;
+    }
+
+    // Teardown only previous nodes whose every logical input is gone in next.
+    let pj = 0;
+    while (pj < prev.length) {
+      const node = prev[pj];
+      const ids = collectLogicalInputIds(node);
+      let anyKept = false;
+      let li = 0;
+      while (li < ids.length) {
+        if (nextAttachedIds[ids[li]]) {
+          anyKept = true;
+          break;
+        }
+        li = li + 1;
+      }
+      if (!anyKept) {
+        teardownMidiInputForNode(node);
+      }
+      pj = pj + 1;
+    }
+
+    setMidiBindings(bindings);
+
+    if (next.length) {
+      try {
+        await ensureAudioEngineShell();
+      } catch (eA) {
+        console.warn("[TishAudio:midi] applyWorkspaceSnapshot: ensureAudioEngineShell", eA);
+      }
+      setAudioReady(true);
+
+      // Reopen only nodes whose logical inputs are not already attached.
+      let ni = 0;
+      while (ni < next.length) {
+        const node = next[ni];
+        const ids = collectLogicalInputIds(node);
+        let alreadyAttached = ids.length > 0;
+        let lj = 0;
+        while (lj < ids.length) {
+          if (!prevAttachedIds[ids[lj]]) {
+            alreadyAttached = false;
+            break;
+          }
+          lj = lj + 1;
+        }
+        if (!alreadyAttached) {
+          await reopenMidiInputForNode(node);
+        }
+        ni = ni + 1;
+      }
     }
   };
 
@@ -604,6 +828,7 @@ export fn useMidiPatch(
           bi = bi + 1;
           continue;
         }
+        pushRawMidiEvent(ev, b.id);
         const midiInNodeId = "midi_in_" + b.id;
         const inBox = nodeAudioMapRef.current[midiInNodeId];
         if (inBox && inBox.midiSink && typeof inBox.midiSink.handleEvent === "function") {
@@ -644,6 +869,9 @@ export fn useMidiPatch(
       void connectMidiChoiceInner(row);
     },
     updateMidiBindingTarget: updateMidiBindingTarget,
-    onRemoveMidiNode: onRemoveMidiNode
+    onRemoveMidiNode: onRemoveMidiNode,
+    applyWorkspaceSnapshot: (opts) => {
+      void applyWorkspaceSnapshot(opts);
+    }
   };
 }

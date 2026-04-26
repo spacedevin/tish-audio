@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, h, runBatched, useMemo } from "lattish"
-import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2, SettingsGear } from "./icons.tish"
+import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2, SettingsGear, FolderOpen } from "./icons.tish"
 import {
   PEDAL_LIBRARY,
   MODULE_REGISTRY,
@@ -29,7 +29,11 @@ import { useMidiPatch } from "./midi/useMidiPatch.tish"
 import { registerBuiltinIrModules } from "./render/registerBuiltinIrModules.tish"
 import { SynthQualityPanel } from "./ui/SynthQualityPanel.tish"
 import { preloadSynthWorkletModules } from "./audio/synth/workletPreload.tish"
-import { PerfHud, perfHudInitialVisible, perfMarkRender } from "./ui/PerfHud.tish"
+import { perfMarkRender } from "./ui/PerfHud.tish"
+import { DebugHudShell, debugHudInitialState } from "./ui/DebugHudShell.tish"
+import { WorkspaceManagerPanel } from "./ui/WorkspaceManagerPanel.tish"
+import { workspaceIdFromCurrentUrl } from "./workspace/workspaceStorage.tish"
+import { resolveWorkspace } from "./workspace/workspaceResolve.tish"
 export fn App() {
 perfMarkRender();
 registerBuiltinIrModules();
@@ -49,7 +53,10 @@ let [showHardwareMenu, setShowHardwareMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
 let [showModuleDebug, setShowModuleDebug] = useState(false);
 let [showSynthQuality, setShowSynthQuality] = useState(false);
-let [showPerfHud, setShowPerfHud] = useState(perfHudInitialVisible());
+const debugHudInit = debugHudInitialState();
+let [showDebugHud, setShowDebugHud] = useState(debugHudInit.visible);
+let [debugHudTab, setDebugHudTab] = useState(debugHudInit.tab);
+let [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
 let [audioGraphTick, setAudioGraphTick] = useState(0);
 let [inputFlowBusy, setInputFlowBusy] = useState(false);
 let [micDenied, setMicDenied] = useState(false);
@@ -130,7 +137,7 @@ if (e.code !== "Backquote") return;
 const el = e.target;
 if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
 e.preventDefault();
-setShowPerfHud((v) => !v);
+setShowDebugHud((v) => !v);
 };
 window.addEventListener("keydown", onKeyDown, true);
 return () => window.removeEventListener("keydown", onKeyDown, true);
@@ -927,6 +934,75 @@ setConnections([]);
 });
 };
 
+const getWorkspaceSnapshot = () => {
+return {
+nodes: nodesRef.current,
+connections: connectionsRef.current,
+midiBindings: midi.midiBindings
+};
+};
+
+const applyWorkspaceDoc = (doc) => {
+if (!doc || !doc.patch) {
+return;
+}
+const previousMidiInNodes = nodesRef.current.filter((n) => n["type"] === "MIDI_IN");
+const nextNodes = Array.isArray(doc.patch.nodes) ? doc.patch.nodes : [];
+const nextConnections = Array.isArray(doc.patch.connections) ? doc.patch.connections : [];
+const nextBindings = Array.isArray(doc.midiBindings) ? doc.midiBindings : [];
+const nextMidiInNodes = nextNodes.filter((n) => n["type"] === "MIDI_IN");
+runBatched(() => {
+setNodes(nextNodes);
+setConnections(nextConnections);
+});
+midi.applyWorkspaceSnapshot({
+previousMidiInNodes: previousMidiInNodes,
+midiInNodes: nextMidiInNodes,
+midiBindings: nextBindings
+});
+};
+
+useEffect(() => {
+if (typeof window === "undefined") {
+return;
+}
+const id = workspaceIdFromCurrentUrl();
+if (!id) {
+return;
+}
+const guardKey = "tish_workspace_applied:" + id;
+let alreadyApplied = false;
+try {
+alreadyApplied = window.sessionStorage && window.sessionStorage.getItem(guardKey) === "1";
+} catch (eS) {}
+if (alreadyApplied) {
+return;
+}
+let cancelled = false;
+void resolveWorkspace(id).then((doc) => {
+if (cancelled || !doc) {
+if (!doc && typeof console !== "undefined" && console.warn) {
+console.warn("[TishAudio:workspace] could not resolve shared workspace id", id);
+}
+return;
+}
+try {
+if (window.sessionStorage) window.sessionStorage.setItem(guardKey, "1");
+} catch (eS2) {}
+applyWorkspaceDoc(doc);
+try {
+if (window.history && window.history.replaceState) {
+const qp = new URLSearchParams(window.location.search || "");
+qp.delete("workspace");
+const qs = qp.toString();
+const next = window.location.pathname + (qs.length ? ("?" + qs) : "") + (window.location.hash || "");
+window.history.replaceState(null, "", next);
+}
+} catch (eR) {}
+});
+return () => { cancelled = true; };
+}, []);
+
 fn onTauriTitlebarPointerDown(e) {
 if (!isTauriApp()) {
 return;
@@ -1160,11 +1236,18 @@ const tuningScene = useMemo(() => {
   return buildTuningScene(w, h, activeTab === "chords" ? "chords" : "tuning");
 }, [renderBackendEnabled, activeTab]);
 
-const perfHud = showPerfHud ? h(PerfHud, {}) : null;
+const debugHud = showDebugHud ? h(DebugHudShell, {
+  tab: debugHudTab,
+  onTabChange: setDebugHudTab,
+  onClose: () => setShowDebugHud(false),
+  midiBindings: midi.midiBindings,
+  nodes: nodes,
+  nodeAudioMapRef: nodeAudioMapRef
+}) : null;
 
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans select-none">
-{perfHud}
+{debugHud}
 {micDenied && (
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" style={{ zIndex: 9999 }}>
 <div class="bg-neutral-900 border border-red-500/60 rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 flex flex-col gap-5">
@@ -1229,6 +1312,13 @@ class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-orange-500
 </button>
 <button  onClick={clearBoard} class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-900/80 bg-red-950/30 hover:bg-red-900/50 text-red-400 text-xs font-bold">
 {h(Trash2, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">CLEAR</span>
+</button>
+<button
+onClick={() => { setShowModuleLibrary(false); setShowHardwareMenu(false); setShowWorkspaceManager(true); }}
+class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-neutral-600 bg-neutral-900/80 text-neutral-300 hover:text-orange-200 hover:border-orange-500/60 text-xs font-bold"
+title="Save / load / share workspaces"
+>
+{h(FolderOpen, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">WORKSPACES</span>
 </button>
 <button 
 onClick={() => { setShowModuleLibrary(false); setShowModuleDebug(prev => !prev); }} 
@@ -1356,6 +1446,12 @@ audioCtx={audioCtxRef.current}
 ) : null}
 </div>
 <SynthQualityPanel open={showSynthQuality} onClose={() => setShowSynthQuality(false)} onApplied={() => setAudioGraphTick((n) => n + 1)} />
+<WorkspaceManagerPanel
+open={showWorkspaceManager}
+onClose={() => setShowWorkspaceManager(false)}
+getCurrentSnapshot={getWorkspaceSnapshot}
+onLoad={applyWorkspaceDoc}
+/>
 </div>
 );
 }

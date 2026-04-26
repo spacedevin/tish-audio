@@ -12,8 +12,10 @@
  *
  * All measurements run while the HUD is mounted and stream to both the
  * on-screen HUD and console.log so the user can paste the cold vs. warm
- * transcript. The HUD is hidden by default; press ` (Backquote) to toggle.
- * Add `?perf=1` to the URL to open it on load.
+ * transcript. The HUD is hidden by default; press ` (Backquote) to toggle
+ * the shared Debug HUD shell (Perf | MIDI tabs); the shell mounts this body
+ * inside its Perf tab. Add `?perf=1` (or `?midi_debug=1`) to the URL to open
+ * the shell on load.
  */
 import { h, useState, useEffect, useRef } from "lattish"
 
@@ -292,8 +294,7 @@ export fn PerfHud(props) {
   }
 
   return (
-    <div class="absolute top-1 right-1 z-[120] pointer-events-none font-mono text-[10px] leading-tight px-2 py-1 rounded-sm bg-black/80 border border-zinc-700 text-emerald-200 select-none" style={{ width: "240px" }}>
-      <div class="text-[10px] font-bold tracking-[0.2em] text-emerald-300 mb-0.5">PERF HUD</div>
+    <div class="font-mono text-[10px] leading-tight text-emerald-200 select-none">
       <div>focus={hasFocus ? "T" : "F"} vis={visibility}</div>
       <div>raf {fmt2(rafAvg)}ms (max {fmt2(rafMax)}) ≈ {fmt2(fps)}fps</div>
       <div>ptr {fmt2(pAvg)}ms (max {fmt2(pMax)}) ≈ {fmt2(pHz)}Hz coal={lastCoalescedCount}</div>
@@ -317,14 +318,4 @@ export fn PerfHud(props) {
       </div>
     </div>
   );
-}
-
-/** True when `?perf=1` so devs can start with the HUD open without toggling. */
-export fn perfHudInitialVisible() {
-  if (typeof window === "undefined" || !window.location) return false;
-  try {
-    const qp = new URLSearchParams(window.location.search || "");
-    return qp.get("perf") === "1";
-  } catch (e) { void e; }
-  return false;
 }

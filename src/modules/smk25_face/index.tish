@@ -956,7 +956,7 @@ export fn smk25_face_buildAudio(ctx, node) {
   const EVENT_LOG_CAP = 80;
   let eventLog = [];
   let eventLogSeq = 0;
-  let eventLogConsole = true;
+  let eventLogConsole = false;
 
   const bumpPortCount = (portKey, kindKey) => {
     const bucket = rxByPort[portKey];
@@ -1346,16 +1346,25 @@ export fn smk25_face_buildAudio(ctx, node) {
       }
       persistPadMaps();
     },
-    getMidiLog: (limit) => {
+    /* Optional "interpreted MIDI trace" contract consumed by the Debug HUD's
+       MIDI tab. Any module can opt in by exposing the same three methods on
+       its midiSink:
+         - getMidiTraceLog(limit) -> array of entries with at least
+             { kind, t, detail?, target?, ch1?, port?, seq? }
+         - clearMidiTraceLog()
+         - setMidiTraceMirrorConsole(enabled)
+       The MIDI tab discovers these by walking nodeAudioMap and rendering a
+       dropdown of nodes whose sink has getMidiTraceLog. */
+    getMidiTraceLog: (limit) => {
       const lim = Number.isFinite(limit) && limit > 0 ? limit : EVENT_LOG_CAP;
       const src = eventLog.length > lim ? eventLog.slice(eventLog.length - lim) : eventLog.slice();
       return src;
     },
-    clearMidiLog: () => {
+    clearMidiTraceLog: () => {
       eventLog = [];
       eventLogSeq = 0;
     },
-    setMidiLogConsole: (enabled) => {
+    setMidiTraceMirrorConsole: (enabled) => {
       eventLogConsole = enabled === true;
     },
     resetKnobMap: (bank) => {
@@ -1472,9 +1481,6 @@ export fn smk25_face_View(props) {
   const knobCfg = sink && typeof sink.getKnobConfigState === "function"
     ? sink.getKnobConfigState()
     : { learning: false, learnBank: null, learnCursor: 0, learnTotal: 0, knobCcsA: [], knobCcsB: [] };
-  const midiLog = sink && typeof sink.getMidiLog === "function" ? sink.getMidiLog(40) : [];
-  let [showLog, setShowLog] = useState(true);
-  let [consoleOn, setConsoleOn] = useState(true);
   void tick;
   void meterSync;
 
@@ -1910,45 +1916,14 @@ export fn smk25_face_View(props) {
           </div>
         </div>
 
-        <div class="flex-1 min-h-0 flex flex-col gap-0.5 w-full pointer-events-auto">
-          <div class="flex items-center gap-1 shrink-0">
-            <button
-              onPointerDown={(e) => { e.stopPropagation(); setShowLog(prev => !prev); }}
-              class="px-1.5 py-0.5 rounded border border-amber-500/60 bg-amber-900/40 text-amber-100 font-bold text-[7px] uppercase tracking-wider pointer-events-auto"
-            >{showLog ? "Hide MIDI Log" : "Show MIDI Log"}</button>
-            <button
-              onPointerDown={(e) => { e.stopPropagation(); const next = !consoleOn; setConsoleOn(next); if (sink && sink.setMidiLogConsole) { sink.setMidiLogConsole(next); } }}
-              class={"px-1.5 py-0.5 rounded border font-bold text-[7px] uppercase tracking-wider pointer-events-auto " + (consoleOn ? "border-teal-500/60 bg-teal-900/40 text-teal-100" : "border-neutral-600 bg-neutral-800 text-neutral-400")}
-            >{"Console " + (consoleOn ? "ON" : "OFF")}</button>
-            <button
-              onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.clearMidiLog) { sink.clearMidiLog(); } }}
-              class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 font-bold text-[7px] uppercase tracking-wider pointer-events-auto"
-            >Clear</button>
-            <span class="text-[7px] font-mono text-neutral-500 ml-auto">
-              {"log:" + String(midiLog.length)
-                + " rxN:" + String((vis.rxCounts && vis.rxCounts.noteOn) || 0)
-                + " rxCC:" + String((vis.rxCounts && vis.rxCounts.cc) || 0)
-                + " rxPB:" + String((vis.rxCounts && vis.rxCounts.pitchBend) || 0)
-                + " rxSX:" + String((vis.rxCounts && vis.rxCounts.sysex) || 0)}
-            </span>
-          </div>
-          {showLog ? (
-            <div class="flex-1 min-h-[60px] overflow-y-auto rounded-sm border border-neutral-800 bg-black/80 font-mono text-[8px] leading-tight">
-              {midiLog.length === 0 ? (
-                <div class="p-1 text-neutral-500">No events. Touch the device.</div>
-              ) : midiLog.slice().reverse().map((entry) => (
-                <div key={"log-" + String(entry.seq)} class="flex gap-1 px-1 py-[1px] border-b border-neutral-900/80">
-                  <span class="text-neutral-500 w-10 shrink-0">{"#" + String(entry.seq)}</span>
-                  <span class="text-amber-300 w-7 shrink-0">{"p" + String(entry.port)}</span>
-                  <span class="text-neutral-400 w-24 shrink-0 truncate" title={entry.inputId}>{shortInputId(entry.inputId)}</span>
-                  <span class={"w-14 shrink-0 " + (entry.kind === "noteOn" ? "text-emerald-300" : entry.kind === "noteOff" ? "text-neutral-500" : entry.kind === "cc" ? "text-violet-300" : entry.kind === "pitchBend" ? "text-amber-300" : "text-fuchsia-300")}>{entry.kind}</span>
-                  <span class="text-neutral-400 w-10 shrink-0">{"ch" + String(entry.ch1)}</span>
-                  <span class="text-neutral-200 flex-1 shrink min-w-0 truncate" title={entry.detail}>{entry.detail}</span>
-                  <span class={"shrink-0 " + (entry.duringLearn ? "text-teal-300" : (entry.target && entry.target.indexOf("unmapped") >= 0 ? "text-red-300" : "text-white"))} title={entry.target}>{"-> " + entry.target + (entry.duringLearn ? " [LEARN-" + String(entry.learnKind) + "]" : "")}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
+        <div class="flex items-center gap-2 shrink-0 w-full font-mono text-[7px] text-neutral-500 pointer-events-auto">
+          <span class="tabular-nums">
+            {"rxN:" + String((vis.rxCounts && vis.rxCounts.noteOn) || 0)
+              + " rxCC:" + String((vis.rxCounts && vis.rxCounts.cc) || 0)
+              + " rxPB:" + String((vis.rxCounts && vis.rxCounts.pitchBend) || 0)
+              + " rxSX:" + String((vis.rxCounts && vis.rxCounts.sysex) || 0)}
+          </span>
+          <span class="ml-auto text-neutral-600">MIDI trace: press <span class="text-amber-300 font-bold">`</span> &rarr; MIDI tab</span>
         </div>
       </div>
     </PedalChassis>

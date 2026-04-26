@@ -1,0 +1,163 @@
+// Workspace document: a versioned, portable snapshot of the patch board.
+// Saved locally today (see workspaceStorage.tish); ready to round-trip through
+// the future cloud API without touching the share URL contract.
+//
+// Shape:
+//   {
+//     format: "toneframe-workspace",
+//     version: 1,
+//     id: <publicId>,
+//     meta: { name, createdAt, updatedAt },
+//     origin: "local" | "remote",
+//     patch: { nodes, connections },
+//     midiBindings: [{ id, midiInputId, midiInputIds, targetNodeId, channelMask }]
+//   }
+
+export const WORKSPACE_FORMAT = "toneframe-workspace";
+export const WORKSPACE_VERSION = 1;
+
+export const WORKSPACE_ORIGIN_LOCAL = "local";
+export const WORKSPACE_ORIGIN_REMOTE = "remote";
+
+export fn newWorkspaceId() {
+  // URL-safe public id; collision odds are negligible for this scale.
+  const a = Math.random().toString(36).substr(2, 9);
+  const b = Math.random().toString(36).substr(2, 6);
+  return a + b;
+}
+
+const cloneJson = (v) => {
+  if (v == null) {
+    return v;
+  }
+  try {
+    return JSON.parse(JSON.stringify(v));
+  } catch (e) {
+    return null;
+  }
+};
+
+const sanitizeMidiBinding = (b) => {
+  if (!b || typeof b !== "object") {
+    return null;
+  }
+  const id = b.id != null ? String(b.id) : "";
+  if (!id.length) {
+    return null;
+  }
+  const out = {
+    id: id,
+    midiInputId: b.midiInputId != null ? String(b.midiInputId) : "",
+    midiInputIds: Array.isArray(b.midiInputIds) ? b.midiInputIds.map((s) => String(s)) : null,
+    targetNodeId: b.targetNodeId != null && String(b.targetNodeId).length ? String(b.targetNodeId) : null,
+    channelMask: Number.isFinite(b.channelMask) ? b.channelMask : -1
+  };
+  return out;
+};
+
+export fn buildWorkspaceDocument(opts) {
+  const o = opts || {};
+  const id = o.id != null && String(o.id).length ? String(o.id) : newWorkspaceId();
+  const now = Date.now();
+  const nodes = Array.isArray(o.nodes) ? cloneJson(o.nodes) || [] : [];
+  const connections = Array.isArray(o.connections) ? cloneJson(o.connections) || [] : [];
+  const bindingsIn = Array.isArray(o.midiBindings) ? o.midiBindings : [];
+  const bindings = [];
+  let bi = 0;
+  while (bi < bindingsIn.length) {
+    const sb = sanitizeMidiBinding(bindingsIn[bi]);
+    if (sb) {
+      bindings.push(sb);
+    }
+    bi = bi + 1;
+  }
+  return {
+    format: WORKSPACE_FORMAT,
+    version: WORKSPACE_VERSION,
+    id: id,
+    meta: {
+      name: o.name != null && String(o.name).length ? String(o.name) : "Untitled",
+      createdAt: Number.isFinite(o.createdAt) ? o.createdAt : now,
+      updatedAt: now
+    },
+    origin: o.origin === WORKSPACE_ORIGIN_REMOTE ? WORKSPACE_ORIGIN_REMOTE : WORKSPACE_ORIGIN_LOCAL,
+    patch: { nodes: nodes, connections: connections },
+    midiBindings: bindings
+  };
+}
+
+/** Drop edges whose endpoints reference missing nodes; keeps the rest of the doc usable. */
+const reconcileConnections = (nodes, connections) => {
+  if (!Array.isArray(connections) || !connections.length) {
+    return [];
+  }
+  const ids = {};
+  let ni = 0;
+  while (ni < nodes.length) {
+    const n = nodes[ni];
+    if (n && n.id != null) {
+      ids[String(n.id)] = true;
+    }
+    ni = ni + 1;
+  }
+  const out = [];
+  let ci = 0;
+  while (ci < connections.length) {
+    const c = connections[ci];
+    if (c && ids[String(c.from)] && ids[String(c.to)]) {
+      out.push(c);
+    }
+    ci = ci + 1;
+  }
+  return out;
+};
+
+/** Best-effort validate + normalize. Returns { ok, doc, warnings }. */
+export fn validateWorkspaceDocument(input) {
+  const warnings = [];
+  if (!input || typeof input !== "object") {
+    return { ok: false, doc: null, warnings: ["empty document"] };
+  }
+  if (input.format !== WORKSPACE_FORMAT) {
+    return { ok: false, doc: null, warnings: ["unknown format: " + String(input.format)] };
+  }
+  const v = Number.isFinite(input.version) ? input.version : 0;
+  if (v > WORKSPACE_VERSION) {
+    return { ok: false, doc: null, warnings: ["workspace version " + String(v) + " is newer than this app supports"] };
+  }
+  const patch = input.patch || {};
+  const nodesIn = Array.isArray(patch.nodes) ? patch.nodes : [];
+  const connsIn = Array.isArray(patch.connections) ? patch.connections : [];
+  const nodes = cloneJson(nodesIn) || [];
+  const connsClone = cloneJson(connsIn) || [];
+  const reconciled = reconcileConnections(nodes, connsClone);
+  if (reconciled.length !== connsClone.length) {
+    warnings.push("dropped " + String(connsClone.length - reconciled.length) + " orphan connection(s)");
+  }
+  const bindingsIn = Array.isArray(input.midiBindings) ? input.midiBindings : [];
+  const bindings = [];
+  let bi = 0;
+  while (bi < bindingsIn.length) {
+    const sb = sanitizeMidiBinding(bindingsIn[bi]);
+    if (sb) {
+      bindings.push(sb);
+    }
+    bi = bi + 1;
+  }
+  const meta = input.meta || {};
+  const id = input.id != null && String(input.id).length ? String(input.id) : newWorkspaceId();
+  const doc = {
+    format: WORKSPACE_FORMAT,
+    version: WORKSPACE_VERSION,
+    id: id,
+    meta: {
+      name: meta.name != null && String(meta.name).length ? String(meta.name) : "Untitled",
+      createdAt: Number.isFinite(meta.createdAt) ? meta.createdAt : Date.now(),
+      updatedAt: Number.isFinite(meta.updatedAt) ? meta.updatedAt : Date.now()
+    },
+    origin: input.origin === WORKSPACE_ORIGIN_REMOTE ? WORKSPACE_ORIGIN_REMOTE : WORKSPACE_ORIGIN_LOCAL,
+    patch: { nodes: nodes, connections: reconciled },
+    midiBindings: bindings
+  };
+  return { ok: true, doc: doc, warnings: warnings };
+}

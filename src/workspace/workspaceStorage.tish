@@ -1,0 +1,253 @@
+// localStorage-backed CRUD for workspace documents.
+// Index key holds a compact list for the picker; each body lives under its own key.
+
+import {
+  buildWorkspaceDocument,
+  validateWorkspaceDocument,
+  newWorkspaceId,
+  WORKSPACE_ORIGIN_LOCAL,
+  WORKSPACE_ORIGIN_REMOTE
+} from "./workspaceDocument.tish"
+
+const INDEX_KEY = "tish_workspace_index_v1";
+const BODY_PREFIX = "tish_workspace_body_v1:";
+
+const hasStorage = () => typeof window !== "undefined" && window.localStorage;
+
+export fn loadWorkspaceIndex() {
+  if (!hasStorage()) {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(INDEX_KEY);
+    if (!raw) {
+      return [];
+    }
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) {
+      return [];
+    }
+    const out = [];
+    let i = 0;
+    while (i < arr.length) {
+      const e = arr[i];
+      if (e && typeof e === "object" && e.id) {
+        out.push({
+          id: String(e.id),
+          name: e.name != null ? String(e.name) : "Untitled",
+          updatedAt: Number.isFinite(e.updatedAt) ? e.updatedAt : 0
+        });
+      }
+      i = i + 1;
+    }
+    return out;
+  } catch (e) {
+    return [];
+  }
+}
+
+const writeIndex = (entries) => {
+  if (!hasStorage()) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(INDEX_KEY, JSON.stringify(entries));
+  } catch (e) {}
+};
+
+const upsertIndexEntry = (entry) => {
+  const list = loadWorkspaceIndex();
+  let found = false;
+  let i = 0;
+  while (i < list.length) {
+    if (list[i].id === entry.id) {
+      list[i] = entry;
+      found = true;
+      break;
+    }
+    i = i + 1;
+  }
+  if (!found) {
+    list.push(entry);
+  }
+  list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  writeIndex(list);
+};
+
+const removeIndexEntry = (id) => {
+  const list = loadWorkspaceIndex();
+  const next = [];
+  let i = 0;
+  while (i < list.length) {
+    if (list[i].id !== id) {
+      next.push(list[i]);
+    }
+    i = i + 1;
+  }
+  writeIndex(next);
+};
+
+export fn loadWorkspaceById(id) {
+  if (!hasStorage() || !id) {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(BODY_PREFIX + String(id));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    const v = validateWorkspaceDocument(parsed);
+    if (!v.ok || !v.doc) {
+      return null;
+    }
+    return v.doc;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Persist a document. If `opts.id` is set, overwrites in place; otherwise mints a fresh id. */
+export fn saveWorkspaceLocal(opts) {
+  const o = opts || {};
+  const existing = o.id ? loadWorkspaceById(o.id) : null;
+  const id = o.id != null && String(o.id).length ? String(o.id) : newWorkspaceId();
+  const createdAt = existing && existing.meta ? existing.meta.createdAt : Date.now();
+  const doc = buildWorkspaceDocument({
+    id: id,
+    name: o.name,
+    createdAt: createdAt,
+    nodes: o.nodes,
+    connections: o.connections,
+    midiBindings: o.midiBindings,
+    origin: WORKSPACE_ORIGIN_LOCAL
+  });
+  if (!hasStorage()) {
+    return doc;
+  }
+  try {
+    window.localStorage.setItem(BODY_PREFIX + id, JSON.stringify(doc));
+    upsertIndexEntry({ id: id, name: doc.meta.name, updatedAt: doc.meta.updatedAt });
+  } catch (e) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[TishAudio:workspace] save failed", e);
+    }
+  }
+  return doc;
+}
+
+/** Cache a remote document locally so the share link works offline next time. */
+export fn cacheRemoteWorkspace(doc) {
+  if (!hasStorage() || !doc || !doc.id) {
+    return;
+  }
+  try {
+    const stamped = { ...doc, origin: WORKSPACE_ORIGIN_REMOTE };
+    window.localStorage.setItem(BODY_PREFIX + String(doc.id), JSON.stringify(stamped));
+    upsertIndexEntry({
+      id: String(doc.id),
+      name: doc.meta && doc.meta.name ? String(doc.meta.name) : "Shared workspace",
+      updatedAt: doc.meta && Number.isFinite(doc.meta.updatedAt) ? doc.meta.updatedAt : Date.now()
+    });
+  } catch (e) {}
+}
+
+export fn deleteWorkspaceLocal(id) {
+  if (!hasStorage() || !id) {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(BODY_PREFIX + String(id));
+  } catch (e) {}
+  removeIndexEntry(String(id));
+}
+
+export fn buildShareUrl(id) {
+  if (!id || typeof window === "undefined" || !window.location) {
+    return "";
+  }
+  try {
+    const path = window.location.pathname || "/";
+    const url = new URL(path + "?workspace=" + encodeURIComponent(String(id)), window.location.origin);
+    return url.href;
+  } catch (e) {
+    return "";
+  }
+}
+
+export fn workspaceIdFromCurrentUrl() {
+  if (typeof window === "undefined" || !window.location) {
+    return null;
+  }
+  try {
+    const qp = new URLSearchParams(window.location.search || "");
+    const v = qp.get("workspace");
+    return v && v.length ? v : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+const slugifyForFilename = (s) => {
+  const src = String(s || "workspace");
+  let out = "";
+  let i = 0;
+  while (i < src.length) {
+    const ch = src.charAt(i);
+    const code = src.charCodeAt(i);
+    const isAlnum =
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122);
+    if (isAlnum || ch === "-" || ch === "_") {
+      out = out + ch;
+    } else if (ch === " ") {
+      out = out + "-";
+    }
+    i = i + 1;
+  }
+  if (!out.length) {
+    out = "workspace";
+  }
+  return out.slice(0, 60);
+};
+
+/**
+ * Trigger a browser/WKWebView file download of the workspace document.
+ * Works in Tauri (the webview honors <a download>) and any standard browser.
+ * Returns the suggested filename, or "" on failure.
+ */
+export fn exportWorkspaceToFile(doc) {
+  if (!doc || typeof window === "undefined" || !window.document) {
+    return "";
+  }
+  if (typeof Blob === "undefined" || typeof URL === "undefined" || !URL.createObjectURL) {
+    return "";
+  }
+  try {
+    const json = JSON.stringify(doc, null, 2);
+    const filename = slugifyForFilename(doc.meta && doc.meta.name) + ".toneframe.json";
+    const blob = new Blob([json], { type: "application/json" });
+    const href = URL.createObjectURL(blob);
+    const a = window.document.createElement("a");
+    a.href = href;
+    a.download = filename;
+    a.style.display = "none";
+    window.document.body.appendChild(a);
+    a.click();
+    window.setTimeout(() => {
+      try {
+        if (a.parentNode) {
+          a.parentNode.removeChild(a);
+        }
+        URL.revokeObjectURL(href);
+      } catch (eC) {}
+    }, 0);
+    return filename;
+  } catch (e) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[TishAudio:workspace] export failed", e);
+    }
+    return "";
+  }
+}

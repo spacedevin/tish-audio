@@ -1,0 +1,148 @@
+/**
+ * Per-binding raw MIDI trace hub. The Debug HUD's MIDI tab opts individual
+ * MIDI_IN bindings into a small ring buffer of the dispatched events that
+ * arrived for them. Events for non-traced bindings are dropped immediately,
+ * which keeps the hot dispatch path cheap when nothing is listening.
+ *
+ * This is the host-level counterpart to the optional per-module "interpreted
+ * trace" sink API (see `getMidiTraceLog` on midiSinks): the hub records what
+ * actually came off the wire; modules can also surface what they decided to
+ * do with it.
+ */
+
+const RAW_LOG_CAP = 200;
+
+let rawLog = [];
+let rawSeq = 0;
+let tracedBindings = {};
+let mirrorConsole = false;
+let configSubs = [];
+
+const rawNowMs = () => (typeof performance !== "undefined" && performance.now ? performance.now() : 0);
+
+const rawShortStr = (s) => {
+  const v = String(s == null ? "" : s);
+  if (v.length <= 18) { return v; }
+  return v.slice(0, 6) + "…" + v.slice(v.length - 9);
+};
+
+const rawBuildDetail = (ev) => {
+  const k = ev.kind;
+  if (k === "noteOn" || k === "noteOff") {
+    return "note=" + String(ev.note != null ? ev.note : "?")
+      + " vel=" + String(ev.velocity != null ? ev.velocity : 0);
+  }
+  if (k === "cc") {
+    return "cc=" + String(ev.controller) + " val=" + String(ev.value);
+  }
+  if (k === "pitchBend") {
+    return "value14=" + String(ev.value14);
+  }
+  if (k === "mvaveSmk25SysexBtn") {
+    return "key=" + String(ev.sysexKey) + " val=" + String(ev.sysexValue);
+  }
+  return "";
+};
+
+const notifyConfig = () => {
+  let i = 0;
+  while (i < configSubs.length) {
+    const cb = configSubs[i];
+    try { cb(); } catch (e) { void e; }
+    i = i + 1;
+  }
+};
+
+export fn setRawTraceEnabled(bindingId, enabled) {
+  const id = String(bindingId || "");
+  if (!id) { return; }
+  if (enabled) {
+    tracedBindings[id] = true;
+  } else {
+    Reflect.deleteProperty(tracedBindings, id);
+  }
+  notifyConfig();
+}
+
+export fn isRawTraceEnabled(bindingId) {
+  const id = String(bindingId || "");
+  return tracedBindings[id] === true;
+}
+
+export fn anyRawTraceEnabled() {
+  const keys = Object.keys(tracedBindings);
+  let i = 0;
+  while (i < keys.length) {
+    if (tracedBindings[keys[i]] === true) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
+/** Called once per dispatched event for each binding it matched. The hub
+ *  is responsible for filtering out non-traced bindings cheaply. */
+export fn pushRawMidiEvent(ev, bindingId) {
+  const id = String(bindingId || "");
+  if (!id || tracedBindings[id] !== true || !ev) { return; }
+  const detail = rawBuildDetail(ev);
+  const entry = {
+    seq: rawSeq,
+    t: rawNowMs(),
+    bindingId: id,
+    inputId: ev.inputId != null ? String(ev.inputId) : "",
+    kind: ev.kind != null ? String(ev.kind) : "?",
+    ch1: (ev.channel != null ? ev.channel : 0) + 1,
+    detail: detail
+  };
+  rawSeq = rawSeq + 1;
+  rawLog.push(entry);
+  if (rawLog.length > RAW_LOG_CAP) {
+    rawLog = rawLog.slice(rawLog.length - RAW_LOG_CAP);
+  }
+  if (mirrorConsole && typeof console !== "undefined" && console.log) {
+    console.log(
+      "[midi:raw] #" + String(entry.seq)
+        + " " + rawShortStr(id)
+        + " " + rawShortStr(entry.inputId)
+        + " " + entry.kind
+        + " ch" + String(entry.ch1)
+        + (detail ? " " + detail : "")
+    );
+  }
+}
+
+export fn getRawMidiLog(limit) {
+  const lim = Number.isFinite(limit) && limit > 0 ? limit : RAW_LOG_CAP;
+  return rawLog.length > lim ? rawLog.slice(rawLog.length - lim) : rawLog.slice();
+}
+
+export fn clearRawMidiLog() {
+  rawLog = [];
+  rawSeq = 0;
+}
+
+export fn setMirrorConsole(enabled) {
+  mirrorConsole = enabled === true;
+  notifyConfig();
+}
+
+export fn isMirrorConsole() {
+  return mirrorConsole === true;
+}
+
+/** Fires whenever the binding-trace set or mirror flag changes. Used by the
+ *  panel's checkboxes to stay in sync if other code flips a toggle. */
+export fn subscribeRawTraceConfig(cb) {
+  if (typeof cb !== "function") { return () => {}; }
+  configSubs.push(cb);
+  return () => {
+    let i = 0;
+    while (i < configSubs.length) {
+      if (configSubs[i] === cb) {
+        configSubs.splice(i, 1);
+        return;
+      }
+      i = i + 1;
+    }
+  };
+}

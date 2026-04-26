@@ -1,0 +1,299 @@
+/**
+ * MIDI tab of the Debug HUD.
+ *
+ *   - "Inputs" section: one row per MIDI binding with a checkbox that flips
+ *     raw-event tracing on/off for that binding. Toggling drives
+ *     `setRawTraceEnabled` on the trace hub; the dispatch loop in
+ *     `useMidiPatch` consults the hub and only buffers events for opted-in
+ *     bindings.
+ *   - "Raw stream": tail of the host-level ring buffer (most recent first).
+ *   - "Interpreted": dropdown of nodes whose `midiSink` exposes the optional
+ *     trace contract (`getMidiTraceLog` / `clearMidiTraceLog` /
+ *     `setMidiTraceMirrorConsole`). SMK-25 is the first consumer; any module
+ *     can opt in by exposing those methods on its sink.
+ *
+ * The panel polls (200ms) for log updates rather than re-rendering on every
+ * MIDI event — same approach the SMK-25 twin view uses for its own log.
+ */
+
+import { h, useEffect, useState } from "lattish"
+import {
+  getRawMidiLog,
+  clearRawMidiLog,
+  isRawTraceEnabled,
+  setRawTraceEnabled,
+  isMirrorConsole,
+  setMirrorConsole,
+  subscribeRawTraceConfig
+} from "../midi/midiRawTraceHub.tish"
+
+const shortStr = (s) => {
+  const v = String(s == null ? "" : s);
+  if (v.length <= 18) { return v; }
+  return v.slice(0, 6) + "…" + v.slice(v.length - 9);
+};
+
+const kindClass = (k) => {
+  if (k === "noteOn") { return "text-emerald-300"; }
+  if (k === "noteOff") { return "text-neutral-500"; }
+  if (k === "cc") { return "text-violet-300"; }
+  if (k === "pitchBend") { return "text-amber-300"; }
+  return "text-fuchsia-300";
+};
+
+const labelForBinding = (b, nodes) => {
+  if (!b) { return "MIDI binding"; }
+  const id = "midi_in_" + String(b.id);
+  if (Array.isArray(nodes)) {
+    let i = 0;
+    while (i < nodes.length) {
+      const n = nodes[i];
+      if (n && n.id === id && n.label) {
+        return String(n.label);
+      }
+      i = i + 1;
+    }
+  }
+  return "MIDI " + String(b.id).slice(0, 6);
+};
+
+/** Pull the list of nodes whose midiSink implements the interpreted trace
+ *  contract. The shape is documented in `midiRawTraceHub.tish`. */
+const collectInterpretedSources = (nodes, nodeAudioMapRef) => {
+  const out = [];
+  if (!Array.isArray(nodes) || !nodeAudioMapRef || !nodeAudioMapRef.current) {
+    return out;
+  }
+  let i = 0;
+  while (i < nodes.length) {
+    const n = nodes[i];
+    if (n && n.id) {
+      const box = nodeAudioMapRef.current[n.id];
+      const sink = box && box.midiSink;
+      if (sink && typeof sink.getMidiTraceLog === "function") {
+        out.push({
+          nodeId: n.id,
+          label: n.label ? String(n.label) : String(n["type"] || n.id),
+          sink: sink
+        });
+      }
+    }
+    i = i + 1;
+  }
+  return out;
+};
+
+export fn MidiDebugPanel(props) {
+  const midiBindings = Array.isArray(props.midiBindings) ? props.midiBindings : [];
+  const nodes = Array.isArray(props.nodes) ? props.nodes : [];
+  const nodeAudioMapRef = props.nodeAudioMapRef;
+
+  let [tick, setTick] = useState(0);
+  let [configTick, setConfigTick] = useState(0);
+  let [interpretedNodeId, setInterpretedNodeId] = useState("");
+  let [interpretedConsole, setInterpretedConsole] = useState(false);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setTick((x) => x + 1);
+    }, 200);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    return subscribeRawTraceConfig(() => {
+      setConfigTick((x) => x + 1);
+    });
+  }, []);
+
+  void tick;
+  void configTick;
+
+  const rawLog = getRawMidiLog(120);
+  const mirror = isMirrorConsole();
+
+  const interpretedSources = collectInterpretedSources(nodes, nodeAudioMapRef);
+  let activeSource = null;
+  if (interpretedNodeId) {
+    let i = 0;
+    while (i < interpretedSources.length) {
+      if (interpretedSources[i].nodeId === interpretedNodeId) {
+        activeSource = interpretedSources[i];
+        break;
+      }
+      i = i + 1;
+    }
+  }
+  if (!activeSource && interpretedSources.length) {
+    activeSource = interpretedSources[0];
+  }
+  const interpretedLog =
+    activeSource && typeof activeSource.sink.getMidiTraceLog === "function"
+      ? activeSource.sink.getMidiTraceLog(60)
+      : [];
+
+  const onToggleBinding = (bindingId, enabled) => {
+    setRawTraceEnabled(bindingId, enabled);
+  };
+
+  const onToggleMirror = () => {
+    setMirrorConsole(!mirror);
+  };
+
+  const onClearRaw = () => {
+    clearRawMidiLog();
+    setTick((x) => x + 1);
+  };
+
+  const onSelectInterpreted = (e) => {
+    const v = e && e.target ? String(e.target.value || "") : "";
+    setInterpretedNodeId(v);
+  };
+
+  const onClearInterpreted = () => {
+    if (activeSource && typeof activeSource.sink.clearMidiTraceLog === "function") {
+      activeSource.sink.clearMidiTraceLog();
+      setTick((x) => x + 1);
+    }
+  };
+
+  const onToggleInterpretedConsole = () => {
+    const next = !interpretedConsole;
+    setInterpretedConsole(next);
+    if (activeSource && typeof activeSource.sink.setMidiTraceMirrorConsole === "function") {
+      activeSource.sink.setMidiTraceMirrorConsole(next);
+    }
+  };
+
+  const bindingRows = midiBindings.length === 0 ? (
+    <div class="text-[10px] text-neutral-500 px-1 py-1">No MIDI inputs connected.</div>
+  ) : midiBindings.map((b) => {
+    const enabled = isRawTraceEnabled(b.id);
+    const label = labelForBinding(b, nodes);
+    return (
+      <label
+        key={"midi-trace-" + String(b.id)}
+        class="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-zinc-800/60 cursor-pointer"
+      >
+        {h("input", {
+          "type": "checkbox",
+          "checked": enabled,
+          "onChange": (e) => onToggleBinding(b.id, e && e.target ? e.target.checked === true : false),
+          "class": "accent-emerald-400"
+        })}
+        <span class="text-[10px] flex-1 min-w-0 truncate" title={String(b.id)}>{label}</span>
+        {b.midiInputIds && b.midiInputIds.length ? (
+          <span class="text-[9px] text-neutral-500 shrink-0">×{b.midiInputIds.length}</span>
+        ) : null}
+      </label>
+    );
+  });
+
+  const rawRows = rawLog.length === 0 ? (
+    <div class="px-1 py-1 text-[10px] text-neutral-500">
+      {midiBindings.length === 0
+        ? "Connect MIDI input first."
+        : "Tick a MIDI input above and play; events will appear here."}
+    </div>
+  ) : rawLog.slice().reverse().map((entry) => (
+    <div key={"raw-" + String(entry.seq)} class="flex gap-1 px-1 py-[1px] border-b border-zinc-900/80 leading-tight">
+      <span class="text-neutral-500 w-10 shrink-0 tabular-nums">{"#" + String(entry.seq)}</span>
+      <span class="text-neutral-400 w-20 shrink-0 truncate" title={entry.inputId}>{shortStr(entry.inputId)}</span>
+      <span class={"w-14 shrink-0 " + kindClass(entry.kind)}>{entry.kind}</span>
+      <span class="text-neutral-400 w-9 shrink-0">{"ch" + String(entry.ch1)}</span>
+      <span class="text-neutral-200 flex-1 min-w-0 truncate" title={entry.detail}>{entry.detail}</span>
+    </div>
+  ));
+
+  const interpretedRows = !activeSource ? (
+    <div class="px-1 py-1 text-[10px] text-neutral-500">
+      No module is publishing an interpreted MIDI trace yet. (Modules implement <code>getMidiTraceLog</code> on their <code>midiSink</code>.)
+    </div>
+  ) : interpretedLog.length === 0 ? (
+    <div class="px-1 py-1 text-[10px] text-neutral-500">No events yet — play the device.</div>
+  ) : interpretedLog.slice().reverse().map((entry) => (
+    <div key={"int-" + String(entry.seq != null ? entry.seq : entry.t)} class="flex gap-1 px-1 py-[1px] border-b border-zinc-900/80 leading-tight">
+      {entry.seq != null ? (
+        <span class="text-neutral-500 w-10 shrink-0 tabular-nums">{"#" + String(entry.seq)}</span>
+      ) : null}
+      {entry.port != null ? (
+        <span class="text-amber-300 w-7 shrink-0">{"p" + String(entry.port)}</span>
+      ) : null}
+      <span class={"w-14 shrink-0 " + kindClass(entry.kind)}>{entry.kind}</span>
+      {entry.ch1 != null ? (
+        <span class="text-neutral-400 w-9 shrink-0">{"ch" + String(entry.ch1)}</span>
+      ) : null}
+      <span class="text-neutral-200 flex-1 min-w-0 truncate" title={entry.detail}>{entry.detail}</span>
+      {entry.target ? (
+        <span
+          class={"shrink-0 truncate max-w-[40%] " + (entry.duringLearn ? "text-teal-300" : (String(entry.target).indexOf("unmapped") >= 0 ? "text-rose-300" : "text-white"))}
+          title={entry.target}
+        >{"-> " + entry.target}</span>
+      ) : null}
+    </div>
+  ));
+
+  return (
+    <div class="flex flex-col gap-2 text-[10px] font-mono">
+      <section>
+        <div class="flex items-center gap-2 mb-1">
+          <div class="text-[9px] tracking-[0.18em] text-emerald-300 font-bold">INPUTS</div>
+          <button
+            onClick={onToggleMirror}
+            class={"ml-auto px-1.5 py-[1px] rounded border text-[8px] uppercase tracking-wider " + (mirror ? "border-teal-500/60 bg-teal-900/40 text-teal-100" : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-200")}
+            title="Mirror raw events to console.log"
+          >mirror console</button>
+        </div>
+        <div class="flex flex-col gap-px max-h-32 overflow-y-auto">
+          {bindingRows}
+        </div>
+      </section>
+
+      <section>
+        <div class="flex items-center gap-2 mb-1">
+          <div class="text-[9px] tracking-[0.18em] text-emerald-300 font-bold">RAW STREAM</div>
+          <span class="text-[8px] text-neutral-500 ml-auto">{rawLog.length}</span>
+          <button
+            onClick={onClearRaw}
+            class="px-1.5 py-[1px] rounded border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white text-[8px] uppercase tracking-wider"
+          >clear</button>
+        </div>
+        <div class="max-h-40 overflow-y-auto rounded-sm border border-zinc-800 bg-black/70 leading-tight">
+          {rawRows}
+        </div>
+      </section>
+
+      <section>
+        <div class="flex items-center gap-2 mb-1">
+          <div class="text-[9px] tracking-[0.18em] text-emerald-300 font-bold">INTERPRETED</div>
+          <select
+            value={activeSource ? activeSource.nodeId : ""}
+            onChange={onSelectInterpreted}
+            class="ml-auto bg-zinc-900 border border-zinc-700 text-[9px] text-zinc-200 rounded px-1 py-[1px] max-w-[140px]"
+            disabled={interpretedSources.length === 0}
+          >
+            {interpretedSources.length === 0 ? (
+              <option value="">(none)</option>
+            ) : interpretedSources.map((s) => (
+              <option key={"src-" + s.nodeId} value={s.nodeId}>{s.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={onToggleInterpretedConsole}
+            disabled={!activeSource || typeof activeSource.sink.setMidiTraceMirrorConsole !== "function"}
+            class={"px-1.5 py-[1px] rounded border text-[8px] uppercase tracking-wider " + (interpretedConsole ? "border-teal-500/60 bg-teal-900/40 text-teal-100" : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-200")}
+            title="Mirror interpreted events to console.log"
+          >mirror</button>
+          <button
+            onClick={onClearInterpreted}
+            disabled={!activeSource}
+            class="px-1.5 py-[1px] rounded border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white text-[8px] uppercase tracking-wider"
+          >clear</button>
+        </div>
+        <div class="max-h-40 overflow-y-auto rounded-sm border border-zinc-800 bg-black/70 leading-tight">
+          {interpretedRows}
+        </div>
+      </section>
+    </div>
+  );
+}

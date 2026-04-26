@@ -63,7 +63,16 @@ import { memo } from "lattish"
 /* Wrap a module's View with lattish `memo` so re-renders triggered by
    unrelated state changes elsewhere in the app skip the rack subtree
    when its `node`/`onChange`/etc. props are shallow-equal to last time.
-   Returns the original view unchanged when there's nothing to wrap. */
+   Returns the original view unchanged when there's nothing to wrap.
+
+   IMPORTANT: do NOT memoize a View that uses `useState` + `setInterval`
+   (or any internal state ticker) to drive its visuals. Memo's prop-
+   equality check doesn't see internal state changes, so the body never
+   re-runs after the first render and the visuals freeze. The following
+   modules read live MIDI activity from `audioDataMap[id].midiSink` and
+   must skip memo: smk25_face, midi_poly, midi_recorder,
+   midi_channel_splitter, midi_semantic_splitter, mpc_pads. They are
+   registered with raw `<mod>.<mod>_View` (no `memoView` wrapper). */
 fn memoView(viewFn) {
   if (typeof viewFn !== "function") return viewFn;
   return memo(viewFn);
@@ -237,7 +246,7 @@ export const MODULE_REGISTRY = {
     type: midi_poly.midi_poly_type,
     category: midi_poly.midi_poly_category,
     metadata: midi_poly.midi_poly_metadata,
-    View: memoView(midi_poly.midi_poly_View),
+    View: midi_poly.midi_poly_View,
     buildAudio: midi_poly.midi_poly_buildAudio,
     /** Node audio box exposes `midiSink` — MIDI_IN bindings may route here. */
     acceptsMidiInput: true,
@@ -246,7 +255,7 @@ export const MODULE_REGISTRY = {
     type: midi_recorder.midi_recorder_type,
     category: midi_recorder.midi_recorder_category,
     metadata: midi_recorder.midi_recorder_metadata,
-    View: memoView(midi_recorder.midi_recorder_View),
+    View: midi_recorder.midi_recorder_View,
     buildAudio: midi_recorder.midi_recorder_buildAudio,
     acceptsMidiInput: true,
     /** May emit a second MIDI cable (pass-through to downstream synth). */
@@ -256,7 +265,7 @@ export const MODULE_REGISTRY = {
     type: midi_channel_splitter.midi_channel_splitter_type,
     category: midi_channel_splitter.midi_channel_splitter_category,
     metadata: midi_channel_splitter.midi_channel_splitter_metadata,
-    View: memoView(midi_channel_splitter.midi_channel_splitter_View),
+    View: midi_channel_splitter.midi_channel_splitter_View,
     buildAudio: midi_channel_splitter.midi_channel_splitter_buildAudio,
     acceptsMidiInput: true,
     midiThrough: true,
@@ -265,7 +274,7 @@ export const MODULE_REGISTRY = {
     type: midi_semantic_splitter.midi_semantic_splitter_type,
     category: midi_semantic_splitter.midi_semantic_splitter_category,
     metadata: midi_semantic_splitter.midi_semantic_splitter_metadata,
-    View: memoView(midi_semantic_splitter.midi_semantic_splitter_View),
+    View: midi_semantic_splitter.midi_semantic_splitter_View,
     buildAudio: midi_semantic_splitter.midi_semantic_splitter_buildAudio,
     acceptsMidiInput: true,
     midiThrough: true,
@@ -274,7 +283,7 @@ export const MODULE_REGISTRY = {
     type: smk25_face.smk25_face_type,
     category: smk25_face.smk25_face_category,
     metadata: smk25_face.smk25_face_metadata,
-    View: memoView(smk25_face.smk25_face_View),
+    View: smk25_face.smk25_face_View,
     buildAudio: smk25_face.smk25_face_buildAudio,
     acceptsMidiInput: true,
     midiThrough: true,
@@ -616,7 +625,7 @@ export const MODULE_REGISTRY = {
     category: mpc_pads.mpc_pads_category,
     metadata: mpc_pads.mpc_pads_metadata,
     layout: mpc_pads.mpc_pads_layout,
-    View: memoView(mpc_pads.mpc_pads_View),
+    View: mpc_pads.mpc_pads_View,
     buildAudio: mpc_pads.mpc_pads_buildAudio,
     acceptsMidiInput: true,
     paintScene: mpc_pads.mpc_pads_paintScene,

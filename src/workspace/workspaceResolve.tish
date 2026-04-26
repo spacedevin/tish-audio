@@ -1,0 +1,69 @@
+// Resolve a workspace public id to a document.
+// 1) Local cache (saved or previously cached from a share link).
+// 2) Future cloud API: GET {WORKSPACE_API_BASE}/workspaces/{id}.
+//
+// The base URL is optional today; once the API exists, set it via
+// `window.__TISH_WORKSPACE_API_BASE__` (or build-time constant) and shared
+// links from any device will start resolving without further code changes.
+
+import { validateWorkspaceDocument } from "./workspaceDocument.tish"
+import { loadWorkspaceById, cacheRemoteWorkspace } from "./workspaceStorage.tish"
+
+const stripTrailingSlashes = (s) => {
+  let end = s.length;
+  while (end > 0 && s.charAt(end - 1) === "/") {
+    end = end - 1;
+  }
+  return s.slice(0, end);
+};
+
+const apiBase = () => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const w = window;
+  const v = w.__TISH_WORKSPACE_API_BASE__;
+  return v != null && String(v).length ? stripTrailingSlashes(String(v)) : "";
+};
+
+export fn workspaceApiConfigured() {
+  return apiBase().length > 0;
+}
+
+async fn fetchRemoteWorkspace(id) {
+  const base = apiBase();
+  if (!base || typeof fetch !== "function") {
+    return null;
+  }
+  try {
+    const url = base + "/workspaces/" + encodeURIComponent(String(id));
+    const resp = await fetch(url, { method: "GET", credentials: "omit" });
+    if (!resp.ok) {
+      return null;
+    }
+    const json = await resp.json();
+    const v = validateWorkspaceDocument(json);
+    if (!v.ok || !v.doc) {
+      return null;
+    }
+    cacheRemoteWorkspace(v.doc);
+    return v.doc;
+  } catch (e) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[TishAudio:workspace] remote fetch failed", e);
+    }
+    return null;
+  }
+}
+
+/** Returns a workspace document or null if not found anywhere. */
+export async fn resolveWorkspace(id) {
+  if (!id) {
+    return null;
+  }
+  const local = loadWorkspaceById(id);
+  if (local) {
+    return local;
+  }
+  return await fetchRemoteWorkspace(id);
+}

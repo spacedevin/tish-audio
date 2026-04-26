@@ -1,0 +1,89 @@
+/**
+ * Tabbed debug overlay. Toggled by Backquote in App.tish (same key that used
+ * to toggle the perf HUD); its tabs are:
+ *
+ *   - PERF — the live perf HUD body (renders/s, raf gaps, midi rate, …)
+ *   - MIDI — per-input raw trace toggles + interpreted-trace viewer
+ *
+ * URL flags decide which tab is active when the shell first opens (see
+ * `debugHudInitialState`):
+ *
+ *   ?perf=1        → shell open, Perf tab active
+ *   ?midi_debug=1  → shell open, MIDI tab active
+ *
+ * If both query params are present, MIDI wins (because it implies the user
+ * is actively investigating MIDI and Perf is one click away).
+ */
+
+import { h } from "lattish"
+import { PerfHud } from "./PerfHud.tish"
+import { MidiDebugPanel } from "./MidiDebugPanel.tish"
+import { X } from "../icons.tish"
+
+/** Returns `{ visible, tab }` for the initial render, derived from URL.
+ *  `visible: false` keeps the shell unmounted until the user presses ` . */
+export fn debugHudInitialState() {
+  const out = { visible: false, tab: "perf" };
+  if (typeof window === "undefined" || !window.location) {
+    return out;
+  }
+  try {
+    const qp = new URLSearchParams(window.location.search || "");
+    const midi = qp.get("midi_debug") === "1";
+    const perf = qp.get("perf") === "1";
+    if (midi) {
+      out.visible = true;
+      out.tab = "midi";
+    } else if (perf) {
+      out.visible = true;
+      out.tab = "perf";
+    }
+  } catch (e) { void e; }
+  return out;
+}
+
+export fn DebugHudShell(props) {
+  const tab = props.tab === "midi" ? "midi" : "perf";
+  const onTabChange = typeof props.onTabChange === "function" ? props.onTabChange : null;
+  const onClose = props.onClose;
+  const midiBindings = Array.isArray(props.midiBindings) ? props.midiBindings : [];
+  const nodes = Array.isArray(props.nodes) ? props.nodes : [];
+  const nodeAudioMapRef = props.nodeAudioMapRef;
+
+  const setTab = (id) => {
+    if (onTabChange) { onTabChange(id); }
+  };
+
+  const tabBtnClass = (id) =>
+    "px-2 py-[2px] text-[9px] uppercase tracking-[0.2em] font-bold rounded-sm transition-colors " +
+    (tab === id
+      ? "bg-emerald-900/60 text-emerald-200 border border-emerald-500/60"
+      : "bg-zinc-900 text-zinc-400 border border-zinc-700 hover:text-zinc-200");
+
+  return (
+    <div
+      class="fixed top-1 right-1 z-[120] pointer-events-auto rounded-sm bg-black/85 border border-zinc-700 shadow-xl backdrop-blur-sm"
+      style={{ width: tab === "midi" ? "320px" : "260px" }}
+    >
+      <div class="flex items-center gap-1 px-1.5 py-1 border-b border-zinc-800">
+        <button onClick={() => setTab("perf")} class={tabBtnClass("perf")}>perf</button>
+        <button onClick={() => setTab("midi")} class={tabBtnClass("midi")}>midi</button>
+        <button
+          onClick={onClose}
+          class="ml-auto text-zinc-500 hover:text-white p-[2px] rounded hover:bg-zinc-800 transition-colors"
+          title="Close (`)"
+        >
+          {h(X, { "class": "w-3 h-3" })}
+        </button>
+      </div>
+      <div class="px-2 py-1.5">
+        {tab === "perf" ? h(PerfHud, {}) : null}
+        {tab === "midi" ? h(MidiDebugPanel, {
+          midiBindings: midiBindings,
+          nodes: nodes,
+          nodeAudioMapRef: nodeAudioMapRef
+        }) : null}
+      </div>
+    </div>
+  );
+}
