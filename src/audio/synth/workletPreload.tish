@@ -1,0 +1,61 @@
+/**
+ * Preload compiled synth processors so allocateEngine can run synchronously during graph rebuild.
+ */
+
+export fn synthProcessorHref(processorName) {
+  return new URL("assets/synth/" + String(processorName) + ".processor.worklet.js", window.location.href).href;
+}
+
+export const SYNTH_PROCESSOR_NAMES = [
+  "smoke-sine",
+  "fm-matrix",
+  "hybrid-x",
+  "wavetable-pro",
+  "analog-poly",
+  "analog-mono",
+  "organ",
+  "drum-xr",
+  "rompler",
+  "vocoder",
+  "pad-ambient"
+];
+
+export async fn preloadSynthWorkletModules(ctx) {
+  if (!ctx || !ctx.audioWorklet) {
+    return;
+  }
+  if (!ctx._synthWorkletReady) {
+    ctx._synthWorkletReady = {};
+  }
+  const nativeHref = new URL("assets/native-synth-out.worklet.js", window.location.href).href;
+  if (ctx._nativeSynthOutReady !== true) {
+    try {
+      await ctx.audioWorklet.addModule(nativeHref);
+      ctx._nativeSynthOutReady = true;
+    } catch (eN) {
+      ctx._nativeSynthOutReady = false;
+    }
+  }
+  let i = 0;
+  while (i < SYNTH_PROCESSOR_NAMES.length) {
+    const name = SYNTH_PROCESSOR_NAMES[i];
+    const href = synthProcessorHref(name);
+    if (!ctx._synthWorkletReady[href]) {
+      try {
+        await ctx.audioWorklet.addModule(href);
+        ctx._synthWorkletReady[href] = true;
+      } catch (e) {
+        ctx._synthWorkletReady[href] = false;
+      }
+    }
+    i = i + 1;
+  }
+}
+
+export fn isSynthWorkletReady(ctx, processorName) {
+  if (!ctx || !ctx._synthWorkletReady) {
+    return false;
+  }
+  const href = synthProcessorHref(processorName);
+  return ctx._synthWorkletReady[href] === true;
+}

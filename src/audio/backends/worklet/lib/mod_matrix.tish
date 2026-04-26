@@ -1,0 +1,32 @@
+/** Simple mod matrix: sources 0..7, dest gain array. */
+
+export fn modMatrixInit(nDest) {
+  const d = [];
+  let i = 0;
+  while (i < nDest) {
+    d.push(0);
+    i = i + 1;
+  }
+  return { depth: d, routes: [] };
+}
+
+export fn modMatrixClear(m) {
+  let i = 0;
+  while (i < m.depth.length) {
+    m.depth[i] = 0;
+    i = i + 1;
+  }
+}
+
+export fn modMatrixApplyRoute(m, dest, srcVal, amount) {
+  if (dest >= 0 && dest < m.depth.length) {
+    m.depth[dest] = m.depth[dest] + srcVal * amount;
+  }
+}
+
+export fn modMatrixGet(m, dest) {
+  if (dest >= 0 && dest < m.depth.length) {
+    return m.depth[dest];
+  }
+  return 0;
+}

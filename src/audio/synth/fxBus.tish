@@ -1,0 +1,52 @@
+import { createReverbIR } from "../dsp.tish"
+
+export fn createFxBus(ctx, opts) {
+  const o = opts || {};
+  const dry = ctx.createGain();
+  const wet = ctx.createGain();
+  const out = ctx.createGain();
+  const delay = ctx.createDelay(2.0);
+  const fb = ctx.createGain();
+  const lp = ctx.createBiquadFilter();
+  lp["type"] = "lowpass";
+  lp.frequency.value = Number(o.darkHz) || 7000;
+  delay.delayTime.value = Number(o.delaySec) || 0.22;
+  fb.gain.value = Number(o.feedback) || 0.25;
+  wet.gain.value = Number(o.wet) || 0.2;
+  dry.gain.value = 1;
+  delay.connect(fb);
+  fb.connect(lp);
+  lp.connect(delay);
+  delay.connect(wet);
+  dry.connect(out);
+  wet.connect(out);
+
+  const convolver = ctx.createConvolver();
+  convolver.buffer = createReverbIR(ctx, 1.6, 3.1, "hall");
+  const rvMix = ctx.createGain();
+  rvMix.gain.value = Number(o.reverb) || 0;
+  delay.connect(convolver);
+  convolver.connect(rvMix);
+  rvMix.connect(out);
+
+  return {
+    "in": dry,
+    send: delay,
+    "out": out,
+    setMix: (v) => {
+      const m = Math.max(0, Math.min(1, Number(v) || 0));
+      dry.gain.value = 1 - m * 0.5;
+      wet.gain.value = m;
+    },
+    dispose: () => {
+      try { dry.disconnect(); } catch (e0) {}
+      try { wet.disconnect(); } catch (e1) {}
+      try { out.disconnect(); } catch (e2) {}
+      try { delay.disconnect(); } catch (e3) {}
+      try { fb.disconnect(); } catch (e4) {}
+      try { lp.disconnect(); } catch (e5) {}
+      try { convolver.disconnect(); } catch (e6) {}
+      try { rvMix.disconnect(); } catch (e7) {}
+    }
+  };
+}

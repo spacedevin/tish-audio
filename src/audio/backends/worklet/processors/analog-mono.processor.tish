@@ -1,0 +1,99 @@
+import { registerWorkletProcessor } from "../processorShell.tish"
+import { polyblepSaw } from "../lib/polyblep.tish"
+import { envInit, envSetSampleRate, envTrigger, envTick, envRelease } from "../lib/mseg.tish"
+import { ladderInit, ladderTick } from "../lib/ladder.tish"
+
+export fn hzFromMidi(n) {
+  return 440 * Math.pow(2, (n - 69) / 12);
+}
+
+export fn analogMonoConstructor() {
+  AudioWorkletProcessor.call(this);
+  this.v = {
+    active: 0,
+    note: 0,
+    ph: 0,
+    phSub: 0,
+    hz: 220,
+    hzTarget: 220,
+    env: envInit(),
+    lad: ladderInit(),
+    vel: 0.8
+  };
+  this.params = { cutoff: 0.5, glide: 0.2, drive: 0.15 };
+  this.srReady = 0;
+  this.port.onmessage = (e) => {
+    const d = e.data;
+    if (!d) {
+      return;
+    }
+    if (d.kind === "params" && d.params) {
+      this.params = { ...this.params, ...d.params };
+      return;
+    }
+    if (d.kind === "noteOn") {
+      const note = d.note != null ? d.note : 60;
+      const vel = d.velocity != null ? d.velocity : 110;
+      const g = this.params.glide != null ? this.params.glide : 0.2;
+      this.v.active = 1;
+      this.v.note = note;
+      this.v.hzTarget = hzFromMidi(note);
+      if (g < 0.02) {
+        this.v.hz = this.v.hzTarget;
+      }
+      this.v.vel = Math.max(0.08, Math.min(1, vel / 127));
+      envTrigger(this.v.env, this.v.vel, 0.002, 0.06, 0.78, 0.22);
+      return;
+    }
+    if (d.kind === "noteOff") {
+      const nn = d.note != null ? d.note : -999;
+      if (this.v.note === nn) {
+        envRelease(this.v.env);
+      }
+    }
+  };
+}
+
+export fn analogMonoProcess(inputs, outputs, parameters) {
+  const sr = sampleRate;
+  if (this.srReady === 0) {
+    envSetSampleRate(this.v.env, sr);
+    this.srReady = 1;
+  }
+  const out0 = outputs[0][0];
+  const cut = this.params.cutoff != null ? this.params.cutoff : 0.5;
+  const glide = this.params.glide != null ? this.params.glide : (this.params.motion != null ? this.params.motion : 0.2);
+  const drive = this.params.drive != null ? this.params.drive : 0.15;
+  const fHz = 180 + cut * 10000;
+  const gCoef = Math.max(0.0001, glide * 0.08);
+  const dt0 = 1 / sr;
+  let si = 0;
+  while (si < out0.length) {
+    let acc = 0;
+    const v = this.v;
+    if (v.active) {
+      const eg = envTick(v.env);
+      if (eg <= 0.00001 && v.env.stage === 0) {
+        v.active = 0;
+      } else {
+        v.hz = v.hz + (v.hzTarget - v.hz) * gCoef;
+        const dt = v.hz / sr;
+        v.ph = v.ph + dt;
+        v.phSub = v.phSub + dt * 0.5;
+        let x = polyblepSaw(dt0, v.ph) + Math.sin(6.283185307179586 * v.phSub) * 0.55;
+        x = Math.tanh(x * (1 + drive * 6));
+        x = ladderTick(v.lad, x, fHz, 0.2 + drive * 0.4, sr, drive);
+        acc = x * eg * 0.28;
+      }
+    }
+    out0[si] = Math.max(-1, Math.min(1, acc));
+    si = si + 1;
+  }
+  return true;
+}
+
+export fn registerAnalogMono() {
+  registerWorkletProcessor("analog-mono", analogMonoConstructor, analogMonoProcess);
+}
+
+registerAnalogMono();

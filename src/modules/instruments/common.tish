@@ -1,0 +1,196 @@
+import { h, useEffect, useState } from "lattish"
+import { RackChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import { hzFromMidi } from "../../guitar/instrumentSpec.tish"
+import { createVoiceManager } from "../../audio/synth/voiceManager.tish"
+import { applyAdsr, releaseAdsr } from "../../audio/synth/envelope.tish"
+import { createFxBus } from "../../audio/synth/fxBus.tish"
+import { Group, Rect, Text } from "../../render/prims.tish"
+import { getEraPalette } from "../../render/themeTokens.tish"
+
+export fn makeRackView(typeLabel) {
+  return (props) => {
+    const node = props.node;
+    const onRemove = props.onRemove;
+    const onChange = props.onChange;
+    const onDragStart = props.onDragStart;
+    const onToggleBypass = props.onToggleBypass;
+    const previewOnly = props.previewOnly === true;
+    let [rev, setRev] = useState(0);
+    useEffect(() => {
+      let t = window.setInterval(() => setRev((r) => r + 1), 120);
+      return () => window.clearInterval(t);
+    }, []);
+    void rev;
+    const p = node.params || {};
+    return (
+      <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel={typeLabel}>
+        <div class="relative z-10 flex flex-1 min-h-0 flex-row gap-3 px-3 py-2 items-center">
+          <RotaryKnob label={formatKnobLabel("level")} min={0} max={1} value={p.level ?? 0.4} theme={node.theme} compact={true} onChange={(v) => onChange("level", v)} />
+          <RotaryKnob label={formatKnobLabel("tone")} min={0} max={1} value={p.tone ?? 0.5} theme={node.theme} compact={true} onChange={(v) => onChange("tone", v)} />
+          <RotaryKnob label={formatKnobLabel("motion")} min={0} max={1} value={p.motion ?? 0.3} theme={node.theme} compact={true} onChange={(v) => onChange("motion", v)} />
+          <div class="text-[10px] font-mono text-neutral-300 border border-neutral-700 rounded px-2 py-1 bg-black/30">{typeLabel}</div>
+        </div>
+      </RackChassis>
+    );
+  }
+}
+
+export fn makePaintScene(styleId) {
+  return (ctx) => {
+    const c = ctx || {};
+    const node = c.node || { id: "rack", x: 0, y: 0, label: "Rack", params: {} };
+    const p = getEraPalette(styleId);
+    const x = Number(node.x) || 0;
+    const y = Number(node.y) || 0;
+    const w = 640;
+    const h = 216;
+    return {
+      resources: [],
+      primitives: [
+        Group("rack_" + String(node.id), [
+          Rect("rack_panel_" + String(node.id), x, y, w, h, { fill: p.panel, stroke: p.accent, strokeWidth: 2, radius: 8 }),
+          Text("rack_title_" + String(node.id), x + 18, y + 34, String(node.label || "Rack"), { color: p.text, size: 18, weight: 900 }),
+          Rect("rack_meter_" + String(node.id), x + w - 180, y + 22, 150, 12, { fill: p.glow, radius: 3, opacity: 0.7 })
+        ], {})
+      ]
+    };
+  }
+}
+
+export fn makeInputBindings() {
+  return (ctx) => {
+    const n = (ctx && ctx.node) ? ctx.node : { id: "rack", x: 0, y: 0 };
+    const x = Number(n.x) || 0;
+    const y = Number(n.y) || 0;
+    return [
+      { id: "knob_level_" + String(n.id), rect: { x: x + 40, y: y + 90, w: 72, h: 72 }, role: "knob", param: "level" },
+      { id: "knob_tone_" + String(n.id), rect: { x: x + 150, y: y + 90, w: 72, h: 72 }, role: "knob", param: "tone" },
+      { id: "knob_motion_" + String(n.id), rect: { x: x + 260, y: y + 90, w: 72, h: 72 }, role: "knob", param: "motion" }
+    ];
+  }
+}
+
+export fn makeSimplePolyBuildAudio(flavor) {
+  return (ctx, node) => {
+    const inNode = ctx.createGain();
+    inNode.gain.value = 0;
+    const outNode = ctx.createGain();
+    outNode.gain.value = (node.params && node.params.level != null) ? node.params.level : 0.35;
+    inNode.connect(outNode);
+
+    const vm = createVoiceManager(8, false);
+    const fx = createFxBus(ctx, { wet: 0.15, reverb: 0.08, delaySec: 0.2, feedback: 0.2 });
+    outNode.connect(fx["in"]);
+    fx["out"].connect(outNode);
+
+    const spawnVoice = (note, vel) => {
+      const hz = hzFromMidi(note);
+      if (!Number.isFinite(hz) || hz <= 0) return null;
+      const v = vm.alloc(note, ctx.currentTime);
+      if (v.data && v.data.osc) {
+        try { v.data.osc.stop(); } catch (e0) {}
+        try { v.data.osc.disconnect(); } catch (e1) {}
+        try { v.data.gain.disconnect(); } catch (e2) {}
+      }
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      const filt = ctx.createBiquadFilter();
+      filt["type"] = "lowpass";
+      const tone = node.params && node.params.tone != null ? node.params.tone : 0.5;
+      filt.frequency.value = 240 + tone * 7000;
+      osc["type"] = flavor === "fm_4op" ? "sine" : (flavor === "wavetable_morph" ? "triangle" : "sawtooth");
+      if (flavor === "analog_mono_lead") osc["type"] = "square";
+      osc.frequency.setValueAtTime(hz, ctx.currentTime);
+      osc.connect(filt);
+      filt.connect(g);
+      g.connect(outNode);
+      applyAdsr(g.gain, ctx.currentTime, 8, 80, 0.7, 120, Math.max(0.05, Math.min(1, (vel || 96) / 127)) * 0.55);
+      osc.start();
+      v.data = { osc: osc, gain: g, filt: filt };
+      vm.markNoteOn(note);
+      return v;
+    };
+
+    const releaseVoice = (note) => {
+      const can = vm.markNoteOff(note);
+      if (!can) return;
+      const v = vm.findByNote(note);
+      if (!v || !v.data) return;
+      releaseAdsr(v.data.gain.gain, ctx.currentTime, 120);
+      const osc = v.data.osc;
+      window.setTimeout(() => {
+        try { osc.stop(); } catch (e0) {}
+        try { osc.disconnect(); } catch (e1) {}
+        try { v.data.gain.disconnect(); } catch (e2) {}
+        try { v.data.filt.disconnect(); } catch (e3) {}
+      }, 140);
+      vm.clearVoice(v);
+    };
+
+    const midiSink = {
+      handleEvent: (ev, ctx2) => {
+        void ctx2;
+        if (!ev) return;
+        if (ev.kind === "cc" && ev.controller === 64) {
+          vm.setSustain((ev.value || 0) >= 64);
+          return;
+        }
+        if (ev.kind === "noteOn") {
+          spawnVoice(ev.note, ev.velocity != null ? ev.velocity : 96);
+          return;
+        }
+        if (ev.kind === "noteOff") {
+          releaseVoice(ev.note);
+        }
+      },
+      getActivity: () => ({ last: flavor, vel: 100 }),
+      dispose: () => {
+        let i = 0;
+        while (i < vm.voices.length) {
+          const v = vm.voices[i];
+          i = i + 1;
+          if (!v.data) continue;
+          try { v.data.osc.stop(); } catch (e0) {}
+          try { v.data.osc.disconnect(); } catch (e1) {}
+          try { v.data.gain.disconnect(); } catch (e2) {}
+          try { v.data.filt.disconnect(); } catch (e3) {}
+          vm.clearVoice(v);
+        }
+        fx.dispose();
+      }
+    };
+
+    const nodeParamSync = (ctx2, n2) => {
+      void ctx2;
+      const lvl = n2.params && n2.params.level != null ? n2.params.level : 0.35;
+      outNode.gain.value = lvl;
+    };
+
+    return {
+      "in": inNode,
+      "out": outNode,
+      inPorts: null,
+      outPorts: null,
+      analysers: {},
+      nodeParamSync: nodeParamSync,
+      smartGateRuntime: null,
+      midiSink: midiSink
+    };
+  }
+}
+
+export fn buildPresetSet(prefix, count, baseParams) {
+  const out = [];
+  const n = Math.max(1, Number(count) || 1);
+  let i = 0;
+  while (i < n) {
+    out.push({
+      id: String(prefix) + "_" + String(i + 1),
+      name: String(prefix).toUpperCase() + " " + String(i + 1),
+      params: { ...(baseParams || {}), motion: Math.max(0, Math.min(1, (Number(baseParams.motion) || 0.2) + (i % 5) * 0.12)) }
+    });
+    i = i + 1;
+  }
+  return out;
+}

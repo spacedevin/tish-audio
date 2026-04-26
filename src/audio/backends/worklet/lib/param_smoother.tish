@@ -1,0 +1,18 @@
+/** One-pole smoothing toward target (0..1 coeff per sample). */
+
+export fn smootherInit(val) {
+  return { v: val, target: val, coef: 0.99 };
+}
+
+export fn smootherSetTarget(s, t) {
+  s.target = t;
+}
+
+export fn smootherSetCoef(s, c) {
+  s.coef = c;
+}
+
+export fn smootherTick(s) {
+  s.v = s.v + (s.target - s.v) * (1 - s.coef);
+  return s.v;
+}

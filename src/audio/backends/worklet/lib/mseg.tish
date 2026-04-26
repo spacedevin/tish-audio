@@ -1,0 +1,70 @@
+/** ADSR envelope (seconds; linear segments). Extend later for arbitrary breakpoints. */
+
+export fn envInit() {
+  return { stage: 0, level: 0, gate: 0, sr: 44100, t: 0, vel: 1, sus: 0.7, aSamps: 1, dSamps: 1, rSamps: 1, relStart: 0 };
+}
+
+export fn envSetSampleRate(e, sr) {
+  e.sr = sr;
+}
+
+export fn envTrigger(e, vel, atk, dec, susLvl, rel) {
+  e.stage = 1;
+  e.gate = 1;
+  e.level = 0;
+  e.t = 0;
+  e.vel = Math.max(0, Math.min(1, vel));
+  e.sus = Math.max(0, Math.min(1, susLvl)) * e.vel;
+  e.aSamps = Math.max(1, atk * e.sr);
+  e.dSamps = Math.max(1, dec * e.sr);
+  e.rSamps = Math.max(1, rel * e.sr);
+}
+
+export fn envRelease(e) {
+  e.gate = 0;
+  if (e.stage === 1 || e.stage === 2 || e.stage === 3) {
+    e.stage = 4;
+    e.t = 0;
+    e.relStart = e.level;
+  }
+}
+
+export fn envTick(e) {
+  if (e.stage === 1) {
+    e.t = e.t + 1;
+    e.level = (e.t / e.aSamps) * e.vel;
+    if (e.t >= e.aSamps) {
+      e.stage = 2;
+      e.t = 0;
+    }
+    return e.level;
+  }
+  if (e.stage === 2) {
+    e.t = e.t + 1;
+    const nx = e.t / e.dSamps;
+    e.level = e.vel + (e.sus - e.vel) * nx;
+    if (e.t >= e.dSamps) {
+      e.stage = 3;
+    }
+    return e.level;
+  }
+  if (e.stage === 3) {
+    e.level = e.sus;
+    if (e.gate <= 0) {
+      e.stage = 4;
+      e.t = 0;
+      e.relStart = e.level;
+    }
+    return e.level;
+  }
+  if (e.stage === 4) {
+    e.t = e.t + 1;
+    e.level = e.relStart * (1 - e.t / e.rSamps);
+    if (e.t >= e.rSamps || e.level <= 0.00001) {
+      e.stage = 0;
+      e.level = 0;
+    }
+    return Math.max(0, e.level);
+  }
+  return 0;
+}

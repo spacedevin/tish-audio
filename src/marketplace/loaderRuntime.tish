@@ -1,0 +1,23 @@
+import { validateRackManifest, normalizeRackManifest } from "./manifest.tish"
+
+export async fn loadRuntimeManifest(input, opts) {
+  const o = opts || {};
+  let raw = input;
+  if (typeof input === "string") {
+    try {
+      raw = JSON.parse(input);
+    } catch (e0) {
+      return { ok: false, reason: "invalid json" };
+    }
+  }
+  const v = validateRackManifest(raw);
+  if (!v.ok) return { ok: false, reason: v.reason };
+  const m = normalizeRackManifest(raw);
+  const req = m.requirements || {};
+  const irNeed = Number(req.irVersion) || 1;
+  const irHave = Number(o.irVersion) || 1;
+  if (irNeed > irHave) {
+    return { ok: false, reason: "irVersion mismatch" };
+  }
+  return { ok: true, manifest: m };
+}

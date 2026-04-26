@@ -1,0 +1,73 @@
+/** Round-robin poly voice pool. */
+
+export fn voicePoolInit(count) {
+  const vs = [];
+  let i = 0;
+  while (i < count) {
+    vs.push({ active: 0, note: -1, age: 0 });
+    i = i + 1;
+  }
+  return { voices: vs, sustain: 0, monoNote: -1 };
+}
+
+export fn voicePoolAlloc(pool, note, stealOldest) {
+  let best = -1;
+  let bestAge = 999999999;
+  let i = 0;
+  while (i < pool.voices.length) {
+    const v = pool.voices[i];
+    if (v.active === 0) {
+      v.active = 1;
+      v.note = note;
+      v.age = 0;
+      return i;
+    }
+    if (stealOldest && v.age < bestAge) {
+      bestAge = v.age;
+      best = i;
+    }
+    i = i + 1;
+  }
+  if (best >= 0) {
+    const v = pool.voices[best];
+    v.note = note;
+    v.age = 0;
+    return best;
+  }
+  return -1;
+}
+
+export fn voicePoolFind(pool, note) {
+  let i = 0;
+  while (i < pool.voices.length) {
+    const v = pool.voices[i];
+    if (v.active && v.note === note) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+export fn voicePoolRelease(pool, note) {
+  const ix = voicePoolFind(pool, note);
+  if (ix < 0) {
+    return;
+  }
+  if (pool.sustain > 0) {
+    return;
+  }
+  pool.voices[ix].active = 0;
+  pool.voices[ix].note = -1;
+}
+
+export fn voicePoolAge(pool) {
+  let i = 0;
+  while (i < pool.voices.length) {
+    const v = pool.voices[i];
+    if (v.active) {
+      v.age = v.age + 1;
+    }
+    i = i + 1;
+  }
+}

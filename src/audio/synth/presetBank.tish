@@ -1,0 +1,24 @@
+export fn createPresetBank(factoryPresets) {
+  const factory = Array.isArray(factoryPresets) ? factoryPresets.slice() : [];
+  const user = [];
+  return {
+    factory: factory,
+    user: user,
+    all: () => [...factory, ...user],
+    get: (index) => {
+      const all = [...factory, ...user];
+      if (index < 0 || index >= all.length) return null;
+      return all[index];
+    },
+    addUserPreset: (name, params) => {
+      user.push({ id: "user_" + String(Date.now()) + "_" + String(user.length), name: String(name || "User"), params: { ...(params || {}) } });
+    },
+    page: (pageIndex, pageSize) => {
+      const all = [...factory, ...user];
+      const ps = Math.max(1, Number(pageSize) || 16);
+      const p = Math.max(0, Number(pageIndex) || 0);
+      const start = p * ps;
+      return all.slice(start, start + ps);
+    }
+  };
+}

@@ -46,6 +46,16 @@ import * as tron from './tron/index.tish';
 import * as u87_sim from './u87_sim/index.tish';
 import * as vibrato from './vibrato/index.tish';
 import * as vocal_doubler from './vocal_doubler/index.tish';
+import * as pad_micro from './instruments/pad_micro/index.tish';
+import * as analog_poly_juniper from './instruments/analog_poly_juniper/index.tish';
+import * as fm_4op from './instruments/fm_4op/index.tish';
+import * as hybrid_toxic_x from './instruments/hybrid_toxic_x/index.tish';
+import * as wavetable_morph from './instruments/wavetable_morph/index.tish';
+import * as organ_drawbars from './instruments/organ_drawbars/index.tish';
+import * as drum_machine_xr from './instruments/drum_machine_xr/index.tish';
+import * as rompler_90s from './instruments/rompler_90s/index.tish';
+import * as vocoder_pad from './instruments/vocoder_pad/index.tish';
+import * as analog_mono_lead from './instruments/analog_mono_lead/index.tish';
 
 export const MODULE_REGISTRY = {
   'amp_modern': {
@@ -446,6 +456,136 @@ export const MODULE_REGISTRY = {
     View: vocal_doubler.vocal_doubler_View,
     buildAudio: vocal_doubler.vocal_doubler_buildAudio,
   },
+  'pad_micro': {
+    type: pad_micro.pad_micro_type,
+    category: pad_micro.pad_micro_category,
+    metadata: pad_micro.pad_micro_metadata,
+    layout: pad_micro.pad_micro_layout,
+    View: pad_micro.pad_micro_View,
+    buildAudio: pad_micro.pad_micro_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: pad_micro.pad_micro_paintScene,
+    inputBindings: pad_micro.pad_micro_inputBindings,
+    parameters: pad_micro.pad_micro_parameters,
+    requirements: pad_micro.pad_micro_requirements,
+  },
+  'analog_poly_juniper': {
+    type: analog_poly_juniper.analog_poly_juniper_type,
+    category: analog_poly_juniper.analog_poly_juniper_category,
+    metadata: analog_poly_juniper.analog_poly_juniper_metadata,
+    layout: analog_poly_juniper.analog_poly_juniper_layout,
+    View: analog_poly_juniper.analog_poly_juniper_View,
+    buildAudio: analog_poly_juniper.analog_poly_juniper_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: analog_poly_juniper.analog_poly_juniper_paintScene,
+    inputBindings: analog_poly_juniper.analog_poly_juniper_inputBindings,
+    parameters: analog_poly_juniper.analog_poly_juniper_parameters,
+    requirements: analog_poly_juniper.analog_poly_juniper_requirements,
+  },
+  'fm_4op': {
+    type: fm_4op.fm_4op_type,
+    category: fm_4op.fm_4op_category,
+    metadata: fm_4op.fm_4op_metadata,
+    layout: fm_4op.fm_4op_layout,
+    View: fm_4op.fm_4op_View,
+    buildAudio: fm_4op.fm_4op_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: fm_4op.fm_4op_paintScene,
+    inputBindings: fm_4op.fm_4op_inputBindings,
+    parameters: fm_4op.fm_4op_parameters,
+    requirements: fm_4op.fm_4op_requirements,
+  },
+  'hybrid_toxic_x': {
+    type: hybrid_toxic_x.hybrid_toxic_x_type,
+    category: hybrid_toxic_x.hybrid_toxic_x_category,
+    metadata: hybrid_toxic_x.hybrid_toxic_x_metadata,
+    layout: hybrid_toxic_x.hybrid_toxic_x_layout,
+    View: hybrid_toxic_x.hybrid_toxic_x_View,
+    buildAudio: hybrid_toxic_x.hybrid_toxic_x_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: hybrid_toxic_x.hybrid_toxic_x_paintScene,
+    inputBindings: hybrid_toxic_x.hybrid_toxic_x_inputBindings,
+    parameters: hybrid_toxic_x.hybrid_toxic_x_parameters,
+    requirements: hybrid_toxic_x.hybrid_toxic_x_requirements,
+  },
+  'wavetable_morph': {
+    type: wavetable_morph.wavetable_morph_type,
+    category: wavetable_morph.wavetable_morph_category,
+    metadata: wavetable_morph.wavetable_morph_metadata,
+    layout: wavetable_morph.wavetable_morph_layout,
+    View: wavetable_morph.wavetable_morph_View,
+    buildAudio: wavetable_morph.wavetable_morph_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: wavetable_morph.wavetable_morph_paintScene,
+    inputBindings: wavetable_morph.wavetable_morph_inputBindings,
+    parameters: wavetable_morph.wavetable_morph_parameters,
+    requirements: wavetable_morph.wavetable_morph_requirements,
+  },
+  'organ_drawbars': {
+    type: organ_drawbars.organ_drawbars_type,
+    category: organ_drawbars.organ_drawbars_category,
+    metadata: organ_drawbars.organ_drawbars_metadata,
+    layout: organ_drawbars.organ_drawbars_layout,
+    View: organ_drawbars.organ_drawbars_View,
+    buildAudio: organ_drawbars.organ_drawbars_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: organ_drawbars.organ_drawbars_paintScene,
+    inputBindings: organ_drawbars.organ_drawbars_inputBindings,
+    parameters: organ_drawbars.organ_drawbars_parameters,
+    requirements: organ_drawbars.organ_drawbars_requirements,
+  },
+  'drum_machine_xr': {
+    type: drum_machine_xr.drum_machine_xr_type,
+    category: drum_machine_xr.drum_machine_xr_category,
+    metadata: drum_machine_xr.drum_machine_xr_metadata,
+    layout: drum_machine_xr.drum_machine_xr_layout,
+    View: drum_machine_xr.drum_machine_xr_View,
+    buildAudio: drum_machine_xr.drum_machine_xr_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: drum_machine_xr.drum_machine_xr_paintScene,
+    inputBindings: drum_machine_xr.drum_machine_xr_inputBindings,
+    parameters: drum_machine_xr.drum_machine_xr_parameters,
+    requirements: drum_machine_xr.drum_machine_xr_requirements,
+  },
+  'rompler_90s': {
+    type: rompler_90s.rompler_90s_type,
+    category: rompler_90s.rompler_90s_category,
+    metadata: rompler_90s.rompler_90s_metadata,
+    layout: rompler_90s.rompler_90s_layout,
+    View: rompler_90s.rompler_90s_View,
+    buildAudio: rompler_90s.rompler_90s_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: rompler_90s.rompler_90s_paintScene,
+    inputBindings: rompler_90s.rompler_90s_inputBindings,
+    parameters: rompler_90s.rompler_90s_parameters,
+    requirements: rompler_90s.rompler_90s_requirements,
+  },
+  'vocoder_pad': {
+    type: vocoder_pad.vocoder_pad_type,
+    category: vocoder_pad.vocoder_pad_category,
+    metadata: vocoder_pad.vocoder_pad_metadata,
+    layout: vocoder_pad.vocoder_pad_layout,
+    View: vocoder_pad.vocoder_pad_View,
+    buildAudio: vocoder_pad.vocoder_pad_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: vocoder_pad.vocoder_pad_paintScene,
+    inputBindings: vocoder_pad.vocoder_pad_inputBindings,
+    parameters: vocoder_pad.vocoder_pad_parameters,
+    requirements: vocoder_pad.vocoder_pad_requirements,
+  },
+  'analog_mono_lead': {
+    type: analog_mono_lead.analog_mono_lead_type,
+    category: analog_mono_lead.analog_mono_lead_category,
+    metadata: analog_mono_lead.analog_mono_lead_metadata,
+    layout: analog_mono_lead.analog_mono_lead_layout,
+    View: analog_mono_lead.analog_mono_lead_View,
+    buildAudio: analog_mono_lead.analog_mono_lead_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: analog_mono_lead.analog_mono_lead_paintScene,
+    inputBindings: analog_mono_lead.analog_mono_lead_inputBindings,
+    parameters: analog_mono_lead.analog_mono_lead_parameters,
+    requirements: analog_mono_lead.analog_mono_lead_requirements,
+  },
 };
 
 
@@ -515,6 +655,18 @@ const LEGACY_LIBRARY = {
     { type: 'graphic_eq', label: 'Graphic EQ', color: 'from-stone-800 to-stone-950', theme: 'dark', defaultParams: { b31: 0, b62: 0, b125: 0, b250: 0, b500: 0, b1k: 0, b2k: 0, b4k: 0, b8k: 0, b16k: 0, level: 1.0 } },
     { type: 'console_mixer', label: 'Mixing Console', color: 'from-zinc-800 to-black', theme: 'dark', defaultParams: { channels: 4, ch1: 1.0, ch2: 1.0, ch3: 1.0, ch4: 1.0, master: 1.0 } }
   ],
+  INSTRUMENTS: [
+    { type: 'pad_micro', label: 'Pad Micro', color: 'from-cyan-400 to-blue-700', theme: 'dark', defaultParams: { level: 0.42, tone: 0.48, motion: 0.28 } },
+    { type: 'analog_poly_juniper', label: 'Analog Poly Juniper', color: 'from-orange-500 to-amber-800', theme: 'dark', defaultParams: { level: 0.5, tone: 0.62, motion: 0.34 } },
+    { type: 'fm_4op', label: 'FM Matrix Pro', color: 'from-amber-700 to-yellow-900', theme: 'dark', defaultParams: { level: 0.46, tone: 0.56, motion: 0.52, feedback: 0.2, algorithm: 0.2 } },
+    { type: 'hybrid_toxic_x', label: 'Hybrid Toxic X', color: 'from-fuchsia-700 via-violet-900 to-black', theme: 'dark', defaultParams: { level: 0.38, tone: 0.52, motion: 0.4, morph: 0.35 } },
+    { type: 'wavetable_morph', label: 'Wavetable Morph', color: 'from-indigo-500 to-sky-700', theme: 'dark', defaultParams: { level: 0.45, tone: 0.58, motion: 0.64 } },
+    { type: 'organ_drawbars', label: 'Organ Drawbars', color: 'from-amber-800 to-stone-950', theme: 'dark', defaultParams: { level: 0.52, tone: 0.54, motion: 0.26 } },
+    { type: 'drum_machine_xr', label: 'Drum Machine XR', color: 'from-red-700 to-orange-900', theme: 'dark', defaultParams: { level: 0.5, tone: 0.45, motion: 0.6 } },
+    { type: 'rompler_90s', label: 'Rompler 90s', color: 'from-blue-600 to-blue-900', theme: 'dark', defaultParams: { level: 0.5, tone: 0.52, motion: 0.48 } },
+    { type: 'vocoder_pad', label: 'Vocoder Pad', color: 'from-zinc-600 to-zinc-900', theme: 'dark', defaultParams: { level: 0.44, tone: 0.57, motion: 0.5 } },
+    { type: 'analog_mono_lead', label: 'Analog Mono Lead', color: 'from-amber-600 to-orange-900', theme: 'dark', defaultParams: { level: 0.5, tone: 0.67, motion: 0.31 } }
+  ],
   UTILITY: [
     { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
     { type: 'midi_poly', label: 'MIDI Poly', color: 'from-violet-600 to-indigo-900', theme: 'dark', defaultParams: { level: 0.35, waveform: 0, brightness: 0.5 } },
@@ -548,7 +700,17 @@ const MODULES_WITHOUT_AUTO_CONTROL_PORTS = {
   midi_recorder: true,
   midi_poly: true,
   midi_channel_splitter: true,
-  midi_semantic_splitter: true
+  midi_semantic_splitter: true,
+  pad_micro: true,
+  analog_poly_juniper: true,
+  fm_4op: true,
+  hybrid_toxic_x: true,
+  wavetable_morph: true,
+  organ_drawbars: true,
+  drum_machine_xr: true,
+  rompler_90s: true,
+  vocoder_pad: true,
+  analog_mono_lead: true
 };
 
 export fn getNodeControlPorts(node) {
@@ -804,6 +966,9 @@ export fn controlParamRangeForKey(moduleType, paramKey) {
     if (key === "waveform") return { min: 0, max: 3 };
     if (key === "brightness") return { min: 0, max: 1 };
   }
+  if (t === "pad_micro" || t === "analog_poly_juniper" || t === "fm_4op" || t === "hybrid_toxic_x" || t === "wavetable_morph" || t === "organ_drawbars" || t === "drum_machine_xr" || t === "rompler_90s" || t === "vocoder_pad" || t === "analog_mono_lead") {
+    if (key === "level" || key === "tone" || key === "motion") return { min: 0, max: 1 };
+  }
   if (key === "time") return { min: 0, max: 8 };
   if (key === "threshold") return { min: -60, max: 0 };
   if (key === "ratio") return { min: 1, max: 20 };
@@ -847,6 +1012,7 @@ export const getNodePorts = (node) => {
     return { "in": ['midi1', 'midi2', 'midi3'], "out": SMK25_FACE_OUT_PORTS };
   }
   if (node["type"] === 'midi_poly') return { "in": ['midi'], "out": ['main'] };
+  if (node["type"] === 'pad_micro' || node["type"] === 'analog_poly_juniper' || node["type"] === 'fm_4op' || node["type"] === 'hybrid_toxic_x' || node["type"] === 'wavetable_morph' || node["type"] === 'organ_drawbars' || node["type"] === 'drum_machine_xr' || node["type"] === 'rompler_90s' || node["type"] === 'vocoder_pad' || node["type"] === 'analog_mono_lead') return { "in": ['midi', 'main'], "out": ['main'] };
   const regAccept = MODULE_REGISTRY[node["type"]];
   if (regAccept && regAccept.acceptsMidiInput === true) {
     return { "in": ['midi', 'main'], "out": ['main'] };

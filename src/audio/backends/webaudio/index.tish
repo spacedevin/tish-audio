@@ -1,0 +1,56 @@
+import { defaultCapabilities } from "../protocol.tish"
+import { buildLitePolyGraph } from "./litePoly.tish"
+
+export fn createWebAudioBackend() {
+  let ctxRef = null;
+  return {
+    mount: (ctx) => {
+      ctxRef = ctx;
+    },
+    unmount: () => {
+      ctxRef = null;
+    },
+    capabilities: () => {
+      const c = defaultCapabilities();
+      c.worklet = false;
+      c.zdfFilter = false;
+      c.oversample = 1;
+      c.polyphonyMax = 8;
+      return c;
+    },
+    allocateEngine: (spec, qualityProfile, node) => {
+      if (!ctxRef) {
+        return null;
+      }
+      return buildLitePolyGraph(ctxRef, spec, qualityProfile, node);
+    },
+    releaseEngine: (handle) => {
+      if (handle && typeof handle.dispose === "function") {
+        handle.dispose();
+      }
+    },
+    applyPreset: (handle, preset) => {
+      void handle;
+      void preset;
+    },
+    setParam: (handle, paramId, value, atTime) => {
+      void handle;
+      void paramId;
+      void value;
+      void atTime;
+    },
+    sendNoteEvent: (handle, ev) => {
+      if (handle && handle.midiSink && typeof handle.midiSink.handleEvent === "function") {
+        handle.midiSink.handleEvent(ev, ctxRef);
+      }
+    },
+    getMeters: (handle) => {
+      void handle;
+      return { rms: 0, peak: 0, polyphony: 0 };
+    },
+    requestQualityProfile: (handle, next) => {
+      void handle;
+      void next;
+    }
+  };
+}

@@ -1,0 +1,18 @@
+import * as voiceManager from "./voiceManager.tish"
+import * as envelope from "./envelope.tish"
+import * as lfo from "./lfo.tish"
+import * as modMatrix from "./modMatrix.tish"
+import * as fxBus from "./fxBus.tish"
+import * as oscBank from "./oscBank.tish"
+import * as presetBank from "./presetBank.tish"
+import * as workletRegistrar from "./workletRegistrar.tish"
+
+export const createVoiceManager = voiceManager.createVoiceManager;
+export const applyAdsr = envelope.applyAdsr;
+export const releaseAdsr = envelope.releaseAdsr;
+export const createLfo = lfo.createLfo;
+export const createModMatrix = modMatrix.createModMatrix;
+export const createFxBus = fxBus.createFxBus;
+export const createOscBank = oscBank.createOscBank;
+export const createPresetBank = presetBank.createPresetBank;
+export const ensureWorklet = workletRegistrar.ensureWorklet;

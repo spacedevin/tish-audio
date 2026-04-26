@@ -1,0 +1,34 @@
+/**
+ * Audio backend protocol (lifecycle + engine control). Implementations return plain objects
+ * with the methods below; handles expose .in / .out AudioNode shims on the main thread.
+ */
+
+export const ABE_MOUNT = "mount";
+export const ABE_UNMOUNT = "unmount";
+export const ABE_ALLOC = "allocateEngine";
+export const ABE_RELEASE = "releaseEngine";
+export const ABE_PRESET = "applyPreset";
+export const ABE_PARAM = "setParam";
+export const ABE_NOTE = "sendNoteEvent";
+export const ABE_METERS = "getMeters";
+export const ABE_QUALITY = "requestQualityProfile";
+export const ABE_CAPABILITIES = "capabilities";
+
+export fn assertBackend(api) {
+  if (!api) {
+    return false;
+  }
+  return typeof api.mount === "function" && typeof api.allocateEngine === "function";
+}
+
+export fn defaultCapabilities() {
+  return {
+    oversample: 1,
+    zdfFilter: false,
+    mseg: false,
+    polyphonyMax: 8,
+    latencyMs: 12,
+    worklet: false,
+    nativeStream: false
+  };
+}

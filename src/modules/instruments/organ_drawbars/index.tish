@@ -1,0 +1,24 @@
+import { buildPresetSet } from "../common.tish"
+import { organDrawbarsView, organDrawbarsPaintScene, organDrawbarsInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const organ_drawbars_type = "organ_drawbars";
+export const organ_drawbars_category = "INSTRUMENTS";
+export const organ_drawbars_metadata = {
+  label: "Organ Drawbars",
+  color: "from-amber-800 to-stone-950",
+  theme: "dark",
+  defaultParams: { level: 0.52, tone: 0.54, motion: 0.26 },
+  presets: buildPresetSet("Organ", 12, { level: 0.52, tone: 0.54, motion: 0.26 })
+};
+export const organ_drawbars_layout = { width: 640, height: 216 };
+export const organ_drawbars_View = organDrawbarsView;
+export const organ_drawbars_paintScene = organDrawbarsPaintScene;
+export const organ_drawbars_inputBindings = organDrawbarsInputBindings;
+export const organ_drawbars_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.52, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.54, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.26, taper: "lin" }
+];
+export const organ_drawbars_requirements = { irVersion: 1 };
+export const organ_drawbars_buildAudio = makeEngineBuildAudio("organ_drawbars");

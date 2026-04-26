@@ -1,0 +1,107 @@
+export fn createVoiceManager(maxVoices, monoMode) {
+  const cap = Math.max(1, Number(maxVoices) || 8);
+  const mono = monoMode === true;
+  const voices = [];
+  let i = 0;
+  while (i < cap) {
+    voices.push({ note: -1, active: false, startedAt: 0, data: null });
+    i = i + 1;
+  }
+  let sustain = false;
+  const held = {};
+  const releaseQueue = {};
+
+  const findByNote = (note) => {
+    let vi = 0;
+    while (vi < voices.length) {
+      if (voices[vi].active && voices[vi].note === note) return voices[vi];
+      vi = vi + 1;
+    }
+    return null;
+  };
+
+  const oldest = () => {
+    let best = voices[0];
+    let vi = 1;
+    while (vi < voices.length) {
+      if (voices[vi].startedAt < best.startedAt) best = voices[vi];
+      vi = vi + 1;
+    }
+    return best;
+  };
+
+  const alloc = (note, nowTime) => {
+    const t = Number(nowTime) || 0;
+    if (mono) {
+      const v0 = voices[0];
+      v0.note = note;
+      v0.active = true;
+      v0.startedAt = t;
+      return v0;
+    }
+    const existing = findByNote(note);
+    if (existing) {
+      existing.startedAt = t;
+      return existing;
+    }
+    let vi = 0;
+    while (vi < voices.length) {
+      const v = voices[vi];
+      if (!v.active) {
+        v.note = note;
+        v.active = true;
+        v.startedAt = t;
+        return v;
+      }
+      vi = vi + 1;
+    }
+    const stolen = oldest();
+    stolen.note = note;
+    stolen.active = true;
+    stolen.startedAt = t;
+    return stolen;
+  };
+
+  const markNoteOn = (note) => {
+    held[String(note)] = true;
+    Reflect.deleteProperty(releaseQueue, String(note));
+  };
+
+  const markNoteOff = (note) => {
+    Reflect.deleteProperty(held, String(note));
+    if (sustain) {
+      releaseQueue[String(note)] = true;
+      return false;
+    }
+    return true;
+  };
+
+  const setSustain = (next) => {
+    sustain = !!next;
+    if (!sustain) {
+      const keys = Object.keys(releaseQueue);
+      let ki = 0;
+      while (ki < keys.length) {
+        Reflect.deleteProperty(releaseQueue, keys[ki]);
+        ki = ki + 1;
+      }
+    }
+  };
+
+  return {
+    voices: voices,
+    alloc: alloc,
+    findByNote: findByNote,
+    markNoteOn: markNoteOn,
+    markNoteOff: markNoteOff,
+    setSustain: setSustain,
+    isHeld: (note) => held[String(note)] === true,
+    clearVoice: (v) => {
+      if (!v) return;
+      v.note = -1;
+      v.active = false;
+      v.data = null;
+      v.startedAt = 0;
+    }
+  };
+}

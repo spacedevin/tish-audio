@@ -1,0 +1,67 @@
+/**
+ * Dispatches engine IR across Native / Worklet / WebAudio backends; returns MODULE_REGISTRY buildAudio shape.
+ */
+
+import { specForModuleType } from "./engineIR.tish"
+import {
+  loadSynthQualitySettings,
+  resolveAudioBackendChoice,
+  effectiveQualityForEngine,
+  BACKEND_WEBAUDIO,
+  BACKEND_NATIVE,
+  QUALITY_LITE,
+  shouldForceLite
+} from "./qualityProfile.tish"
+import { createWebAudioBackend } from "../backends/webaudio/index.tish"
+import { createWorkletBackend } from "../backends/worklet/index.tish"
+import { createNativeSynthBackend } from "../backends/native/index.tish"
+
+export fn makeEngineBuildAudio(moduleType) {
+  return (ctx, node) => {
+    const spec = specForModuleType(moduleType);
+    if (!spec) {
+      return null;
+    }
+    const settings = loadSynthQualitySettings();
+    let tier = effectiveQualityForEngine(settings, spec.id);
+    if (shouldForceLite(ctx)) {
+      tier = QUALITY_LITE;
+    }
+    const profile = { qualityTier: tier };
+    const backendChoice = resolveAudioBackendChoice(ctx, settings, spec.id);
+
+    const wb = createWebAudioBackend();
+    wb.mount(ctx);
+    const lb = createWorkletBackend();
+    lb.mount(ctx);
+    const nb = createNativeSynthBackend();
+    nb.mount(ctx);
+
+    let handle = null;
+    if (backendChoice !== BACKEND_WEBAUDIO) {
+      if (backendChoice === BACKEND_NATIVE) {
+        handle = nb.allocateEngine(spec, profile, node);
+      }
+      if (!handle) {
+        handle = lb.allocateEngine(spec, profile, node);
+      }
+    }
+    if (!handle) {
+      handle = wb.allocateEngine(spec, profile, node);
+    }
+    if (!handle) {
+      return null;
+    }
+
+    return {
+      "in": handle["in"],
+      "out": handle["out"],
+      inPorts: handle.inPorts,
+      outPorts: handle.outPorts,
+      analysers: handle.analysers,
+      nodeParamSync: handle.nodeParamSync,
+      smartGateRuntime: handle.smartGateRuntime,
+      midiSink: handle.midiSink
+    };
+  };
+}

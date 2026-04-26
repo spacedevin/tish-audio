@@ -1,0 +1,23 @@
+import { MODULE_REGISTRY } from "../modules/registry.tish"
+import { registerIrModule } from "./moduleRegistry.tish"
+
+let __registered = false;
+
+export fn registerBuiltinIrModules() {
+  if (__registered) return;
+  const keys = Object.keys(MODULE_REGISTRY);
+  let i = 0;
+  while (i < keys.length) {
+    const k = keys[i];
+    i = i + 1;
+    const m = MODULE_REGISTRY[k];
+    if (!m) continue;
+    registerIrModule(k, {
+      paintScene: m.paintScene,
+      inputBindings: m.inputBindings,
+      parameters: m.parameters || [],
+      requirements: m.requirements || { irVersion: 1 }
+    });
+  }
+  __registered = true;
+}

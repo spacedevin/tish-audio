@@ -1,0 +1,156 @@
+import { hzFromMidi } from "../../../guitar/instrumentSpec.tish"
+import { createVoiceManager } from "../../synth/voiceManager.tish"
+import { applyAdsr, releaseAdsr } from "../../synth/envelope.tish"
+import { createFxBus } from "../../synth/fxBus.tish"
+import { OSC_SINE, OSC_SAW, OSC_SQUARE, FILT_NONE, FILT_BIQUAD_LP } from "../../synth/engineIR.tish"
+import { qualityTierLimits, QUALITY_LITE } from "../../synth/qualityProfile.tish"
+
+export fn buildLitePolyGraph(ctx, spec, profile, node) {
+  const tier = profile && profile.qualityTier ? profile.qualityTier : QUALITY_LITE;
+  const lim = qualityTierLimits(tier);
+  const maxV = Math.min(lim.voices, spec.voicing && spec.voicing.polyphony ? spec.voicing.polyphony : 8);
+  const inNode = ctx.createGain();
+  inNode.gain.value = 0;
+  const outNode = ctx.createGain();
+  const lvl = node.params && node.params.level != null ? node.params.level : 0.35;
+  outNode.gain.value = lvl;
+  inNode.connect(outNode);
+
+  const vm = createVoiceManager(maxV, false);
+  const wet = tier === QUALITY_LITE ? 0.08 : 0.15;
+  const fx = createFxBus(ctx, { wet: wet, reverb: tier === QUALITY_LITE ? 0.02 : 0.08, delaySec: 0.18, feedback: 0.18 });
+  outNode.connect(fx["in"]);
+  fx["out"].connect(outNode);
+
+  const lite = spec.liteVoice || { osc: OSC_SAW, filt: FILT_BIQUAD_LP };
+  const oscKind = lite.osc || OSC_SAW;
+
+  const spawnVoice = (note, vel) => {
+    const hz = hzFromMidi(note);
+    if (!Number.isFinite(hz) || hz <= 0) {
+      return null;
+    }
+    const v = vm.alloc(note, ctx.currentTime);
+    if (v.data && v.data.osc) {
+      try { v.data.osc.stop(); } catch (e0) {}
+      try { v.data.osc.disconnect(); } catch (e1) {}
+      try { v.data.gain.disconnect(); } catch (e2) {}
+    }
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    let filt = null;
+    if (lite.filt === FILT_NONE) {
+      osc.connect(g);
+    } else {
+      filt = ctx.createBiquadFilter();
+      filt["type"] = "lowpass";
+      const tone = node.params && node.params.tone != null ? node.params.tone : (node.params && node.params.cutoff != null ? node.params.cutoff : 0.5);
+      filt.frequency.value = 220 + tone * 9000;
+      osc.connect(filt);
+      filt.connect(g);
+    }
+    if (oscKind === OSC_SINE) {
+      osc["type"] = "sine";
+    } else if (oscKind === OSC_SQUARE) {
+      osc["type"] = "square";
+    } else {
+      osc["type"] = "sawtooth";
+    }
+    osc.frequency.setValueAtTime(hz, ctx.currentTime);
+    g.connect(outNode);
+    applyAdsr(g.gain, ctx.currentTime, 8, 80, 0.7, 120, Math.max(0.05, Math.min(1, (vel || 96) / 127)) * 0.55);
+    osc.start();
+    v.data = { osc: osc, gain: g, filt: filt };
+    vm.markNoteOn(note);
+    return v;
+  };
+
+  const releaseVoice = (note) => {
+    const can = vm.markNoteOff(note);
+    if (!can) {
+      return;
+    }
+    const v = vm.findByNote(note);
+    if (!v || !v.data) {
+      return;
+    }
+    releaseAdsr(v.data.gain.gain, ctx.currentTime, 120);
+    const osc = v.data.osc;
+    window.setTimeout(() => {
+      try { osc.stop(); } catch (e0) {}
+      try { osc.disconnect(); } catch (e1) {}
+      try { v.data.gain.disconnect(); } catch (e2) {}
+      if (v.data.filt) {
+        try { v.data.filt.disconnect(); } catch (e3) {}
+      }
+    }, 140);
+    vm.clearVoice(v);
+  };
+
+  const midiSink = {
+    handleEvent: (ev, ctx2) => {
+      void ctx2;
+      if (!ev) {
+        return;
+      }
+      if (ev.kind === "cc" && ev.controller === 64) {
+        vm.setSustain((ev.value || 0) >= 64);
+        return;
+      }
+      if (ev.kind === "noteOn") {
+        spawnVoice(ev.note, ev.velocity != null ? ev.velocity : 96);
+        return;
+      }
+      if (ev.kind === "noteOff") {
+        releaseVoice(ev.note);
+      }
+    },
+    getActivity: () => ({ last: spec.id, vel: 100 }),
+    dispose: () => {
+      let i = 0;
+      while (i < vm.voices.length) {
+        const v = vm.voices[i];
+        i = i + 1;
+        if (!v.data) {
+          continue;
+        }
+        try { v.data.osc.stop(); } catch (e0) {}
+        try { v.data.osc.disconnect(); } catch (e1) {}
+        try { v.data.gain.disconnect(); } catch (e2) {}
+        if (v.data.filt) {
+          try { v.data.filt.disconnect(); } catch (e3) {}
+        }
+        vm.clearVoice(v);
+      }
+      fx.dispose();
+    }
+  };
+
+  const nodeParamSync = (ctx2, n2) => {
+    void ctx2;
+    const lv = n2.params && n2.params.level != null ? n2.params.level : 0.35;
+    outNode.gain.value = lv;
+    let vi = 0;
+    while (vi < vm.voices.length) {
+      const v = vm.voices[vi];
+      vi = vi + 1;
+      if (!v || !v.data || !v.data.filt) {
+        continue;
+      }
+      const tone = n2.params && n2.params.tone != null ? n2.params.tone : (n2.params && n2.params.cutoff != null ? n2.params.cutoff : 0.5);
+      v.data.filt.frequency.setValueAtTime(220 + tone * 9000, ctx.currentTime);
+    }
+  };
+
+  return {
+    "in": inNode,
+    "out": outNode,
+    inPorts: null,
+    outPorts: null,
+    analysers: {},
+    nodeParamSync: nodeParamSync,
+    smartGateRuntime: null,
+    midiSink: midiSink,
+    dispose: () => midiSink.dispose()
+  };
+}

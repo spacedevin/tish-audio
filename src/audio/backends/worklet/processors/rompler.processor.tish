@@ -1,0 +1,111 @@
+import { registerWorkletProcessor } from "../processorShell.tish"
+import { envInit, envSetSampleRate, envTrigger, envTick, envRelease } from "../lib/mseg.tish"
+import { svfInit, svfTick } from "../lib/svf.tish"
+
+export fn hzFromMidi(n) {
+  return 440 * Math.pow(2, (n - 69) / 12);
+}
+
+export fn romplerConstructor() {
+  AudioWorkletProcessor.call(this);
+  this.voices = [];
+  let i = 0;
+  while (i < 12) {
+    this.voices.push({ active: 0, note: 0, ph: 0, env: envInit(), svf: svfInit(), hz: 220, vel: 0.7 });
+    i = i + 1;
+  }
+  this.params = { tone: 0.5, release: 0.35, start: 0 };
+  this.srReady = 0;
+  this.port.onmessage = (e) => {
+    const d = e.data;
+    if (!d) {
+      return;
+    }
+    if (d.kind === "params" && d.params) {
+      this.params = { ...this.params, ...d.params };
+      return;
+    }
+    if (d.kind === "noteOn") {
+      const note = d.note != null ? d.note : 60;
+      const vel = d.velocity != null ? d.velocity : 96;
+      let slot = -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        if (this.voices[j].active === 0) {
+          slot = j;
+          break;
+        }
+        j = j + 1;
+      }
+      if (slot < 0) {
+        slot = 0;
+      }
+      const v = this.voices[slot];
+      v.active = 1;
+      v.note = note;
+      v.hz = hzFromMidi(note);
+      v.vel = Math.max(0.05, Math.min(1, vel / 127));
+      const st = this.params.start != null ? this.params.start : 0;
+      v.ph = st * 4;
+      const rel = this.params.release != null ? this.params.release : 0.35;
+      envTrigger(v.env, v.vel, 0.002, 0.1, 0.72, 0.15 + rel * 0.8);
+      return;
+    }
+    if (d.kind === "noteOff") {
+      const note = d.note != null ? d.note : -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        const v = this.voices[j];
+        if (v.active && v.note === note) {
+          envRelease(v.env);
+        }
+        j = j + 1;
+      }
+    }
+  };
+}
+
+export fn romplerProcess(inputs, outputs, parameters) {
+  const sr = sampleRate;
+  if (this.srReady === 0) {
+    let i = 0;
+    while (i < this.voices.length) {
+      envSetSampleRate(this.voices[i].env, sr);
+      i = i + 1;
+    }
+    this.srReady = 1;
+  }
+  const out0 = outputs[0][0];
+  const tone = this.params.tone != null ? this.params.tone : 0.5;
+  let si = 0;
+  while (si < out0.length) {
+    let acc = 0;
+    let j = 0;
+    while (j < this.voices.length) {
+      const v = this.voices[j];
+      j = j + 1;
+      if (!v.active) {
+        continue;
+      }
+      const eg = envTick(v.env);
+      if (eg <= 0.00001 && v.env.stage === 0) {
+        v.active = 0;
+        continue;
+      }
+      v.ph = v.ph + v.hz / sr;
+      let w = Math.sin(6.283185307179586 * v.ph);
+      w = w + Math.sin(6.283185307179586 * v.ph * 2) * 0.25 * tone;
+      const f = svfTick(v.svf, w, 300 + tone * 7000, 0.12, sr);
+      acc = acc + f.lp * eg * 0.2;
+    }
+    out0[si] = Math.max(-1, Math.min(1, acc));
+    si = si + 1;
+  }
+  return true;
+}
+
+export fn registerRompler() {
+  registerWorkletProcessor("rompler", romplerConstructor, romplerProcess);
+}
+
+registerRompler();

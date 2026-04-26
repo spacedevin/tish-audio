@@ -1,0 +1,25 @@
+export fn createModMatrix() {
+  const routes = [];
+  return {
+    routes: routes,
+    addRoute: (src, dest, amount) => {
+      routes.push({ src: src, dest: dest, amount: Number(amount) || 0 });
+    },
+    clear: () => {
+      routes.length = 0;
+    },
+    applyScalar: (sourceMap, destinationMap, nowTime) => {
+      let i = 0;
+      while (i < routes.length) {
+        const r = routes[i];
+        i = i + 1;
+        const sv = Number(sourceMap[r.src]) || 0;
+        const dp = destinationMap[r.dest];
+        if (!dp) continue;
+        try {
+          dp.setValueAtTime((dp.value || 0) + sv * r.amount, Number(nowTime) || 0);
+        } catch (e0) {}
+      }
+    }
+  };
+}

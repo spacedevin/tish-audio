@@ -1,0 +1,1297 @@
+/**
+ * Per-engine rack faceplates for the v2 synth flagship racks.
+ * Each engine gets its own DOM View (RackChassis-wrapped, distinct layout)
+ * plus a matching IR paintScene composed from materialKit + matching inputBindings.
+ */
+import { h, useRef, useState, useEffect } from "lattish"
+import { RackChassis } from "../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../ui/controls.tish"
+import * as mat from "../../render/widgets/materialKit.tish"
+import { Group, Rect, Path, Text } from "../../render/prims.tish"
+import { eraPalettes, materialTokens, getEraPalette } from "../../render/themeTokens.tish"
+
+const RACK_W = 640;
+const RACK_H = 216;
+
+const rackClamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0));
+
+const lcdShellClass = (tone) => {
+  if (tone === "amber") return "bg-[#1c1208] border-amber-900/80 shadow-[inset_0_0_18px_rgba(252,211,77,0.18)]";
+  if (tone === "cyan") return "bg-[#03201f] border-teal-900/80 shadow-[inset_0_0_18px_rgba(94,234,212,0.18)]";
+  if (tone === "blue") return "bg-[#040a1c] border-sky-900/80 shadow-[inset_0_0_18px_rgba(96,165,250,0.18)]";
+  if (tone === "white") return "bg-[#0a0a0a] border-zinc-700 shadow-[inset_0_0_18px_rgba(248,250,252,0.18)]";
+  return "bg-[#0a0a0a] border-zinc-700";
+};
+
+const lcdTextClass = (tone) => {
+  if (tone === "amber") return "text-amber-300";
+  if (tone === "cyan") return "text-teal-200";
+  if (tone === "blue") return "text-sky-200";
+  if (tone === "white") return "text-zinc-100";
+  return "text-zinc-300";
+};
+
+fn RkMiniLCD(props) {
+  const tone = props.tone || "amber";
+  const lines = props.lines || [];
+  const widthClass = props.widthClass || "w-[170px]";
+  const shell = lcdShellClass(tone);
+  const txt = lcdTextClass(tone);
+  return (
+    <div class={"relative rounded-[3px] border " + widthClass + " " + shell + " px-2 py-1.5 font-mono text-[10px] tracking-[0.18em] " + txt + " select-none pointer-events-none"}>
+      <div class="absolute inset-0 rounded-[3px] pointer-events-none" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.35) 50%, transparent 50%)", backgroundSize: "100% 3px", opacity: 0.35 }} />
+      <div class="relative">
+        {lines.map((ln, i) => (
+          <div key={i} class={i === 0 ? "text-[9px] opacity-80 uppercase" : "text-[11px] font-bold"}>{ln}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+fn RkJewelLed(props) {
+  const color = props.color || "#22c55e";
+  const active = props.active === true;
+  const size = props.size || 10;
+  return (
+    <div class="relative shrink-0" style={{ width: String(size + 6) + "px", height: String(size + 6) + "px" }}>
+      <div class="absolute inset-0 rounded-full" style={{ background: color, opacity: active ? 0.45 : 0.1, filter: "blur(4px)" }} />
+      <div class="absolute rounded-full border border-black/70 shadow-[inset_0_1px_2px_rgba(255,255,255,0.45)]" style={{ inset: "3px", background: color, opacity: active ? 1 : 0.35 }} />
+    </div>
+  );
+}
+
+fn RkScrewHead(props) {
+  const r = props.r || 5;
+  return (
+    <div class="rounded-full bg-gradient-to-br from-zinc-300 via-zinc-500 to-zinc-800 border border-black/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]" style={{ width: String(r * 2) + "px", height: String(r * 2) + "px" }}>
+      <div class="w-full h-full grid place-items-center">
+        <div class="w-[60%] h-[1px] bg-black/70 rounded-full rotate-45" />
+      </div>
+    </div>
+  );
+}
+
+fn RkLedSegment(props) {
+  const value = rackClamp01(props.value);
+  const segments = props.segments || 12;
+  const color = props.color || "#22c55e";
+  const lit = Math.round(value * segments);
+  const cells = [];
+  let i = 0;
+  while (i < segments) {
+    const on = i < lit;
+    const danger = i >= segments - 2;
+    const clr = on ? (danger ? "#ef4444" : (i >= segments - 4 ? "#facc15" : color)) : "#1c1917";
+    cells.push(<div key={i} class="rounded-[1px] border border-black/60" style={{ width: "5px", height: "6px", background: clr, opacity: on ? 1 : 0.55 }} />);
+    i = i + 1;
+  }
+  return <div class="flex flex-col-reverse gap-[1px] py-1 px-1 bg-black/60 rounded-[2px] border border-black/80">{cells}</div>;
+}
+
+fn RkRockerSwitch(props) {
+  const on = props.on === true;
+  const label = props.label || "";
+  const onClick = props.onClick;
+  return (
+    <div class="flex flex-col items-center gap-1 select-none">
+      <div
+        onPointerDown={(e) => { e.stopPropagation(); if (onClick) onClick(); }}
+        class={"relative w-10 h-5 rounded-[3px] cursor-pointer border border-black shadow-[inset_0_2px_4px_rgba(0,0,0,0.7)] " + (on ? "bg-gradient-to-b from-red-500 to-red-800" : "bg-gradient-to-b from-zinc-700 to-zinc-900")}
+      >
+        <div class={"absolute top-[2px] w-4 h-3 rounded-[2px] bg-gradient-to-b from-zinc-200 to-zinc-500 border border-black/80 shadow-[inset_0_-2px_3px_rgba(0,0,0,0.5)] transition-all " + (on ? "left-[22px]" : "left-[2px]")} />
+      </div>
+      <span class="text-[7px] font-black tracking-[0.2em] text-zinc-400 uppercase">{label}</span>
+    </div>
+  );
+}
+
+fn RkTickedFader(props) {
+  const label = props.label || "";
+  const value = rackClamp01(props.value);
+  const onChange = props.onChange;
+  const heightPx = props.heightPx || 86;
+  const widthPx = props.widthPx || 18;
+  const tipColor = props.tipColor || "#f5f5f4";
+  const trackColor = props.trackColor || "#0c0a09";
+  const interactive = props.interactive !== false;
+  const dragRef = useRef(null);
+  const detachRef = useRef(null);
+  useEffect(() => {
+    return () => {
+      const d = detachRef.current;
+      if (typeof d === "function") d();
+      detachRef.current = null;
+    };
+  }, []);
+  const handlePointerDown = (e) => {
+    if (e.button !== 0) return;
+    if (!interactive) return;
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startV = value;
+    const captured = onChange;
+    const onMove = (ev) => {
+      ev.preventDefault();
+      const dy = startY - ev.clientY;
+      const next = Math.max(0, Math.min(1, startV + (dy / heightPx)));
+      if (captured) captured(next);
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.body.style.cursor = "";
+      detachRef.current = null;
+    };
+    document.body.style.cursor = "ns-resize";
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    detachRef.current = () => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.body.style.cursor = "";
+    };
+  };
+  return (
+    <div class="flex flex-col items-center select-none touch-none shrink-0">
+      <div ref={dragRef} onPointerDown={handlePointerDown} class={(interactive ? "cursor-ns-resize " : "") + "relative rounded-[2px] border border-black/80 shadow-[inset_0_2px_4px_rgba(0,0,0,0.85)]"} style={{ width: String(widthPx) + "px", height: String(heightPx) + "px", background: trackColor }}>
+        <div class="absolute inset-x-0 top-1/2 h-[1px] bg-white/30 pointer-events-none" />
+        <div class="absolute left-[2px] right-[2px] rounded-[1px] shadow-[0_2px_3px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.45)]" style={{ height: "10px", bottom: "calc(" + String(value * 100) + "% - 5px)", background: tipColor }}>
+          <div class="absolute inset-x-0 top-1/2 h-[1px] bg-black/60 -translate-y-1/2" />
+        </div>
+      </div>
+      <span class="mt-1 text-[7px] font-black tracking-[0.2em] uppercase text-zinc-400">{label}</span>
+    </div>
+  );
+}
+
+fn RkHexCell(props) {
+  const active = props.active === true;
+  const tone = props.tone || "amber";
+  const onColor = tone === "amber" ? "#fbbf24" : (tone === "cyan" ? "#5eead4" : "#a5f3fc");
+  return (
+    <div class="relative" style={{ width: "18px", height: "20px" }}>
+      <div class="absolute inset-0" style={{
+        clipPath: "polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0% 50%)",
+        background: active ? onColor : "#1f1708",
+        boxShadow: active ? "0 0 6px " + onColor : "inset 0 0 4px rgba(0,0,0,0.7)",
+        opacity: active ? 1 : 0.55
+      }} />
+    </div>
+  );
+}
+
+fn RkXYPad(props) {
+  const xVal = rackClamp01(props.x);
+  const yVal = rackClamp01(props.y);
+  const onChange = props.onChange;
+  const interactive = props.interactive !== false;
+  const widthPx = props.widthPx || 110;
+  const heightPx = props.heightPx || 110;
+  const tone = props.tone || "cyan";
+  const accentClass = tone === "magenta" ? "border-fuchsia-500/70 shadow-[inset_0_0_24px_rgba(217,70,239,0.25)]" : "border-cyan-500/70 shadow-[inset_0_0_24px_rgba(94,234,212,0.25)]";
+  const dotColor = tone === "magenta" ? "#f0abfc" : "#67e8f9";
+  const padRef = useRef(null);
+  const dragging = useRef(false);
+  const detachRef = useRef(null);
+  useEffect(() => {
+    return () => {
+      const d = detachRef.current;
+      if (typeof d === "function") d();
+      detachRef.current = null;
+    };
+  }, []);
+  const updateFromEvent = (ev) => {
+    const el = padRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const nx = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, 1 - (ev.clientY - rect.top) / rect.height));
+    if (onChange) onChange(nx, ny);
+  };
+  const handleDown = (e) => {
+    if (!interactive) return;
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    dragging.current = true;
+    updateFromEvent(e);
+    const onMove = (ev) => { if (dragging.current) { ev.preventDefault(); updateFromEvent(ev); } };
+    const onUp = () => {
+      dragging.current = false;
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+    };
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    detachRef.current = () => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+    };
+  };
+  return (
+    <div ref={padRef} onPointerDown={handleDown} class={"relative rounded-[2px] border bg-black overflow-hidden touch-none " + accentClass + " " + (interactive ? "cursor-crosshair" : "")} style={{ width: String(widthPx) + "px", height: String(heightPx) + "px" }}>
+      <div class="absolute inset-0 pointer-events-none" style={{
+        backgroundImage: "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
+        backgroundSize: "12px 12px"
+      }} />
+      <div class="absolute inset-x-0 top-1/2 h-[1px] bg-white/15 pointer-events-none" />
+      <div class="absolute inset-y-0 left-1/2 w-[1px] bg-white/15 pointer-events-none" />
+      <div class="absolute rounded-full pointer-events-none" style={{
+        width: "14px", height: "14px",
+        left: "calc(" + String(xVal * 100) + "% - 7px)",
+        top: "calc(" + String((1 - yVal) * 100) + "% - 7px)",
+        background: dotColor,
+        boxShadow: "0 0 12px " + dotColor + ", inset 0 0 4px rgba(0,0,0,0.5)"
+      }} />
+    </div>
+  );
+}
+
+fn RkTickerLine(props) {
+  const text = props.text || "";
+  const widthClass = props.widthClass || "w-32";
+  return (
+    <div class={"font-mono text-[8px] tracking-[0.25em] text-emerald-300/80 truncate " + widthClass}>{text}</div>
+  );
+}
+
+const useRkTickRev = (intervalMs) => {
+  let [rev, setRev] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setRev((r) => r + 1), intervalMs || 200);
+    return () => window.clearInterval(t);
+  }, []);
+  return rev;
+};
+
+/* ============================================================
+ *  FM Matrix Pro — amber LCD, hex algorithm map, op strips
+ * ============================================================ */
+
+export fn fmMatrixProView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const rev = useRkTickRev(160);
+  void rev;
+  const algoIdx = Math.round(rackClamp01(p.algorithm ?? 0.2) * 31);
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="6-OP FM MATRIX">
+      <div class="relative z-10 flex-1 flex flex-row gap-3 px-3 py-2 min-h-0">
+        <div class="flex flex-col gap-2 shrink-0 pointer-events-auto">
+          <RkMiniLCD tone="amber" widthClass="w-[174px]" lines={["FM MATRIX PRO", "ALG " + (algoIdx < 10 ? "0" + String(algoIdx) : String(algoIdx)) + " · 6 OP"]} />
+          <div class="flex flex-row items-end gap-1.5 px-1">
+            {[0, 1, 2, 3, 4, 5].map((opIdx) => (
+              <div key={opIdx} class="flex flex-col items-center gap-1">
+                <span class="text-[7px] font-mono tracking-[0.1em] text-amber-400/80">OP{opIdx + 1}</span>
+                <RkLedSegment value={Math.max(0, Math.min(1, (p.motion ?? 0.5) - opIdx * 0.05 + (p.feedback ?? 0.2) * 0.4))} segments={9} color="#fbbf24" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div class="flex flex-col items-center justify-center shrink-0 gap-1">
+          <span class="text-[7px] tracking-[0.3em] font-black text-amber-300/90">ALGORITHM</span>
+          <div class="grid grid-cols-4 gap-[2px] p-1 rounded-[2px] bg-black/60 border border-amber-900/60">
+            {[0,1,2,3,4,5,6,7,8,9,10,11].map((i) => (
+              <RkHexCell key={i} active={(algoIdx & (1 << (i % 5))) !== 0 || i === (algoIdx % 12)} tone="amber" />
+            ))}
+          </div>
+          <div class="text-[7px] font-mono tracking-[0.25em] text-amber-400/70">FB · MOD BUS</div>
+        </div>
+
+        <div class="flex-1 flex flex-row items-center justify-end gap-2 pr-1">
+          <RotaryKnob label="LEVEL" min={0} max={1} value={p.level ?? 0.46} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+          <RotaryKnob label="TONE" min={0} max={1} value={p.tone ?? 0.56} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+          <RotaryKnob label="FBK" min={0} max={1} value={p.feedback ?? 0.2} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("feedback", v)} />
+          <RotaryKnob label="ALGO" min={0} max={1} value={p.algorithm ?? 0.2} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("algorithm", v)} />
+          <RotaryKnob label="MOTION" min={0} max={1} value={p.motion ?? 0.52} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+        </div>
+      </div>
+      <div class="absolute top-1 right-1 pointer-events-none"><RkScrewHead r={4} /></div>
+      <div class="absolute bottom-1 right-1 pointer-events-none"><RkScrewHead r={4} /></div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Hybrid Toxic X — three engine bays + X/Y morph + neon rim
+ * ============================================================ */
+
+export fn hybridToxicXView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const rev = useRkTickRev(140);
+  void rev;
+  const morph = rackClamp01(p.morph ?? 0.35);
+  const motion = rackClamp01(p.motion ?? 0.4);
+  const bays = [
+    { id: "SUB", color: "#a78bfa", weight: 1 - morph },
+    { id: "FM", color: "#f472b6", weight: 1 - Math.abs(0.5 - morph) * 2 },
+    { id: "WAVE", color: "#22d3ee", weight: morph }
+  ];
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="HYBRID 3-ENGINE">
+      <div class="absolute inset-0 pointer-events-none rounded-sm" style={{ boxShadow: "inset 0 0 30px rgba(168,85,247,0.18), inset 0 0 8px rgba(34,211,238,0.18)" }} />
+      <div class="relative z-10 flex-1 flex flex-row gap-2 px-3 py-2 min-h-0">
+        <div class="flex flex-row gap-1 shrink-0">
+          {bays.map((bay, i) => (
+            <div key={i} class="flex flex-col items-center gap-1 px-2 py-2 rounded-[3px] bg-black/70 border border-fuchsia-900/60 shadow-[inset_0_0_18px_rgba(0,0,0,0.75)]">
+              <span class="text-[8px] font-mono tracking-[0.2em] font-bold" style={{ color: bay.color }}>{bay.id}</span>
+              <div class="rounded-[2px] bg-black border border-zinc-800 px-1.5 py-0.5">
+                <span class="text-[7px] font-mono tracking-[0.25em] text-zinc-200">{(bay.weight * 100).toFixed(0)}%</span>
+              </div>
+              <RkTickedFader label="LVL" value={Math.max(0, Math.min(1, bay.weight))} interactive={false} heightPx={68} widthPx={14} tipColor={bay.color} trackColor="#0a0a0a" />
+              <RkJewelLed color={bay.color} active={bay.weight > 0.05} size={6} />
+            </div>
+          ))}
+        </div>
+
+        <div class="flex flex-col items-center gap-1 shrink-0">
+          <span class="text-[7px] font-black tracking-[0.3em] text-fuchsia-300/80">X / Y MORPH</span>
+          <RkXYPad x={p.morph ?? 0.35} y={p.motion ?? 0.4} interactive={!previewOnly} widthPx={102} heightPx={102} tone="magenta" onChange={(x, y) => { onChange("morph", x); onChange("motion", y); }} />
+          <div class="flex flex-row items-center gap-2">
+            <span class="text-[7px] font-mono text-fuchsia-300/80">MORPH {(morph * 100).toFixed(0)}</span>
+            <span class="text-[7px] font-mono text-cyan-300/80">MOT {(motion * 100).toFixed(0)}</span>
+          </div>
+        </div>
+
+        <div class="flex-1 flex flex-col items-stretch gap-1 pr-1 min-w-0">
+          <div class="flex flex-row items-center gap-2 px-2 py-1 rounded-[2px] bg-black border border-zinc-800">
+            <RkJewelLed color="#22d3ee" active={true} size={6} />
+            <RkTickerLine widthClass="flex-1" text={"TOXIC X · " + String(node.label || "PATCH").toUpperCase()} />
+          </div>
+          <div class="flex flex-row items-end justify-around gap-1 mt-1">
+            <RotaryKnob label="LEVEL" min={0} max={1} value={p.level ?? 0.38} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+            <RotaryKnob label="TONE" min={0} max={1} value={p.tone ?? 0.52} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+            <RotaryKnob label="MORPH" min={0} max={1} value={p.morph ?? 0.35} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("morph", v)} />
+          </div>
+        </div>
+      </div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Wavetable Pro — live waveform, X/Y morph, formant rings
+ * ============================================================ */
+
+export fn wavetableProView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const rev = useRkTickRev(80);
+  const motion = rackClamp01(p.motion ?? 0.64);
+  const tone = rackClamp01(p.tone ?? 0.58);
+  const samples = 60;
+  let path = "M 0 32";
+  let i = 0;
+  while (i < samples) {
+    const t = i / samples;
+    const w = Math.sin(t * Math.PI * 4 + rev * 0.18) * (0.4 + tone * 0.6);
+    const w2 = Math.sin(t * Math.PI * (2 + motion * 8) + rev * 0.05) * motion * 0.5;
+    const yy = 32 - (w + w2) * 24;
+    path = path + " L " + String(t * 178) + " " + String(yy);
+    i = i + 1;
+  }
+  const rings = [];
+  let r = 0;
+  while (r < 4) {
+    const radius = 12 + r * 8 + tone * 6;
+    rings.push(<div key={r} class="absolute rounded-full border border-cyan-400/40" style={{ width: String(radius * 2) + "px", height: String(radius * 2) + "px", left: "calc(50% - " + String(radius) + "px)", top: "calc(50% - " + String(radius) + "px)", boxShadow: "0 0 " + String(8 + r * 3) + "px rgba(94,234,212,0.35)" }} />);
+    r = r + 1;
+  }
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="WAVETABLE PRO">
+      <div class="relative z-10 flex-1 flex flex-row gap-3 px-3 py-2 min-h-0">
+        <div class="flex flex-col gap-1 shrink-0">
+          <span class="text-[7px] font-black tracking-[0.3em] text-cyan-300/80">WAVE WINDOW</span>
+          <div class="relative rounded-[3px] border border-cyan-700/60 bg-[#03161c] overflow-hidden" style={{ width: "184px", height: "70px", boxShadow: "inset 0 0 20px rgba(94,234,212,0.25)" }}>
+            <div class="absolute inset-0 pointer-events-none" style={{ backgroundImage: "linear-gradient(rgba(94,234,212,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(94,234,212,0.08) 1px, transparent 1px)", backgroundSize: "16px 12px" }} />
+            <svg width="184" height="70" viewBox="0 0 184 64" class="absolute inset-0 pointer-events-none">
+              <path d={path} fill="none" stroke="#67e8f9" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+            </svg>
+          </div>
+          <RkMiniLCD tone="cyan" widthClass="w-[184px]" lines={["WAVE BANK 01", "MORPH " + (motion * 100).toFixed(0) + " · FORMANT " + (tone * 100).toFixed(0)]} />
+        </div>
+
+        <div class="flex flex-col items-center gap-1 shrink-0">
+          <span class="text-[7px] font-black tracking-[0.3em] text-cyan-300/80">X / Y MORPH</span>
+          <RkXYPad x={p.tone ?? 0.58} y={p.motion ?? 0.64} interactive={!previewOnly} widthPx={104} heightPx={104} tone="cyan" onChange={(x, y) => { onChange("tone", x); onChange("motion", y); }} />
+        </div>
+
+        <div class="flex-1 flex flex-col items-center justify-center min-w-0">
+          <div class="relative" style={{ width: "92px", height: "92px" }}>
+            {rings}
+            <div class="absolute inset-0 grid place-items-center pointer-events-none">
+              <span class="text-[8px] font-mono tracking-[0.2em] text-cyan-200">FORMANT</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col items-center justify-center gap-1 pr-1">
+          <RotaryKnob label="LEVEL" min={0} max={1} value={p.level ?? 0.45} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+          <RotaryKnob label="MOTION" min={0} max={1} value={p.motion ?? 0.64} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+        </div>
+      </div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Analog Poly Juniper — walnut + brushed-aluminium + orange sliders
+ * ============================================================ */
+
+export fn analogPolyView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const sliderKeys = ["level", "tone", "tone", "motion", "tone", "motion", "level", "motion"];
+  const sliderLabels = ["VCO1", "VCO2", "SUB", "MIX", "CUT", "RES", "ADSR", "MOD"];
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="6-VOICE ANALOG POLY">
+      <div class="relative z-10 flex-1 flex flex-row min-h-0">
+        <div class="w-3 shrink-0 self-stretch" style={{ background: "linear-gradient(180deg,#5a3a2a,#2c1a10 60%,#160c08)", borderRight: "1px solid #1a120e" }} />
+
+        <div class="flex-1 flex flex-row min-w-0" style={{ background: "linear-gradient(180deg,#cbd5e1,#94a3b8 30%,#64748b)" }}>
+          <div class="flex flex-col gap-1 px-2 py-2 shrink-0">
+            <RkMiniLCD tone="amber" widthClass="w-[150px]" lines={["JUNIPER POLY", "PATCH · " + String(node.label || "INIT").toUpperCase()]} />
+            <div class="flex items-center gap-1 mt-1">
+              <RkJewelLed color="#fb923c" active={true} size={9} />
+              <span class="text-[8px] font-black tracking-[0.25em] text-stone-800">PILOT</span>
+              <span class="text-[7px] font-mono text-stone-700 ml-auto">PRG 12</span>
+            </div>
+          </div>
+
+          <div class="flex flex-row items-end gap-[6px] px-2 py-2 shrink-0">
+            {sliderLabels.map((lab, i) => (
+              <RkTickedFader key={i} label={lab} value={rackClamp01((p[sliderKeys[i]] ?? 0.5) + (i % 2 === 0 ? 0 : 0.05))} interactive={!previewOnly} onChange={(v) => onChange(sliderKeys[i], v)} heightPx={86} widthPx={14} tipColor="#f97316" trackColor="#1a0c04" />
+            ))}
+          </div>
+
+          <div class="flex flex-row items-center gap-1 pr-2 ml-auto">
+            <RotaryKnob label="LEVEL" min={0} max={1} value={p.level ?? 0.5} theme={"light"} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+            <RotaryKnob label="TONE" min={0} max={1} value={p.tone ?? 0.62} theme={"light"} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+            <RotaryKnob label="MOTION" min={0} max={1} value={p.motion ?? 0.34} theme={"light"} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+          </div>
+        </div>
+
+        <div class="w-3 shrink-0 self-stretch" style={{ background: "linear-gradient(180deg,#5a3a2a,#2c1a10 60%,#160c08)", borderLeft: "1px solid #1a120e" }} />
+      </div>
+      <div class="absolute top-2 left-4 pointer-events-none"><RkScrewHead r={3} /></div>
+      <div class="absolute top-2 right-4 pointer-events-none"><RkScrewHead r={3} /></div>
+      <div class="absolute bottom-2 left-4 pointer-events-none"><RkScrewHead r={3} /></div>
+      <div class="absolute bottom-2 right-4 pointer-events-none"><RkScrewHead r={3} /></div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Analog Mono Lead — walnut+black, three wheels, sub osc rocker
+ * ============================================================ */
+
+export fn analogMonoView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const wheels = [
+    { id: "PITCH", value: 0.5, color: "#27272a" },
+    { id: "MOD", value: rackClamp01(p.motion ?? 0.31), color: "#3f3f46" },
+    { id: "GLIDE", value: rackClamp01(p.tone ?? 0.67), color: "#27272a" }
+  ];
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="MONO LEAD · '78">
+      <div class="relative z-10 flex-1 flex flex-row min-h-0">
+        <div class="w-4 shrink-0 self-stretch" style={{ background: "linear-gradient(180deg,#3a2418,#1a0e08)", borderRight: "1px solid #1a120e" }} />
+
+        <div class="flex-1 flex flex-row gap-3 px-3 py-2 items-center" style={{ background: "linear-gradient(180deg,#0a0a0a,#1f1f1f 30%,#0a0a0a)" }}>
+          <div class="flex flex-row gap-2 items-end shrink-0">
+            {wheels.map((w, i) => (
+              <div key={i} class="flex flex-col items-center gap-1">
+                <div class="relative rounded-full bg-gradient-to-b from-zinc-700 via-zinc-900 to-black border border-zinc-950 shadow-[inset_0_0_8px_rgba(0,0,0,0.95)]" style={{ width: "26px", height: "84px" }}>
+                  <div class="absolute inset-x-1 rounded-full bg-gradient-to-b from-zinc-100 to-zinc-500 border border-black/80 shadow-[0_2px_3px_rgba(0,0,0,0.6)]" style={{ height: "12px", top: "calc(" + String((1 - w.value) * 100) + "% - 6px)" }} />
+                  <div class="absolute inset-x-2 top-1/2 h-[1px] bg-amber-500/60" />
+                </div>
+                <span class="text-[7px] font-black tracking-[0.25em] text-amber-400/80 uppercase">{w.id}</span>
+              </div>
+            ))}
+          </div>
+
+          <div class="flex flex-col items-stretch gap-2 shrink-0">
+            <RkMiniLCD tone="amber" widthClass="w-[160px]" lines={["MONO LEAD '78", "GLIDE " + ((p.tone ?? 0.67) * 100).toFixed(0)]} />
+            <div class="flex flex-row items-end gap-3 pl-1">
+              <RkRockerSwitch on={(p.motion ?? 0.31) > 0.5} label="SUB OSC" onClick={!previewOnly ? () => onChange("motion", (p.motion ?? 0.31) > 0.5 ? 0.2 : 0.7) : null} />
+              <RkRockerSwitch on={(p.tone ?? 0.67) > 0.5} label="DRIVE" onClick={!previewOnly ? () => onChange("tone", (p.tone ?? 0.67) > 0.5 ? 0.3 : 0.8) : null} />
+            </div>
+          </div>
+
+          <div class="flex flex-row items-center gap-1 ml-auto pr-1">
+            <RotaryKnob label="LEVEL" min={0} max={1} value={p.level ?? 0.5} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+            <RotaryKnob label="CUT" min={0} max={1} value={p.tone ?? 0.67} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+            <RotaryKnob label="RES" min={0} max={1} value={p.motion ?? 0.31} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+          </div>
+        </div>
+
+        <div class="w-4 shrink-0 self-stretch" style={{ background: "linear-gradient(180deg,#3a2418,#1a0e08)", borderLeft: "1px solid #1a120e" }} />
+      </div>
+      <div class="absolute top-2 left-7 pointer-events-none"><RkScrewHead r={3} /></div>
+      <div class="absolute bottom-2 left-7 pointer-events-none"><RkScrewHead r={3} /></div>
+      <div class="absolute top-2 right-7 pointer-events-none"><RkScrewHead r={3} /></div>
+      <div class="absolute bottom-2 right-7 pointer-events-none"><RkScrewHead r={3} /></div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Organ Drawbars — walnut, 9 numbered drawbars, percussion + Leslie
+ * ============================================================ */
+
+export fn organDrawbarsView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const motion = rackClamp01(p.motion ?? 0.26);
+  const tone = rackClamp01(p.tone ?? 0.54);
+  const drawbarPalette = ["#fafaf9", "#fafaf9", "#a8a29e", "#fafaf9", "#a8a29e", "#fafaf9", "#a8a29e", "#92400e", "#92400e"];
+  const drawbarValues = [tone, tone * 0.9, motion, tone * 0.7, motion * 0.6, tone * 0.5, motion * 0.4, motion * 0.3, motion * 0.2];
+  const drawbarMap = ["tone", "tone", "motion", "tone", "motion", "tone", "motion", "motion", "motion"];
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="9-DRAWBAR ORGAN">
+      <div class="relative z-10 flex-1 flex flex-row min-h-0" style={{ background: "linear-gradient(180deg,#3a2418,#1a0e08)" }}>
+        <div class="flex flex-row items-end gap-[5px] pl-3 py-2 shrink-0">
+          {drawbarValues.map((v, i) => (
+            <div key={i} class="flex flex-col items-center gap-1">
+              <span class="text-[7px] font-mono text-amber-200/80">{i + 1}</span>
+              <RkTickedFader label={String(i + 1) + "'"} value={rackClamp01(v)} interactive={!previewOnly} onChange={(nv) => onChange(drawbarMap[i], nv)} heightPx={90} widthPx={16} tipColor={drawbarPalette[i]} trackColor="#0c0a09" />
+            </div>
+          ))}
+        </div>
+
+        <div class="flex flex-col gap-1.5 px-3 py-2 shrink-0">
+          <RkMiniLCD tone="amber" widthClass="w-[150px]" lines={["DRAWBAR ORGAN", "PERC · " + (motion > 0.5 ? "ON" : "OFF") + " · LESLIE"]} />
+          <div class="flex flex-row gap-2 items-end pl-1">
+            <RkRockerSwitch on={motion > 0.5} label="LESLIE" onClick={!previewOnly ? () => onChange("motion", motion > 0.5 ? 0.2 : 0.8) : null} />
+            <RkRockerSwitch on={tone > 0.6} label="PERC" onClick={!previewOnly ? () => onChange("tone", tone > 0.6 ? 0.4 : 0.8) : null} />
+            <div class="flex flex-col items-center gap-1">
+              <RkJewelLed color="#fbbf24" active={motion > 0.5} size={8} />
+              <span class="text-[7px] tracking-[0.2em] text-amber-200/80 font-black">SLOW · FAST</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-row items-center gap-1 ml-auto pr-2 self-center">
+          <RotaryKnob label="LEVEL" min={0} max={1} value={p.level ?? 0.52} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+          <RotaryKnob label="DRIVE" min={0} max={1} value={p.tone ?? 0.54} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+          <RotaryKnob label="LESLIE" min={0} max={1} value={p.motion ?? 0.26} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+        </div>
+      </div>
+      <div class="absolute bottom-1 right-3 pointer-events-none">
+        <div class="rounded-[2px] px-1 py-[1px] text-[7px] font-mono tracking-[0.25em]" style={{ background: "#a16207", color: "#1f1708", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45)" }}>BRASS · TONEWHEEL</div>
+      </div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Drum XR — tan panel, 8 red rubber pads, sequencer LEDs
+ * ============================================================ */
+
+export fn drumXrView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const rev = useRkTickRev(220);
+  const stepIndex = rev % 16;
+  const padLabels = ["KICK", "SNARE", "HAT", "CLAP", "RIM", "TOM", "RIDE", "PERC"];
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="DRUM XR · KIT">
+      <div class="relative z-10 flex-1 flex flex-row min-h-0" style={{ background: "linear-gradient(180deg,#3f2a1a,#241406)" }}>
+        <div class="grid grid-cols-4 grid-rows-2 gap-1.5 p-2 shrink-0">
+          {padLabels.map((lab, i) => {
+            const hot = (i === stepIndex % 8) && (rackClamp01(p.motion ?? 0.6) > 0.4);
+            return (
+              <div key={i} class={"relative rounded-[5px] flex items-center justify-center select-none " + (previewOnly ? "" : "cursor-pointer")} style={{ width: "44px", height: "44px", background: hot ? "linear-gradient(180deg,#fca5a5,#b91c1c 60%,#7f1d1d)" : "linear-gradient(180deg,#7f1d1d,#450a0a 70%,#1c0a0a)", boxShadow: "inset 0 -3px 4px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.35), 0 1px 2px rgba(0,0,0,0.6)" }}
+                onPointerDown={(e) => { if (!previewOnly) { e.stopPropagation(); onChange("motion", Math.min(1, (p.motion ?? 0.6) + 0.05)); } }}>
+                <span class="text-[8px] font-black tracking-[0.18em] text-red-200/90 drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">{lab}</span>
+                {hot ? <div class="absolute inset-1 rounded-[3px] pointer-events-none" style={{ boxShadow: "0 0 12px rgba(254,202,202,0.7)" }} /> : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <div class="flex flex-col gap-1 px-2 py-2 flex-1 min-w-0">
+          <RkMiniLCD tone="amber" widthClass="w-full" lines={["XR KIT 01 · 16 STEP", "PATTERN A · BPM 120"]} />
+          <div class="flex flex-row gap-[3px] py-1 px-1 rounded-[2px] bg-black border border-amber-900/60">
+            {Array.from({ length: 16 }).map((_, i) => {
+              const isStep = i === stepIndex;
+              const accent = i % 4 === 0;
+              return <div key={i} class="rounded-full border border-black/70" style={{ width: "10px", height: "10px", background: isStep ? "#facc15" : (accent ? "#7c2d12" : "#1c1917"), boxShadow: isStep ? "0 0 8px #facc15" : "inset 0 -1px 1px rgba(0,0,0,0.6)" }} />;
+            })}
+          </div>
+          <div class="flex flex-row items-center gap-2 mt-1">
+            <RkRockerSwitch on={(p.tone ?? 0.45) > 0.5} label="WRITE" onClick={!previewOnly ? () => onChange("tone", (p.tone ?? 0.45) > 0.5 ? 0.3 : 0.7) : null} />
+            <div class="flex flex-col items-center gap-1">
+              <div class="text-[7px] font-black tracking-[0.25em] text-amber-300">PATTERN</div>
+              <div class="flex gap-1">
+                <div class={"px-1.5 py-0.5 rounded-[2px] text-[8px] font-black border border-black " + ((p.motion ?? 0.6) <= 0.5 ? "bg-amber-400 text-black" : "bg-zinc-800 text-zinc-400")}>A</div>
+                <div class={"px-1.5 py-0.5 rounded-[2px] text-[8px] font-black border border-black " + ((p.motion ?? 0.6) > 0.5 ? "bg-amber-400 text-black" : "bg-zinc-800 text-zinc-400")}>B</div>
+              </div>
+            </div>
+            <div class="flex flex-row items-center gap-1 ml-auto">
+              <RotaryKnob label="LVL" min={0} max={1} value={p.level ?? 0.5} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+              <RotaryKnob label="TUNE" min={0} max={1} value={p.tone ?? 0.45} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+              <RotaryKnob label="SWG" min={0} max={1} value={p.motion ?? 0.6} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="absolute top-1 left-1 pointer-events-none"><RkScrewHead r={3} /></div>
+      <div class="absolute top-1 right-1 pointer-events-none"><RkScrewHead r={3} /></div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Rompler 90s — 1U blue, big 24x2 LCD, encoder, rack ears
+ * ============================================================ */
+
+export fn rompler90sView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const programIdx = Math.round(rackClamp01(p.tone ?? 0.52) * 179);
+  const rev = useRkTickRev(900);
+  void rev;
+  const categories = ["PIANO", "STRINGS", "BRASS", "PAD", "BASS", "FX"];
+  const activeCat = categories[Math.min(categories.length - 1, Math.floor(rackClamp01(p.motion ?? 0.48) * categories.length))];
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="ROMPLER · 1U">
+      <div class="relative z-10 flex-1 flex flex-row min-h-0" style={{ background: "linear-gradient(180deg,#1e3a5f,#0c1a30)" }}>
+        <div class="w-6 shrink-0 self-stretch flex flex-col items-center justify-around py-2" style={{ background: "linear-gradient(180deg,#3b82f6,#1e3a5f 60%,#0a1428)", borderRight: "1px solid #050b18" }}>
+          <RkScrewHead r={3} />
+          <RkScrewHead r={3} />
+          <RkScrewHead r={3} />
+        </div>
+
+        <div class="flex-1 flex flex-row items-center gap-2 px-2 py-2 min-w-0">
+          <div class="flex flex-col items-stretch gap-1">
+            <span class="text-[7px] font-black tracking-[0.3em] text-sky-200/70">PROGRAM</span>
+            <div class="rounded-[3px] border border-sky-900/80 px-2 py-2 shrink-0" style={{ width: "300px", background: "#031227", boxShadow: "inset 0 0 22px rgba(56,189,248,0.18)" }}>
+              <div class="font-mono text-[12px] tracking-[0.18em] text-sky-200">
+                <div class="text-[9px] opacity-80 uppercase">{"P" + (programIdx < 10 ? "00" : (programIdx < 100 ? "0" : "")) + String(programIdx) + " · " + activeCat}</div>
+                <div class="text-[14px] font-bold mt-0.5 truncate">{String(node.label || "INIT").toUpperCase()}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col items-center gap-1 shrink-0">
+            <span class="text-[7px] font-black tracking-[0.3em] text-sky-200/70">CATEGORY</span>
+            <div class="grid grid-cols-2 gap-[3px]">
+              {categories.map((c, i) => {
+                const on = c === activeCat;
+                return (
+                  <div key={i} class={"px-1.5 py-1 text-[7px] font-black tracking-[0.18em] rounded-[2px] border " + (on ? "bg-sky-300 text-sky-950 border-sky-100" : "bg-sky-950 text-sky-300/80 border-sky-900")}>{c}</div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div class="flex flex-col items-center gap-1 shrink-0 ml-auto">
+            <span class="text-[7px] font-black tracking-[0.3em] text-sky-200/70">ENCODER</span>
+            <div class="rounded-full border-2 border-sky-300 bg-gradient-to-br from-sky-900 to-sky-950 shadow-[0_4px_8px_rgba(0,0,0,0.7),inset_0_2px_3px_rgba(56,189,248,0.35)] grid place-items-center" style={{ width: "44px", height: "44px" }}>
+              <div class="rounded-full bg-sky-200" style={{ width: "4px", height: "4px" }} />
+            </div>
+            <span class="text-[7px] font-mono text-sky-300/90">PUSH · TURN</span>
+          </div>
+
+          <div class="flex flex-col items-center gap-1 pr-1">
+            <RotaryKnob label="LVL" min={0} max={1} value={p.level ?? 0.5} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+            <RotaryKnob label="MIX" min={0} max={1} value={p.motion ?? 0.48} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+          </div>
+        </div>
+
+        <div class="w-6 shrink-0 self-stretch flex flex-col items-center justify-around py-2" style={{ background: "linear-gradient(180deg,#3b82f6,#1e3a5f 60%,#0a1428)", borderLeft: "1px solid #050b18" }}>
+          <RkScrewHead r={3} />
+          <RkScrewHead r={3} />
+          <RkScrewHead r={3} />
+        </div>
+      </div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Vocoder Pad — industrial black + perforated grille + formant rings
+ * ============================================================ */
+
+export fn vocoderPadView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const tone = rackClamp01(p.tone ?? 0.57);
+  const motion = rackClamp01(p.motion ?? 0.5);
+  const grilleCells = [];
+  let gr = 0;
+  while (gr < 8) {
+    let gc = 0;
+    while (gc < 14) {
+      grilleCells.push(<div key={String(gr) + "-" + String(gc)} class="rounded-full bg-black/90 border border-zinc-800/60" style={{ width: "5px", height: "5px" }} />);
+      gc = gc + 1;
+    }
+    gr = gr + 1;
+  }
+  const formantBars = [0, 1, 2, 3, 4, 5];
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="FORMANT VOCODER">
+      <div class="relative z-10 flex-1 flex flex-row min-h-0" style={{ background: "linear-gradient(180deg,#0a0a0a,#16181d 50%,#0a0a0a)" }}>
+        <div class="flex flex-col items-stretch gap-1 px-2 py-2 shrink-0">
+          <span class="text-[7px] font-black tracking-[0.3em] text-zinc-300">SPEAKER</span>
+          <div class="rounded-[3px] border border-zinc-800 bg-black p-1 shadow-[inset_0_0_18px_rgba(0,0,0,0.95)]">
+            <div class="grid gap-[2px]" style={{ gridTemplateColumns: "repeat(14, 5px)", gridTemplateRows: "repeat(8, 5px)" }}>
+              {grilleCells}
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col items-center justify-center gap-1 shrink-0 px-2">
+          <span class="text-[7px] font-black tracking-[0.3em] text-zinc-300">FORMANT</span>
+          <div class="relative" style={{ width: "100px", height: "100px" }}>
+            {[0, 1, 2, 3, 4].map((i) => {
+              const radius = 16 + i * 8 + tone * 4;
+              return <div key={i} class="absolute rounded-full border border-zinc-300/40" style={{ width: String(radius * 2) + "px", height: String(radius * 2) + "px", left: "calc(50% - " + String(radius) + "px)", top: "calc(50% - " + String(radius) + "px)", boxShadow: "inset 0 0 6px rgba(255,255,255,0.15)", opacity: 0.4 + (1 - i / 5) * 0.5 }} />;
+            })}
+            <div class="absolute inset-0 grid place-items-center pointer-events-none">
+              <span class="text-[8px] font-mono tracking-[0.25em] text-zinc-200">SHIFT {(motion * 100).toFixed(0)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-row items-end gap-1 px-2 shrink-0">
+          {formantBars.map((i) => (
+            <div key={i} class="flex flex-col items-center gap-1">
+              <RkLedSegment value={Math.max(0, Math.min(1, tone + Math.sin(i * 0.7 + motion * 4) * 0.3))} segments={10} color="#f8fafc" />
+              <span class="text-[7px] font-mono text-zinc-400">F{i + 1}</span>
+            </div>
+          ))}
+        </div>
+
+        <div class="flex flex-row items-center gap-1 ml-auto pr-2">
+          <RotaryKnob label="LEVEL" min={0} max={1} value={p.level ?? 0.44} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+          <RotaryKnob label="TONE" min={0} max={1} value={p.tone ?? 0.57} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+          <RotaryKnob label="SHIFT" min={0} max={1} value={p.motion ?? 0.5} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+        </div>
+      </div>
+      <div class="absolute top-1 right-2 pointer-events-none">
+        <span class="text-[7px] font-black tracking-[0.3em] text-zinc-200/80 bg-black/60 px-1.5 py-0.5 rounded-[1px]">MK-VII</span>
+      </div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Pad Micro — translucent acrylic, single oversized halo knob
+ * ============================================================ */
+
+export fn padMicroView(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const haloLevel = rackClamp01(p.level ?? 0.42);
+  const haloAngle = haloLevel * 320 - 160;
+  const motionGlow = 8 + rackClamp01(p.motion ?? 0.28) * 22;
+  const haloRef = useRef(null);
+  const detachRef = useRef(null);
+  useEffect(() => {
+    return () => {
+      const d = detachRef.current;
+      if (typeof d === "function") d();
+      detachRef.current = null;
+    };
+  }, []);
+  const onHaloDown = (e) => {
+    if (previewOnly) return;
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startV = haloLevel;
+    const onMove = (ev) => {
+      ev.preventDefault();
+      const dy = startY - ev.clientY;
+      const next = Math.max(0, Math.min(1, startV + (dy / 200)));
+      onChange("level", next);
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "ns-resize";
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    detachRef.current = () => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.body.style.cursor = "";
+    };
+  };
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="PAD MICRO · ACRYLIC">
+      <div class="relative z-10 flex-1 flex flex-row items-center justify-center min-h-0" style={{ background: "linear-gradient(180deg,rgba(15,23,42,0.85),rgba(8,15,28,0.95))" }}>
+        <div class="absolute inset-0 pointer-events-none" style={{ backdropFilter: "blur(2px)", background: "radial-gradient(circle at 30% 30%, rgba(56,189,248,0.18), transparent 60%), radial-gradient(circle at 70% 70%, rgba(34,211,238,0.14), transparent 65%)" }} />
+
+        <div class="relative flex flex-col items-center gap-1.5 z-10">
+          <span class="text-[8px] font-black tracking-[0.4em] text-cyan-200/70">HALO</span>
+          <div class="relative" style={{ width: "150px", height: "150px" }}>
+            <div class="absolute inset-0 rounded-full pointer-events-none" style={{ border: "1px solid rgba(34,211,238,0.45)", boxShadow: "0 0 " + String(motionGlow) + "px rgba(34,211,238,0.4), inset 0 0 16px rgba(34,211,238,0.18)" }} />
+            <div class="absolute rounded-full pointer-events-none" style={{ inset: "8px", border: "1px dashed rgba(125,211,252,0.35)" }} />
+            <div ref={haloRef} onPointerDown={onHaloDown} class={"absolute rounded-full grid place-items-center select-none " + (previewOnly ? "" : "cursor-ns-resize")} style={{ inset: "22px", background: "radial-gradient(circle at 35% 30%, #38bdf8, #0c4a6e 65%, #082f49)", border: "1px solid rgba(8,145,178,0.7)", boxShadow: "0 6px 20px rgba(0,0,0,0.7), inset 0 2px 4px rgba(255,255,255,0.35), inset 0 -3px 6px rgba(0,0,0,0.6)" }}>
+              <div class="absolute" style={{ width: "4px", height: "38px", background: "linear-gradient(180deg,#f0f9ff,#06b6d4)", borderRadius: "2px", top: "10px", left: "calc(50% - 2px)", transform: "rotate(" + String(haloAngle) + "deg)", transformOrigin: "50% 95%", boxShadow: "0 0 6px #67e8f9" }} />
+              <span class="text-[7px] font-mono tracking-[0.3em] text-cyan-50/80 drop-shadow-[0_0_4px_rgba(34,211,238,0.8)]">{(haloLevel * 100).toFixed(0)}</span>
+            </div>
+          </div>
+          <div class="text-[7px] font-mono tracking-[0.3em] text-cyan-200/70 uppercase">{String(node.label || "ACRYLIC PAD")}</div>
+        </div>
+
+        <div class="absolute right-3 top-3 flex flex-col gap-1 items-end pointer-events-auto">
+          <RotaryKnob label="TONE" min={0} max={1} value={p.tone ?? 0.48} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tone", v)} />
+          <RotaryKnob label="MOTION" min={0} max={1} value={p.motion ?? 0.28} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("motion", v)} />
+        </div>
+      </div>
+    </RackChassis>
+  );
+}
+
+/* ============================================================
+ *  Per-engine paintScene + inputBindings (IR renderer side).
+ *  These compose materialKit primitives and surface the same
+ *  geometry the DOM views use, so the patch board IR matches.
+ * ============================================================ */
+
+const rkPaintHeader = (idBase, x, y, w, palette, title, era) => {
+  void era;
+  return [
+    Rect(idBase + "_panel", x, y, w, RACK_H, { fill: palette.panel, stroke: "#000000", strokeWidth: 2, radius: 6 }),
+    Rect(idBase + "_top", x, y, w, 4, { fill: palette.accent, opacity: 0.85, radius: 1 }),
+    Text(idBase + "_title", x + 18, y + 28, String(title || "Rack"), { color: palette.text, size: 16, weight: 900 })
+  ];
+};
+
+const rkKnobRow = (idBase, x, y, count, palette) => {
+  const out = [];
+  let i = 0;
+  while (i < count) {
+    const cx = x + 22 + i * 50;
+    out.push(mat.knobOrnate(idBase + "_k" + String(i), cx, y, 36, 0.5, { rim: "#1c1917", top: palette.glow }));
+    i = i + 1;
+  }
+  return out;
+};
+
+export fn fmMatrixProPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "fm", x: 0, y: 0, label: "FM Matrix Pro" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("lcd_amber");
+  const lcdPal = materialTokens.lcd_amber;
+  const children = [];
+  const head = rkPaintHeader("fm_" + String(node.id), x, y, RACK_W, palette, "FM Matrix Pro", "lcd_amber");
+  let i = 0;
+  while (i < head.length) { children.push(head[i]); i = i + 1; }
+  children.push(mat.lcdPanel("fm_lcd_" + String(node.id), x + 18, y + 56, 200, 44, "ALG · 6 OP MATRIX", lcdPal));
+  let op = 0;
+  while (op < 6) {
+    children.push(mat.vuMeterStrip("fm_op_" + String(op) + "_" + String(node.id), x + 22 + op * 30, y + 110, 14, 70, 0.45 + Math.sin(op) * 0.2, { on: lcdPal.fg, off: "#1f1708" }));
+    op = op + 1;
+  }
+  let h2 = 0;
+  while (h2 < 12) {
+    const hx = x + 230 + (h2 % 4) * 24;
+    const hy = y + 60 + Math.floor(h2 / 4) * 28;
+    children.push(Rect("fm_hex_" + String(h2) + "_" + String(node.id), hx, hy, 18, 22, { fill: (h2 % 3 === 0) ? lcdPal.fg : palette.panel, stroke: lcdPal.fg, strokeWidth: 1, radius: 4, opacity: (h2 % 3 === 0) ? 0.85 : 0.4 }));
+    h2 = h2 + 1;
+  }
+  const knobs = rkKnobRow("fm_knobs_" + String(node.id), x + 360, y + 130, 5, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  children.push(mat.screwHead("fm_sc1_" + String(node.id), x + 12, y + 12, 4));
+  children.push(mat.screwHead("fm_sc2_" + String(node.id), x + RACK_W - 12, y + 12, 4));
+  children.push(mat.screwHead("fm_sc3_" + String(node.id), x + 12, y + RACK_H - 12, 4));
+  children.push(mat.screwHead("fm_sc4_" + String(node.id), x + RACK_W - 12, y + RACK_H - 12, 4));
+  return { resources: [], primitives: [Group("fm_root_" + String(node.id), children, {})] };
+}
+
+export fn fmMatrixProInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "fm", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + 360, y: y + 100, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 410, y: y + 100, w: 50, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_feedback_" + String(n.id), rect: { x: x + 460, y: y + 100, w: 50, h: 60 }, role: "knob", param: "feedback" },
+    { id: "knob_algorithm_" + String(n.id), rect: { x: x + 510, y: y + 100, w: 50, h: 60 }, role: "knob", param: "algorithm" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 560, y: y + 100, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn hybridToxicXPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "tox", x: 0, y: 0, label: "Hybrid Toxic X" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("plasma_blue");
+  const children = [];
+  const head = rkPaintHeader("tox_" + String(node.id), x, y, RACK_W, palette, "Hybrid Toxic X", "plasma_blue");
+  let i = 0;
+  while (i < head.length) { children.push(head[i]); i = i + 1; }
+  let bay = 0;
+  while (bay < 3) {
+    const bx = x + 24 + bay * 64;
+    children.push(Rect("tox_bay_" + String(bay) + "_" + String(node.id), bx, y + 56, 56, 130, { fill: "#0b1026", stroke: palette.glow, strokeWidth: 1, radius: 4 }));
+    children.push(mat.lcdPanel("tox_oled_" + String(bay) + "_" + String(node.id), bx + 4, y + 60, 48, 18, ["SUB", "FM", "WAVE"][bay], materialTokens.oled_white));
+    children.push(mat.vuMeterStrip("tox_meter_" + String(bay) + "_" + String(node.id), bx + 22, y + 86, 12, 80, 0.4 + bay * 0.15, { on: palette.glow, off: "#0a0a0a" }));
+    bay = bay + 1;
+  }
+  children.push(Rect("tox_xy_" + String(node.id), x + 240, y + 56, 110, 110, { fill: "#000000", stroke: "#a78bfa", strokeWidth: 2, radius: 4 }));
+  children.push(Rect("tox_xy_dot_" + String(node.id), x + 290, y + 100, 10, 10, { fill: "#f0abfc", radius: 5 }));
+  const knobs = rkKnobRow("tox_knobs_" + String(node.id), x + 380, y + 130, 4, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  return { resources: [], primitives: [Group("tox_root_" + String(node.id), children, {})] };
+}
+
+export fn hybridToxicXInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "tox", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "xy_morph_" + String(n.id), rect: { x: x + 240, y: y + 56, w: 110, h: 110 }, role: "xy", paramX: "morph", paramY: "motion" },
+    { id: "knob_level_" + String(n.id), rect: { x: x + 380, y: y + 110, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 430, y: y + 110, w: 50, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_morph_" + String(n.id), rect: { x: x + 480, y: y + 110, w: 50, h: 60 }, role: "knob", param: "morph" }
+  ];
+}
+
+export fn wavetableProPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "wt", x: 0, y: 0, label: "Wavetable Pro" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("plasma_blue");
+  const lcd = materialTokens.vfd_cyan;
+  const children = [];
+  const head = rkPaintHeader("wt_" + String(node.id), x, y, RACK_W, palette, "Wavetable Pro", "plasma_blue");
+  let i = 0;
+  while (i < head.length) { children.push(head[i]); i = i + 1; }
+  children.push(Rect("wt_window_" + String(node.id), x + 22, y + 56, 200, 70, { fill: "#03161c", stroke: lcd.fg, strokeWidth: 1, radius: 3 }));
+  children.push(Path("wt_wave_" + String(node.id), "M " + String(x + 26) + " " + String(y + 92) + " Q " + String(x + 80) + " " + String(y + 64) + " " + String(x + 130) + " " + String(y + 92) + " Q " + String(x + 180) + " " + String(y + 122) + " " + String(x + 220) + " " + String(y + 92), { stroke: lcd.fg, strokeWidth: 2 }));
+  children.push(Rect("wt_xy_" + String(node.id), x + 240, y + 56, 110, 110, { fill: "#000000", stroke: lcd.fg, strokeWidth: 2, radius: 4 }));
+  let r = 0;
+  while (r < 4) {
+    const rad = 14 + r * 8;
+    children.push(Rect("wt_ring_" + String(r) + "_" + String(node.id), x + 410 - rad, y + 100 - rad, rad * 2, rad * 2, { fill: null, stroke: lcd.fg, strokeWidth: 1, radius: rad, opacity: 0.5 }));
+    r = r + 1;
+  }
+  const knobs = rkKnobRow("wt_knobs_" + String(node.id), x + 480, y + 130, 3, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  return { resources: [], primitives: [Group("wt_root_" + String(node.id), children, {})] };
+}
+
+export fn wavetableProInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "wt", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "xy_wt_" + String(n.id), rect: { x: x + 240, y: y + 56, w: 110, h: 110 }, role: "xy", paramX: "tone", paramY: "motion" },
+    { id: "knob_level_" + String(n.id), rect: { x: x + 480, y: y + 110, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 530, y: y + 110, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn analogPolyPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "ap", x: 0, y: 0, label: "Analog Poly Juniper" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("eighties_orange");
+  const children = [];
+  children.push(Rect("ap_shell_" + String(node.id), x, y, RACK_W, RACK_H, { fill: "#94a3b8", stroke: "#1e293b", strokeWidth: 2, radius: 6 }));
+  children.push(mat.walnutEndCheek("ap_left_" + String(node.id), x, y, 18, RACK_H));
+  children.push(mat.walnutEndCheek("ap_right_" + String(node.id), x + RACK_W - 18, y, 18, RACK_H));
+  children.push(Text("ap_title_" + String(node.id), x + 28, y + 28, "Analog Poly Juniper", { color: "#0f172a", size: 16, weight: 900 }));
+  children.push(mat.lcdPanel("ap_lcd_" + String(node.id), x + 26, y + 40, 160, 36, "JUNIPER POLY", materialTokens.lcd_amber));
+  let s = 0;
+  while (s < 8) {
+    children.push(mat.drawbar("ap_sl_" + String(s) + "_" + String(node.id), x + 200 + s * 22, y + 80, 14, 100, 0.4 + (s % 3) * 0.15, "#f97316"));
+    s = s + 1;
+  }
+  const knobs = rkKnobRow("ap_knobs_" + String(node.id), x + 460, y + 130, 3, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  return { resources: [], primitives: [Group("ap_root_" + String(node.id), children, {})] };
+}
+
+export fn analogPolyInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "ap", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + 460, y: y + 110, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 510, y: y + 110, w: 50, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 560, y: y + 110, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn analogMonoPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "am", x: 0, y: 0, label: "Analog Mono Lead" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("oxblood_chrome");
+  const children = [];
+  children.push(Rect("am_panel_" + String(node.id), x + 22, y, RACK_W - 44, RACK_H, { fill: "#0a0a0a", stroke: "#1e293b", strokeWidth: 2, radius: 4 }));
+  children.push(mat.walnutEndCheek("am_left_" + String(node.id), x, y, 22, RACK_H));
+  children.push(mat.walnutEndCheek("am_right_" + String(node.id), x + RACK_W - 22, y, 22, RACK_H));
+  children.push(Text("am_title_" + String(node.id), x + 32, y + 28, "Analog Mono Lead '78", { color: palette.text, size: 16, weight: 900 }));
+  let w = 0;
+  while (w < 3) {
+    const wx = x + 36 + w * 32;
+    children.push(Rect("am_wheel_" + String(w) + "_" + String(node.id), wx, y + 56, 24, 110, { fill: "#27272a", stroke: "#000000", strokeWidth: 1, radius: 12 }));
+    children.push(Rect("am_wheel_grip_" + String(w) + "_" + String(node.id), wx + 2, y + 80, 20, 14, { fill: "#d4d4d8", stroke: "#000000", strokeWidth: 1, radius: 3 }));
+    w = w + 1;
+  }
+  children.push(mat.lcdPanel("am_lcd_" + String(node.id), x + 150, y + 60, 180, 40, "MONO LEAD '78", materialTokens.lcd_amber));
+  const knobs = rkKnobRow("am_knobs_" + String(node.id), x + 380, y + 130, 3, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  return { resources: [], primitives: [Group("am_root_" + String(node.id), children, {})] };
+}
+
+export fn analogMonoInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "am", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + 380, y: y + 110, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 430, y: y + 110, w: 50, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 480, y: y + 110, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn organDrawbarsPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "org", x: 0, y: 0, label: "Organ Drawbars" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("tonewheel_walnut");
+  const children = [];
+  children.push(Rect("org_panel_" + String(node.id), x, y, RACK_W, RACK_H, { fill: "#3a2418", stroke: "#1a120e", strokeWidth: 2, radius: 6 }));
+  children.push(Text("org_title_" + String(node.id), x + 18, y + 28, "Drawbar Organ", { color: palette.text, size: 16, weight: 900 }));
+  const drawbarColors = ["#fafaf9", "#fafaf9", "#a8a29e", "#fafaf9", "#a8a29e", "#fafaf9", "#a8a29e", "#92400e", "#92400e"];
+  let d = 0;
+  while (d < 9) {
+    children.push(mat.drawbar("org_db_" + String(d) + "_" + String(node.id), x + 22 + d * 22, y + 50, 14, 130, 0.7 - d * 0.08, drawbarColors[d]));
+    d = d + 1;
+  }
+  children.push(mat.lcdPanel("org_lcd_" + String(node.id), x + 240, y + 52, 160, 36, "PERC · LESLIE", materialTokens.lcd_amber));
+  children.push(mat.jewelLed("org_perc_" + String(node.id), x + 260, y + 110, 4, "#fbbf24", true));
+  children.push(mat.jewelLed("org_lesl_" + String(node.id), x + 290, y + 110, 4, "#22c55e", true));
+  const knobs = rkKnobRow("org_knobs_" + String(node.id), x + 460, y + 130, 3, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  return { resources: [], primitives: [Group("org_root_" + String(node.id), children, {})] };
+}
+
+export fn organDrawbarsInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "org", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + 460, y: y + 110, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 510, y: y + 110, w: 50, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 560, y: y + 110, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn drumXrPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "dr", x: 0, y: 0, label: "Drum XR" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("tan_red_drum");
+  const children = [];
+  children.push(Rect("dr_panel_" + String(node.id), x, y, RACK_W, RACK_H, { fill: "#3f2a1a", stroke: "#1a120e", strokeWidth: 2, radius: 6 }));
+  children.push(Text("dr_title_" + String(node.id), x + 18, y + 28, "Drum Machine XR", { color: palette.text, size: 16, weight: 900 }));
+  let pi = 0;
+  while (pi < 8) {
+    const px = x + 24 + (pi % 4) * 50;
+    const py = y + 50 + Math.floor(pi / 4) * 50;
+    children.push(mat.padCell("dr_pad_" + String(pi) + "_" + String(node.id), px, py, 44, 44, pi === 0, "#b91c1c"));
+    pi = pi + 1;
+  }
+  let s = 0;
+  while (s < 16) {
+    children.push(mat.jewelLed("dr_step_" + String(s) + "_" + String(node.id), x + 230 + s * 14, y + 80, 4, "#facc15", s === 4));
+    s = s + 1;
+  }
+  children.push(mat.lcdPanel("dr_lcd_" + String(node.id), x + 220, y + 110, 240, 36, "KIT 01 · 16-STEP · BPM 120", materialTokens.lcd_amber));
+  const knobs = rkKnobRow("dr_knobs_" + String(node.id), x + 480, y + 60, 3, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  return { resources: [], primitives: [Group("dr_root_" + String(node.id), children, {})] };
+}
+
+export fn drumXrInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "dr", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + 480, y: y + 40, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 530, y: y + 40, w: 50, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 580, y: y + 40, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn rompler90sPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "rom", x: 0, y: 0, label: "Rompler 90s" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("nineties_rackmount_blue");
+  const children = [];
+  children.push(Rect("rom_panel_" + String(node.id), x, y, RACK_W, RACK_H, { fill: "#0c1a30", stroke: "#000000", strokeWidth: 2, radius: 6 }));
+  children.push(Rect("rom_ear_l_" + String(node.id), x, y, 26, RACK_H, { fill: "#1e3a5f", stroke: "#000000", strokeWidth: 1, radius: 4 }));
+  children.push(Rect("rom_ear_r_" + String(node.id), x + RACK_W - 26, y, 26, RACK_H, { fill: "#1e3a5f", stroke: "#000000", strokeWidth: 1, radius: 4 }));
+  children.push(mat.screwHead("rom_sl1_" + String(node.id), x + 13, y + 24, 4));
+  children.push(mat.screwHead("rom_sl2_" + String(node.id), x + 13, y + RACK_H - 24, 4));
+  children.push(mat.screwHead("rom_sr1_" + String(node.id), x + RACK_W - 13, y + 24, 4));
+  children.push(mat.screwHead("rom_sr2_" + String(node.id), x + RACK_W - 13, y + RACK_H - 24, 4));
+  children.push(Text("rom_title_" + String(node.id), x + 40, y + 28, "Rompler · 1U", { color: palette.text, size: 14, weight: 800 }));
+  children.push(mat.lcdPanel("rom_lcd_" + String(node.id), x + 38, y + 56, 320, 96, "P012 · GRAND PIANO", { bg: "#031227", fg: "#bfdbfe", glow: 0.4 }));
+  children.push(mat.knobOrnate("rom_enc_" + String(node.id), x + 470, y + 100, 56, 0.5, { rim: "#1e3a5f", top: "#bfdbfe" }));
+  return { resources: [], primitives: [Group("rom_root_" + String(node.id), children, {})] };
+}
+
+export fn rompler90sInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "rom", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 440, y: y + 70, w: 60, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_level_" + String(n.id), rect: { x: x + 530, y: y + 60, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 530, y: y + 130, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn vocoderPadPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "voc", x: 0, y: 0, label: "Vocoder Pad" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("industrial_grey");
+  const children = [];
+  children.push(Rect("voc_panel_" + String(node.id), x, y, RACK_W, RACK_H, { fill: "#0a0a0a", stroke: "#000000", strokeWidth: 2, radius: 6 }));
+  children.push(Text("voc_title_" + String(node.id), x + 18, y + 28, "Vocoder · MK-VII", { color: palette.text, size: 16, weight: 900 }));
+  children.push(mat.perforatedGrille("voc_grille_" + String(node.id), x + 22, y + 56, 130, 110, palette));
+  let r = 0;
+  while (r < 5) {
+    const rad = 18 + r * 8;
+    children.push(Rect("voc_ring_" + String(r) + "_" + String(node.id), x + 240 - rad, y + 110 - rad, rad * 2, rad * 2, { fill: null, stroke: palette.text, strokeWidth: 1, radius: rad, opacity: 0.5 }));
+    r = r + 1;
+  }
+  let v = 0;
+  while (v < 6) {
+    children.push(mat.vuMeterStrip("voc_vu_" + String(v) + "_" + String(node.id), x + 320 + v * 22, y + 60, 14, 110, 0.4 + (v % 3) * 0.18, { on: "#f8fafc", off: "#1f2937" }));
+    v = v + 1;
+  }
+  const knobs = rkKnobRow("voc_knobs_" + String(node.id), x + 480, y + 130, 3, palette);
+  let ki = 0;
+  while (ki < knobs.length) { children.push(knobs[ki]); ki = ki + 1; }
+  return { resources: [], primitives: [Group("voc_root_" + String(node.id), children, {})] };
+}
+
+export fn vocoderPadInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "voc", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + 480, y: y + 110, w: 50, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tone_" + String(n.id), rect: { x: x + 530, y: y + 110, w: 50, h: 60 }, role: "knob", param: "tone" },
+    { id: "knob_motion_" + String(n.id), rect: { x: x + 580, y: y + 110, w: 50, h: 60 }, role: "knob", param: "motion" }
+  ];
+}
+
+export fn padMicroPaintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "pad", x: 0, y: 0, label: "Pad Micro" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("acrylic_glass");
+  const children = [];
+  children.push(Rect("pad_panel_" + String(node.id), x, y, RACK_W, RACK_H, { fill: "#0f172a", stroke: palette.accent, strokeWidth: 1, radius: 8, opacity: 0.95 }));
+  children.push(Rect("pad_glow_" + String(node.id), x + 4, y + 4, RACK_W - 8, RACK_H - 8, { fill: palette.accent, opacity: 0.06, radius: 6 }));
+  children.push(Text("pad_title_" + String(node.id), x + 24, y + 28, "Pad Micro · Acrylic", { color: palette.text, size: 14, weight: 800 }));
+  const cx = x + RACK_W * 0.5;
+  const cy = y + RACK_H * 0.55;
+  let ring = 0;
+  while (ring < 3) {
+    const rr = 50 + ring * 14;
+    children.push(Rect("pad_ring_" + String(ring) + "_" + String(node.id), cx - rr, cy - rr, rr * 2, rr * 2, { fill: null, stroke: palette.glow, strokeWidth: 1, radius: rr, opacity: 0.35 - ring * 0.08 }));
+    ring = ring + 1;
+  }
+  children.push(mat.knobOrnate("pad_halo_" + String(node.id), cx, cy, 60, 0.5, { rim: "#0c4a6e", top: "#38bdf8" }));
+  return { resources: [], primitives: [Group("pad_root_" + String(node.id), children, {})] };
+}
+
+export fn padMicroInputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "pad", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + RACK_W * 0.5 - 36, y: y + RACK_H * 0.55 - 36, w: 72, h: 72 }, role: "knob", param: "level" }
+  ];
+}
+
+void eraPalettes;

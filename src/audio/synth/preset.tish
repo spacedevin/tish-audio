@@ -1,0 +1,57 @@
+/**
+ * Preset document: engineVersion, params, modulation snapshot, FX, env/LFO state.
+ */
+
+export fn makePreset(id, name, engineId, engineVersion, params, mod, fx, envLfo) {
+  return {
+    id: String(id),
+    name: String(name),
+    engineId: String(engineId),
+    engineVersion: Number(engineVersion) || 1,
+    params: params || {},
+    modRoutes: mod || [],
+    fx: fx || {},
+    envLfo: envLfo || {},
+    meta: {}
+  };
+}
+
+export fn presetToJson(preset) {
+  return JSON.stringify(preset);
+}
+
+export fn presetFromJson(text) {
+  if (!text) {
+    return null;
+  }
+  try {
+    const j = JSON.parse(text);
+    if (!j || typeof j !== "object") {
+      return null;
+    }
+    if (j.engineVersion == null) {
+      j.engineVersion = 1;
+    }
+    if (!j.params) {
+      j.params = {};
+    }
+    return j;
+  } catch (e) {
+    return null;
+  }
+}
+
+export fn migratePreset(engineId, preset, targetVersion, migrateFn) {
+  if (!preset) {
+    return null;
+  }
+  const cur = Number(preset.engineVersion) || 1;
+  const tgt = Number(targetVersion) || 1;
+  if (cur === tgt) {
+    return preset;
+  }
+  if (migrateFn && typeof migrateFn === "function") {
+    return migrateFn(preset, cur, tgt);
+  }
+  return { ...preset, engineVersion: tgt };
+}

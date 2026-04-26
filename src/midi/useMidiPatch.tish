@@ -16,6 +16,13 @@ import { enrichMidiDeviceRow } from "../inputDevices/midiHardwareVisuals.tish"
 import { mergeMidiHardwareRows } from "./midiPortGroups.tish"
 import { isMidiDebugEnabled, midiDebugLog } from "./midiDebug.tish"
 import { deviceRowIsSmk25FamilyCombo, buildSmk25LayoutNode, smk25DefaultComboEdges } from "./deviceAutoLayout.tish"
+import {
+  loadSynthQualitySettings,
+  saveSynthQualitySettings,
+  QUALITY_STUDIO,
+  QUALITY_LIVE,
+  BACKEND_AUTO
+} from "../audio/synth/qualityProfile.tish"
 
 let __midiDispatchDebugCount = 0;
 
@@ -366,8 +373,19 @@ export fn useMidiPatch(
                 return [...prevList, midiNode, smkNode];
               }
 
+              const qs = loadSynthQualitySettings();
+              const AC = window.AudioContext || window.webkitAudioContext;
+              if (AC) {
+                const probe = new AC();
+                const hasW = !!probe.audioWorklet;
+                try { probe.close(); } catch (ePc) {}
+                qs.qualityTier = hasW ? QUALITY_STUDIO : QUALITY_LIVE;
+                qs.backend = BACKEND_AUTO;
+                saveSynthQualitySettings(qs);
+              }
+
               const semTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_semantic_splitter");
-              const polyTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_poly");
+              const polyTpl = PEDAL_LIBRARY.INSTRUMENTS.find((p) => p["type"] === "analog_poly_juniper");
               const semanticId = Math.random().toString(36).substr(2, 9);
               const keysPolyId = Math.random().toString(36).substr(2, 9);
               const padsPolyId = Math.random().toString(36).substr(2, 9);

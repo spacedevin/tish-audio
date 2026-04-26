@@ -1,0 +1,16 @@
+/**
+ * ES5-style AudioWorkletProcessor registration (tish JS target mangles `class` syntax).
+ * Import from processor entries; compiler inlines this file.
+ */
+
+export fn bindWorkletProcessor(ctorFn, processFn) {
+  Object.setPrototypeOf(ctorFn, AudioWorkletProcessor);
+  ctorFn.prototype = Object.create(AudioWorkletProcessor.prototype);
+  ctorFn.prototype.constructor = ctorFn;
+  ctorFn.prototype.process = processFn;
+}
+
+export fn registerWorkletProcessor(name, ctorFn, processFn) {
+  bindWorkletProcessor(ctorFn, processFn);
+  registerProcessor(name, ctorFn);
+}

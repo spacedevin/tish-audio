@@ -1,0 +1,24 @@
+import { buildPresetSet } from "../common.tish"
+import { wavetableProView, wavetableProPaintScene, wavetableProInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const wavetable_morph_type = "wavetable_morph";
+export const wavetable_morph_category = "INSTRUMENTS";
+export const wavetable_morph_metadata = {
+  label: "Wavetable Morph",
+  color: "from-indigo-500 to-sky-700",
+  theme: "dark",
+  defaultParams: { level: 0.45, tone: 0.58, motion: 0.64 },
+  presets: buildPresetSet("Morph", 24, { level: 0.45, tone: 0.58, motion: 0.64 })
+};
+export const wavetable_morph_layout = { width: 640, height: 216 };
+export const wavetable_morph_View = wavetableProView;
+export const wavetable_morph_paintScene = wavetableProPaintScene;
+export const wavetable_morph_inputBindings = wavetableProInputBindings;
+export const wavetable_morph_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.45, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.58, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.64, taper: "lin" }
+];
+export const wavetable_morph_requirements = { irVersion: 1 };
+export const wavetable_morph_buildAudio = makeEngineBuildAudio("wavetable_morph");

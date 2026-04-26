@@ -1,0 +1,40 @@
+const __irRegistry = {};
+
+export fn registerIrModule(moduleType, spec) {
+  if (!moduleType) return;
+  __irRegistry[String(moduleType)] = {
+    type: String(moduleType),
+    paintScene: spec && typeof spec.paintScene === "function" ? spec.paintScene : null,
+    inputBindings: spec && typeof spec.inputBindings === "function" ? spec.inputBindings : null,
+    parameters: spec && Array.isArray(spec.parameters) ? spec.parameters : [],
+    requirements: spec && spec.requirements ? { ...spec.requirements } : { irVersion: 1 }
+  };
+}
+
+export fn getIrModule(moduleType) {
+  return __irRegistry[String(moduleType || "")] || null;
+}
+
+export fn getIrRegistrySnapshot() {
+  const out = {};
+  const keys = Object.keys(__irRegistry);
+  let i = 0;
+  while (i < keys.length) {
+    const k = keys[i];
+    out[k] = __irRegistry[k];
+    i = i + 1;
+  }
+  return out;
+}
+
+export fn modulePaintScene(moduleType, ctx) {
+  const m = getIrModule(moduleType);
+  if (!m || !m.paintScene) return null;
+  return m.paintScene(ctx);
+}
+
+export fn moduleInputBindings(moduleType, ctx) {
+  const m = getIrModule(moduleType);
+  if (!m || !m.inputBindings) return [];
+  return m.inputBindings(ctx) || [];
+}

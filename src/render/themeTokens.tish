@@ -1,0 +1,53 @@
+export const eraPalettes = {
+  lcd_amber: { panel: "#1f1708", accent: "#f59e0b", text: "#fcd34d", glow: "#fbbf24" },
+  oxblood_chrome: { panel: "#2a0c14", accent: "#d94660", text: "#fda4af", glow: "#fb7185" },
+  eighties_orange: { panel: "#1f1207", accent: "#f97316", text: "#fed7aa", glow: "#fb923c" },
+  nineties_rackmount_blue: { panel: "#081a30", accent: "#3b82f6", text: "#bfdbfe", glow: "#60a5fa" },
+  plasma_blue: { panel: "#0b1026", accent: "#6366f1", text: "#c7d2fe", glow: "#818cf8" },
+  acrylic_glass: { panel: "#0f172a", accent: "#22d3ee", text: "#a5f3fc", glow: "#67e8f9" },
+  tonewheel_walnut: { panel: "#2a1b12", accent: "#a16207", text: "#fcd34d", glow: "#f59e0b" },
+  industrial_grey: { panel: "#16181d", accent: "#6b7280", text: "#d1d5db", glow: "#9ca3af" },
+  tan_red_drum: { panel: "#2b2118", accent: "#ef4444", text: "#fecaca", glow: "#f87171" }
+};
+
+export const materialTokens = {
+  brushed_steel: { noise: 0.08, spec: 0.35 },
+  vinyl_screen: { noise: 0.04, spec: 0.1 },
+  vfd_glow: { noise: 0.02, spec: 0.45 },
+  glass_haze: { noise: 0.01, spec: 0.7 },
+  painted_anodized: { noise: 0.03, spec: 0.25 },
+  walnut: { grain: 0.12, lacquer: 0.2, warmth: 0.55 },
+  chrome: { edge: "#cbd5e1", face: "#64748b", spec: 0.55 },
+  brushed_aluminum: { highlight: "#f1f5f9", lowlight: "#64748b", streak: 0.08 },
+  anodized_red: { base: "#7f1d1d", sheen: "#f87171" },
+  anodized_blue: { base: "#1e3a5f", sheen: "#60a5fa" },
+  vfd_cyan: { bg: "#042f2e", fg: "#5eead4", glow: 0.5 },
+  lcd_amber: { bg: "#1f1708", fg: "#fcd34d", glow: 0.45 },
+  oled_white: { bg: "#0a0a0a", fg: "#f8fafc", glow: 0.35 },
+  acrylic_smoke: { tint: "#0f172a", frost: 0.4, edge: "#38bdf8" }
+};
+
+/** Per-rack design recipes (palette ids + material keys). */
+export const rackDesignTokens = {
+  fm_matrix_pro: { era: "lcd_amber", materials: ["anodized_red", "chrome", "lcd_amber"] },
+  hybrid_toxic_x: { era: "plasma_blue", materials: ["acrylic_smoke", "oled_white", "anodized_blue"] },
+  wavetable_pro: { era: "plasma_blue", materials: ["vfd_cyan", "brushed_aluminum"] },
+  analog_poly: { era: "eighties_orange", materials: ["walnut", "brushed_aluminum", "lcd_amber"] },
+  analog_mono: { era: "oxblood_chrome", materials: ["walnut", "chrome"] },
+  organ: { era: "tonewheel_walnut", materials: ["walnut", "brushed_steel"] },
+  drum_xr: { era: "tan_red_drum", materials: ["tan_red_drum", "painted_anodized"] },
+  rompler: { era: "nineties_rackmount_blue", materials: ["anodized_blue", "lcd_amber"] },
+  vocoder: { era: "industrial_grey", materials: ["industrial_grey", "brushed_steel"] },
+  pad_ambient: { era: "acrylic_glass", materials: ["acrylic_smoke", "glass_haze"] }
+};
+
+export const typographyTokens = {
+  seven_segment: { family: "monospace", weight: 700, tracking: 0.12 },
+  oled_dot: { family: "monospace", weight: 500, tracking: 0.08 },
+  engraved_panel: { family: "sans-serif", weight: 700, tracking: 0.14 },
+  nineties_rack_serif: { family: "serif", weight: 600, tracking: 0.06 }
+};
+
+export fn getEraPalette(name) {
+  return eraPalettes[String(name || "")] || eraPalettes.acrylic_glass;
+}

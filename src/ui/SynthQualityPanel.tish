@@ -1,0 +1,76 @@
+import { h, useState, useEffect } from "lattish"
+import { X } from "../icons.tish"
+import {
+  loadSynthQualitySettings,
+  saveSynthQualitySettings,
+  QUALITY_STUDIO,
+  QUALITY_LIVE,
+  QUALITY_LITE,
+  BACKEND_AUTO,
+  BACKEND_WEBAUDIO,
+  BACKEND_WORKLET,
+  BACKEND_NATIVE
+} from "../audio/synth/qualityProfile.tish"
+
+export fn SynthQualityPanel(props) {
+  const open = props.open === true;
+  const onClose = props.onClose;
+  const onApplied = props.onApplied;
+  let [settings, setSettings] = useState(loadSynthQualitySettings());
+  useEffect(() => {
+    if (open) {
+      setSettings(loadSynthQualitySettings());
+    }
+  }, [open]);
+  if (!open) {
+    return null;
+  }
+  const applyTier = (tier) => {
+    const next = { ...settings, qualityTier: tier };
+    setSettings(next);
+    saveSynthQualitySettings(next);
+    if (onApplied) {
+      onApplied(next);
+    }
+  };
+  const applyBackend = (bk) => {
+    const next = { ...settings, backend: bk };
+    setSettings(next);
+    saveSynthQualitySettings(next);
+    if (onApplied) {
+      onApplied(next);
+    }
+  };
+  return (
+    <div class="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={() => onClose && onClose()}>
+      <div class="w-full max-w-md rounded-xl border border-neutral-600 bg-neutral-900 shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-black tracking-wide text-orange-400">SYNTH ENGINE</span>
+          <button class="text-neutral-500 hover:text-white" onClick={() => onClose && onClose()} title="Close">
+            {h(X, { class: "w-4 h-4" })}
+          </button>
+        </div>
+        <p class="text-[10px] text-neutral-500 mb-3 leading-snug">Quality and backend apply on the next graph rebuild (e.g. add a cable). Release all notes before switching for clean cross-fades.</p>
+        <div class="space-y-3">
+          <div>
+            <div class="text-[10px] font-bold text-neutral-400 mb-1">QUALITY</div>
+            <div class="flex flex-wrap gap-2">
+              <button onClick={() => applyTier(QUALITY_STUDIO)} class={"px-2 py-1 rounded text-[11px] font-bold border " + (settings.qualityTier === QUALITY_STUDIO ? "border-orange-500 bg-orange-950/50 text-orange-200" : "border-neutral-600 text-neutral-300")}>Studio</button>
+              <button onClick={() => applyTier(QUALITY_LIVE)} class={"px-2 py-1 rounded text-[11px] font-bold border " + (settings.qualityTier === QUALITY_LIVE ? "border-orange-500 bg-orange-950/50 text-orange-200" : "border-neutral-600 text-neutral-300")}>Live</button>
+              <button onClick={() => applyTier(QUALITY_LITE)} class={"px-2 py-1 rounded text-[11px] font-bold border " + (settings.qualityTier === QUALITY_LITE ? "border-orange-500 bg-orange-950/50 text-orange-200" : "border-neutral-600 text-neutral-300")}>Lite</button>
+            </div>
+          </div>
+          <div>
+            <div class="text-[10px] font-bold text-neutral-400 mb-1">AUDIO BACKEND</div>
+            <div class="flex flex-wrap gap-2">
+              <button onClick={() => applyBackend(BACKEND_AUTO)} class={"px-2 py-1 rounded text-[11px] font-bold border " + (settings.backend === BACKEND_AUTO ? "border-violet-500 bg-violet-950/40 text-violet-200" : "border-neutral-600 text-neutral-300")}>Auto</button>
+              <button onClick={() => applyBackend(BACKEND_NATIVE)} class={"px-2 py-1 rounded text-[11px] font-bold border " + (settings.backend === BACKEND_NATIVE ? "border-violet-500 bg-violet-950/40 text-violet-200" : "border-neutral-600 text-neutral-300")}>Native</button>
+              <button onClick={() => applyBackend(BACKEND_WORKLET)} class={"px-2 py-1 rounded text-[11px] font-bold border " + (settings.backend === BACKEND_WORKLET ? "border-violet-500 bg-violet-950/40 text-violet-200" : "border-neutral-600 text-neutral-300")}>Worklet</button>
+              <button onClick={() => applyBackend(BACKEND_WEBAUDIO)} class={"px-2 py-1 rounded text-[11px] font-bold border " + (settings.backend === BACKEND_WEBAUDIO ? "border-violet-500 bg-violet-950/40 text-violet-200" : "border-neutral-600 text-neutral-300")}>WebAudio</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

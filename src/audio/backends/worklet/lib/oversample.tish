@@ -1,0 +1,11 @@
+/** Lightweight 2x oversample: repeat sample (placeholder for windowed-sinc). */
+
+export fn oversample2xProcess(fnTick, s, input) {
+  const a = fnTick(s, input);
+  const b = fnTick(s, input);
+  return 0.5 * (a + b);
+}
+
+export fn decimate2x(a, b) {
+  return 0.5 * (a + b);
+}

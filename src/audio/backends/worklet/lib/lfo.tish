@@ -1,0 +1,38 @@
+/** Control-rate LFO (sine/triangle/square). */
+
+export fn lfoInit() {
+  return { phase: 0, noise: 0.1337 };
+}
+
+export fn lfoSetRate(l, hz, sampleRate) {
+  l.inc = 2 * hz / sampleRate;
+}
+
+export fn lfoNoise(l) {
+  l.noise = (l.noise * 1103515245 + 12345) % 2147483648;
+  return (l.noise / 2147483648) * 2 - 1;
+}
+
+export fn lfoTick(l, shape) {
+  l.phase = l.phase + l.inc;
+  if (l.phase >= 1) {
+    l.phase = l.phase - 1;
+  }
+  if (shape === 1) {
+    let t = l.phase * 4;
+    if (t < 1) {
+      return t;
+    }
+    if (t < 3) {
+      return 2 - t;
+    }
+    return t - 4;
+  }
+  if (shape === 2) {
+    return l.phase < 0.5 ? 1 : -1;
+  }
+  if (shape === 3) {
+    return lfoNoise(l);
+  }
+  return Math.sin(6.283185307179586 * l.phase);
+}

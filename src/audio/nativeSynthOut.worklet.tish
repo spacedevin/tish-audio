@@ -1,0 +1,85 @@
+/**
+ * Plays native-synth PCM chunks posted from the main thread (mirrors native-audio-in worklet).
+ */
+import { registerWorkletProcessor } from "./backends/worklet/processorShell.tish";
+
+const RING_LOG = 18;
+const RING_SIZE = 1 << RING_LOG;
+const RING_MASK = RING_SIZE - 1;
+
+export fn nativeSynthOutConstructor() {
+  AudioWorkletProcessor.call(this);
+  this.buf = new Float32Array(RING_SIZE);
+  this.writeL = 0;
+  this.readPos = 0;
+  this.ratio = 1;
+
+  this.port.onmessage = (e) => {
+    const d = e.data;
+    if (!d || typeof d["type"] !== "string") {
+      return;
+    }
+    if (d["type"] === "config") {
+      const r = d.ratio;
+      this.ratio = typeof r === "number" && r > 0 ? r : 1;
+      return;
+    }
+    if (d["type"] === "reset") {
+      this.writeL = 0;
+      this.readPos = 0;
+      this.buf.fill(0);
+      return;
+    }
+    if (d["type"] === "chunk") {
+      const s = d.samples;
+      if (!s || s.length === 0) {
+        return;
+      }
+      const len = s.length;
+      while (this.writeL - Math.floor(this.readPos) >= RING_SIZE - 1024) {
+        this.readPos = this.writeL - 2000;
+      }
+      let w = this.writeL;
+      let j = 0;
+      while (j < len) {
+        this.buf[w & RING_MASK] = s[j];
+        w = w + 1;
+        j = j + 1;
+      }
+      this.writeL = w;
+    }
+  };
+}
+
+export fn nativeSynthOutProcess(inputs, outputs, parameters) {
+  const out = outputs[0][0];
+  const ratio = this.ratio;
+  const buf = this.buf;
+  const mask = RING_MASK;
+  let readPos = this.readPos;
+  let i = 0;
+  while (i < out.length) {
+    const floorR = Math.floor(readPos);
+    const avail = this.writeL - floorR;
+    if (avail < 2) {
+      out[i] = 0;
+    } else {
+      const p0 = floorR & mask;
+      const p1 = (floorR + 1) & mask;
+      const rf = readPos - floorR;
+      const s0 = buf[p0];
+      const s1 = buf[p1];
+      out[i] = s0 + (s1 - s0) * rf;
+    }
+    readPos = readPos + ratio;
+    i = i + 1;
+  }
+  this.readPos = readPos;
+  return true;
+}
+
+export fn registerNativeSynthOut() {
+  registerWorkletProcessor("native-synth-out", nativeSynthOutConstructor, nativeSynthOutProcess);
+}
+
+registerNativeSynthOut();

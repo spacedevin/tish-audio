@@ -1,0 +1,25 @@
+import { buildPresetSet } from "../common.tish"
+import { hybridToxicXView, hybridToxicXPaintScene, hybridToxicXInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const hybrid_toxic_x_type = "hybrid_toxic_x";
+export const hybrid_toxic_x_category = "INSTRUMENTS";
+export const hybrid_toxic_x_metadata = {
+  label: "Hybrid Toxic X",
+  color: "from-fuchsia-700 via-violet-900 to-black",
+  theme: "dark",
+  defaultParams: { level: 0.38, tone: 0.52, motion: 0.4, morph: 0.35 },
+  presets: buildPresetSet("TOX", 24, { level: 0.38, tone: 0.52, motion: 0.4, morph: 0.35 })
+};
+export const hybrid_toxic_x_layout = { width: 640, height: 216 };
+export const hybrid_toxic_x_View = hybridToxicXView;
+export const hybrid_toxic_x_paintScene = hybridToxicXPaintScene;
+export const hybrid_toxic_x_inputBindings = hybridToxicXInputBindings;
+export const hybrid_toxic_x_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.38, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.52, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.4, taper: "lin" },
+  { id: "morph", min: 0, max: 1, def: 0.35, taper: "lin" }
+];
+export const hybrid_toxic_x_requirements = { irVersion: 2, workletUrls: ["hybrid-x.processor.worklet.js"] };
+export const hybrid_toxic_x_buildAudio = makeEngineBuildAudio("hybrid_toxic_x");

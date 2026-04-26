@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, h, runBatched, useMemo } from "lattish"
-import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2 } from "./icons.tish"
+import { Play, Gamepad2, Mic, Activity, X, Sliders, Plus, ChevronDown, Trash2, Bug, TuningFork, Music2, SettingsGear } from "./icons.tish"
 import {
   PEDAL_LIBRARY,
   MODULE_REGISTRY,
@@ -26,7 +26,11 @@ import { RenderSceneSurface } from "./ui/RenderSceneSurface.tish"
 import { buildChromeScene, buildJamScene, buildArcadeScene, buildTuningScene } from "./render/screens.tish"
 import { isTauriApp } from "./platform/tauriEnv.tish"
 import { useMidiPatch } from "./midi/useMidiPatch.tish"
+import { registerBuiltinIrModules } from "./render/registerBuiltinIrModules.tish"
+import { SynthQualityPanel } from "./ui/SynthQualityPanel.tish"
+import { preloadSynthWorkletModules } from "./audio/synth/workletPreload.tish"
 export fn App() {
+registerBuiltinIrModules();
 let renderBackendMode = null;
 if (typeof window !== "undefined" && window.location) {
   const qp = new URLSearchParams(window.location.search || "");
@@ -42,6 +46,7 @@ let [devices, setDevices] = useState([]);
 let [showHardwareMenu, setShowHardwareMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
 let [showModuleDebug, setShowModuleDebug] = useState(false);
+let [showSynthQuality, setShowSynthQuality] = useState(false);
 let [audioGraphTick, setAudioGraphTick] = useState(0);
 let [inputFlowBusy, setInputFlowBusy] = useState(false);
 let [micDenied, setMicDenied] = useState(false);
@@ -492,6 +497,22 @@ if (ac && ac.state === 'suspended') { void ac.resume(); }
 }, [nodes, connections, audioReady]);
 
 useEffect(() => {
+if (!audioReady || !audioCtxRef.current) {
+return;
+}
+const ctx = audioCtxRef.current;
+let alive = true;
+preloadSynthWorkletModules(ctx).then(() => {
+if (alive) {
+setAudioGraphTick((n) => n + 1);
+}
+});
+return () => {
+alive = false;
+};
+}, [audioReady]);
+
+useEffect(() => {
 return () => {
 if (audioCtxRef.current) audioCtxRef.current.close();
 };
@@ -615,7 +636,7 @@ const next = [...prev, newNode];
 const nonSystemCount = prev.filter((n) => !n.isSystem).length;
 if (nonSystemCount === 0) {
   const semTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_semantic_splitter");
-  const polyTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_poly");
+  const polyTpl = PEDAL_LIBRARY.INSTRUMENTS.find((p) => p["type"] === "analog_poly_juniper");
   if (semTpl) {
     next.push({
       id: semanticId,
@@ -696,7 +717,7 @@ const semanticId = Math.random().toString(36).substr(2, 9);
 const keysPolyId = Math.random().toString(36).substr(2, 9);
 const padsPolyId = Math.random().toString(36).substr(2, 9);
 const semTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_semantic_splitter");
-const polyTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_poly");
+const polyTpl = PEDAL_LIBRARY.INSTRUMENTS.find((p) => p["type"] === "analog_poly_juniper");
 runBatched(() => {
 setNodes((prev) => {
 const next = prev.slice();
@@ -1109,6 +1130,13 @@ title="Preview all modules in a chain (layout only)"
 >
 {h(Bug, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">DEBUG</span>
 </button>
+<button
+onClick={() => { setShowSynthQuality(true); }}
+class="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-neutral-600 bg-neutral-900/80 text-neutral-400 hover:text-cyan-200 hover:border-cyan-600/50 text-xs font-bold"
+title="Synth quality & audio backend"
+>
+{h(SettingsGear, { "class": "w-3.5 h-3.5" })} <span class="hidden sm:inline">ENGINE</span>
+</button>
 </div>
 ) : null}
 </div>
@@ -1220,6 +1248,7 @@ audioCtx={audioCtxRef.current}
 <ModuleDebugPanel onClose={() => setShowModuleDebug(false)} addNode={addNode} />
 ) : null}
 </div>
+<SynthQualityPanel open={showSynthQuality} onClose={() => setShowSynthQuality(false)} onApplied={() => setAudioGraphTick((n) => n + 1)} />
 </div>
 );
 }

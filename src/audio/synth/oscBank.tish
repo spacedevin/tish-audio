@@ -1,0 +1,43 @@
+export fn createOscBank(ctx, params) {
+  const p = params || {};
+  const out = ctx.createGain();
+  const voices = [];
+
+  const spawn = (hz, detCents, type, level) => {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type || "sawtooth";
+    osc.frequency.setValueAtTime(Number(hz) || 220, ctx.currentTime);
+    osc.detune.setValueAtTime(Number(detCents) || 0, ctx.currentTime);
+    g.gain.value = Number(level) || 0.2;
+    osc.connect(g);
+    g.connect(out);
+    osc.start();
+    const row = { osc: osc, gain: g };
+    voices.push(row);
+    return row;
+  };
+
+  const spawnDual = (hz) => {
+    spawn(hz, Number(p.detuneA) || -6, p.waveA || "sawtooth", Number(p.levelA) || 0.28);
+    spawn(hz, Number(p.detuneB) || 6, p.waveB || "square", Number(p.levelB) || 0.22);
+    if (p.sub === true) spawn(hz / 2, 0, "sine", Number(p.subLevel) || 0.12);
+  };
+
+  return {
+    out: out,
+    spawnDual: spawnDual,
+    dispose: () => {
+      let i = 0;
+      while (i < voices.length) {
+        const v = voices[i];
+        i = i + 1;
+        try { v.osc.stop(); } catch (e0) {}
+        try { v.osc.disconnect(); } catch (e1) {}
+        try { v.gain.disconnect(); } catch (e2) {}
+      }
+      voices.length = 0;
+      try { out.disconnect(); } catch (e3) {}
+    }
+  };
+}

@@ -1,0 +1,24 @@
+export fn applyAdsr(param, nowTime, attackMs, decayMs, sustainLvl, releaseMs, peak) {
+  const t0 = Number(nowTime) || 0;
+  const a = Math.max(0.001, (Number(attackMs) || 10) / 1000);
+  const d = Math.max(0.001, (Number(decayMs) || 80) / 1000);
+  const s = Math.max(0, Math.min(1, Number(sustainLvl) || 0.6));
+  const p = Number(peak) || 1;
+  try {
+    param.cancelScheduledValues(t0);
+    param.setValueAtTime(0.0001, t0);
+    param.linearRampToValueAtTime(p, t0 + a);
+    param.linearRampToValueAtTime(p * s, t0 + a + d);
+  } catch (e0) {}
+  return { releaseMs: Number(releaseMs) || 120, sustain: s };
+}
+
+export fn releaseAdsr(param, nowTime, releaseMs) {
+  const t0 = Number(nowTime) || 0;
+  const r = Math.max(0.001, (Number(releaseMs) || 120) / 1000);
+  try {
+    param.cancelScheduledValues(t0);
+    param.setValueAtTime(Math.max(0.0001, param.value), t0);
+    param.exponentialRampToValueAtTime(0.0001, t0 + r);
+  } catch (e0) {}
+}

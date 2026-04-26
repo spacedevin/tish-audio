@@ -1,0 +1,171 @@
+/**
+ * Native (Tauri) synth backend: Rust DSP streams PCM via OTA events into native-synth-out worklet.
+ */
+
+import { synthBridgePresent } from "../../synth/qualityProfile.tish"
+import { isTauriApp } from "../../../platform/tauriEnv.tish"
+
+export fn ensureNativeSynthOutWorklet(ctx) {
+  if (!ctx || !ctx.audioWorklet) {
+    return false;
+  }
+  return ctx._nativeSynthOutReady === true;
+}
+
+export fn createNativeSynthBackend() {
+  let ctxRef = null;
+  return {
+    mount: (ctx) => {
+      ctxRef = ctx;
+    },
+    unmount: () => {
+      ctxRef = null;
+    },
+    capabilities: () => {
+      return {
+        oversample: 4,
+        zdfFilter: true,
+        mseg: true,
+        polyphonyMax: 16,
+        latencyMs: 28,
+        worklet: true,
+        nativeStream: true
+      };
+    },
+    allocateEngine: (spec, qualityProfile, node) => {
+      void qualityProfile;
+      if (!ctxRef || !ctxRef.audioWorklet) {
+        return null;
+      }
+      if (!isTauriApp() || !synthBridgePresent()) {
+        return null;
+      }
+      if (!ensureNativeSynthOutWorklet(ctxRef)) {
+        return null;
+      }
+      const ota = window.__OTA_BRIDGE__;
+      const inGain = ctxRef.createGain();
+      inGain.gain.value = 0;
+      const outGain = ctxRef.createGain();
+      const lvl = node.params && node.params.level != null ? node.params.level : 0.35;
+      outGain.gain.value = lvl;
+      const wn = new AudioWorkletNode(ctxRef, "native-synth-out", {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1]
+      });
+      wn.connect(outGain);
+      const ref = { handleId: null, unlisten: null };
+      const arm = () => {
+        ota.createSynthEngine(spec, ctxRef.sampleRate).then((raw) => {
+          const hid = raw && raw.handleId != null ? raw.handleId : raw && raw.handle_id != null ? raw.handle_id : null;
+          ref.handleId = hid;
+          const ratio = 48000 / ctxRef.sampleRate;
+          wn.port.postMessage({ type: "config", ratio: ratio });
+          if (!ota.listenNativeSynthAudioChunk) {
+            return null;
+          }
+          return ota.listenNativeSynthAudioChunk((payload) => {
+            if (payload == null || ref.handleId == null) {
+              return;
+            }
+            let p = payload;
+            if (typeof p === "string") {
+              return;
+            }
+            const ph = p.handleId != null ? p.handleId : p.handle_id;
+            if (String(ph) !== String(ref.handleId)) {
+              return;
+            }
+            const s = p.samples != null ? p.samples : p.Samples;
+            const len = s && s.length != null ? s.length : 0;
+            if (!len) {
+              return;
+            }
+            const f32 = new Float32Array(len);
+            let j = 0;
+            while (j < len) {
+              f32[j] = s[j];
+              j = j + 1;
+            }
+            wn.port.postMessage({ type: "chunk", samples: f32 }, [f32.buffer]);
+          });
+        }).then((un) => {
+          ref.unlisten = un;
+        });
+      };
+      arm();
+      const midiSink = {
+        handleEvent: (ev, c2) => {
+          void c2;
+          if (ref.handleId == null || !ota.sendSynthNoteEvent) {
+            return;
+          }
+          try {
+            ota.sendSynthNoteEvent(ref.handleId, ev);
+          } catch (eN) {}
+        },
+        getActivity: () => ({ last: "native", vel: 100 }),
+        dispose: () => {
+          try { wn.disconnect(); } catch (eW) {}
+          try { outGain.disconnect(); } catch (eO) {}
+          if (ref.unlisten) {
+            try { ref.unlisten(); } catch (eU) {}
+            ref.unlisten = null;
+          }
+          if (ref.handleId != null && ota.releaseSynthEngine) {
+            try { ota.releaseSynthEngine(ref.handleId); } catch (eR) {}
+            ref.handleId = null;
+          }
+        }
+      };
+      const nodeParamSync = (c2, n2) => {
+        const lv = n2.params && n2.params.level != null ? n2.params.level : 0.35;
+        outGain.gain.value = lv;
+        if (ref.handleId != null && ota.setSynthParam) {
+          try { ota.setSynthParam(ref.handleId, "level", lv); } catch (eP) {}
+        }
+      };
+      return {
+        "in": inGain,
+        "out": outGain,
+        inPorts: null,
+        outPorts: null,
+        analysers: {},
+        nodeParamSync: nodeParamSync,
+        smartGateRuntime: null,
+        midiSink: midiSink,
+        dispose: () => midiSink.dispose(),
+        _nativeWorklet: wn
+      };
+    },
+    releaseEngine: (handle) => {
+      if (handle && typeof handle.dispose === "function") {
+        handle.dispose();
+      }
+    },
+    applyPreset: (handle, preset) => {
+      void handle;
+      void preset;
+    },
+    setParam: (handle, paramId, value, atTime) => {
+      void atTime;
+      void handle;
+      void paramId;
+      void value;
+    },
+    sendNoteEvent: (handle, ev) => {
+      if (handle && handle.midiSink) {
+        handle.midiSink.handleEvent(ev, ctxRef);
+      }
+    },
+    getMeters: (handle) => {
+      void handle;
+      return { rms: 0, peak: 0, polyphony: 0 };
+    },
+    requestQualityProfile: (handle, next) => {
+      void handle;
+      void next;
+    }
+  };
+}

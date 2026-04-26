@@ -1,0 +1,24 @@
+import { buildPresetSet } from "../common.tish"
+import { analogPolyView, analogPolyPaintScene, analogPolyInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const analog_poly_juniper_type = "analog_poly_juniper";
+export const analog_poly_juniper_category = "INSTRUMENTS";
+export const analog_poly_juniper_metadata = {
+  label: "Analog Poly Juniper",
+  color: "from-orange-500 to-amber-800",
+  theme: "dark",
+  defaultParams: { level: 0.5, tone: 0.62, motion: 0.34 },
+  presets: buildPresetSet("Juniper", 24, { level: 0.5, tone: 0.62, motion: 0.34 })
+};
+export const analog_poly_juniper_layout = { width: 640, height: 216 };
+export const analog_poly_juniper_View = analogPolyView;
+export const analog_poly_juniper_paintScene = analogPolyPaintScene;
+export const analog_poly_juniper_inputBindings = analogPolyInputBindings;
+export const analog_poly_juniper_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.5, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.62, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.34, taper: "lin" }
+];
+export const analog_poly_juniper_requirements = { irVersion: 1 };
+export const analog_poly_juniper_buildAudio = makeEngineBuildAudio("analog_poly_juniper");

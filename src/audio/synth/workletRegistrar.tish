@@ -1,0 +1,16 @@
+const __registered = {};
+
+export async fn ensureWorklet(ctx, moduleHref) {
+  const k = String(moduleHref || "");
+  if (!k.length) return false;
+  if (__registered[k] === true) return true;
+  if (!ctx || !ctx.audioWorklet || typeof ctx.audioWorklet.addModule !== "function") return false;
+  try {
+    await ctx.audioWorklet.addModule(k);
+    __registered[k] = true;
+    return true;
+  } catch (e0) {
+    console.warn("[SynthSDK] worklet load failed", k, e0);
+    return false;
+  }
+}

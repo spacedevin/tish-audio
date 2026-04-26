@@ -1,5 +1,6 @@
 import { scene, Rect, Path, Text, Group, BlurFilter } from "./prims.tish"
 import { pedalNodePrims, rackNodePrims, vuNodePrims, consoleNodePrims, graphicEqNodePrims } from "./widgets/nodesPrims.tish"
+import { modulePaintScene } from "./moduleRegistry.tish"
 
 const PB_JACK_PROTRUDE = 13;
 
@@ -13,6 +14,7 @@ fn pbGetNodeSize(node) {
   else if (nt === "midi_semantic_splitter") { w = 640; h = 216; }
   else if (nt === "midi_channel_splitter") { w = 280; h = 220; }
   else if (nt === "smk25_face") { w = 300; h = 460; }
+  else if (nt === "pad_micro" || nt === "analog_poly_juniper" || nt === "fm_4op" || nt === "wavetable_morph" || nt === "organ_drawbars" || nt === "drum_machine_xr" || nt === "rompler_90s" || nt === "vocoder_pad" || nt === "analog_mono_lead") { w = 640; h = 216; }
   return { w: w, h: h };
 }
 
@@ -77,6 +79,24 @@ export fn buildPatchBoardScene(nodes, connections, w, h, dashSeconds) {
     const n = nn[ni];
     ni = ni + 1;
     const sz = pbGetNodeSize(n);
+
+    const irScene = modulePaintScene(n["type"], { node: n });
+    if (irScene && Array.isArray(irScene.primitives) && irScene.primitives.length) {
+      let pi = 0;
+      while (pi < irScene.primitives.length) {
+        rows.push(irScene.primitives[pi]);
+        pi = pi + 1;
+      }
+      if (Array.isArray(irScene.resources)) {
+        let ri = 0;
+        while (ri < irScene.resources.length) {
+          res.push(irScene.resources[ri]);
+          ri = ri + 1;
+        }
+      }
+      continue;
+    }
+
     if (n["type"] === "master_eq" || n["type"] === "graphic_eq") {
       rows.push(graphicEqNodePrims(n, n.x, n.y, sz.w, sz.h));
     } else if (n["type"] === "console_mixer") {

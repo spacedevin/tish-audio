@@ -1,0 +1,24 @@
+import { buildPresetSet } from "../common.tish"
+import { rompler90sView, rompler90sPaintScene, rompler90sInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const rompler_90s_type = "rompler_90s";
+export const rompler_90s_category = "INSTRUMENTS";
+export const rompler_90s_metadata = {
+  label: "Rompler 90s",
+  color: "from-blue-600 to-blue-900",
+  theme: "dark",
+  defaultParams: { level: 0.5, tone: 0.52, motion: 0.48 },
+  presets: buildPresetSet("ROM", 180, { level: 0.5, tone: 0.52, motion: 0.48 })
+};
+export const rompler_90s_layout = { width: 640, height: 216 };
+export const rompler_90s_View = rompler90sView;
+export const rompler_90s_paintScene = rompler90sPaintScene;
+export const rompler_90s_inputBindings = rompler90sInputBindings;
+export const rompler_90s_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.5, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.52, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.48, taper: "lin" }
+];
+export const rompler_90s_requirements = { irVersion: 1, sampleBanks: [] };
+export const rompler_90s_buildAudio = makeEngineBuildAudio("rompler_90s");

@@ -1,0 +1,110 @@
+/**
+ * AudioWorklet backend: loads compiled *.worklet.js and exposes standard handle shape.
+ */
+
+import { isSynthWorkletReady } from "../../synth/workletPreload.tish"
+
+export fn createWorkletBackend() {
+  let ctxRef = null;
+  return {
+    mount: (ctx) => {
+      ctxRef = ctx;
+    },
+    unmount: () => {
+      ctxRef = null;
+    },
+    capabilities: () => {
+      return {
+        oversample: 4,
+        zdfFilter: true,
+        mseg: true,
+        polyphonyMax: 16,
+        latencyMs: 6,
+        worklet: true,
+        nativeStream: false
+      };
+    },
+    allocateEngine: (spec, qualityProfile, node) => {
+      void qualityProfile;
+      if (!ctxRef || !ctxRef.audioWorklet) {
+        return null;
+      }
+      const nodeName = String(spec.processorName || "smoke-sine");
+      if (!isSynthWorkletReady(ctxRef, nodeName)) {
+        return null;
+      }
+      const wn = new AudioWorkletNode(ctxRef, nodeName, {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1]
+      });
+      const inGain = ctxRef.createGain();
+      inGain.gain.value = 0;
+      const outGain = ctxRef.createGain();
+      const lvl = node.params && node.params.level != null ? node.params.level : 0.35;
+      outGain.gain.value = lvl;
+      wn.connect(outGain);
+      const midiSink = {
+        handleEvent: (ev, c2) => {
+          if (!ev || !wn.port) {
+            return;
+          }
+          wn.port.postMessage(ev);
+        },
+        getActivity: () => ({ last: nodeName, vel: 100 }),
+        dispose: () => {
+          try { wn.disconnect(); } catch (e0) {}
+          try { outGain.disconnect(); } catch (e1) {}
+        }
+      };
+      const nodeParamSync = (c2, n2) => {
+        const lv = n2.params && n2.params.level != null ? n2.params.level : 0.35;
+        outGain.gain.value = lv;
+        if (wn.port) {
+          wn.port.postMessage({ kind: "params", params: n2.params || {} });
+        }
+      };
+      return {
+        "in": inGain,
+        "out": outGain,
+        inPorts: null,
+        outPorts: null,
+        analysers: {},
+        nodeParamSync: nodeParamSync,
+        smartGateRuntime: null,
+        midiSink: midiSink,
+        dispose: () => midiSink.dispose(),
+        _worklet: wn
+      };
+    },
+    releaseEngine: (handle) => {
+      if (handle && typeof handle.dispose === "function") {
+        handle.dispose();
+      }
+    },
+    applyPreset: (handle, preset) => {
+      if (handle && handle._worklet && handle._worklet.port) {
+        handle._worklet.port.postMessage({ kind: "preset", preset: preset });
+      }
+    },
+    setParam: (handle, paramId, value, atTime) => {
+      void atTime;
+      if (handle && handle._worklet && handle._worklet.port) {
+        handle._worklet.port.postMessage({ kind: "param", id: paramId, value: value });
+      }
+    },
+    sendNoteEvent: (handle, ev) => {
+      if (handle && handle.midiSink) {
+        handle.midiSink.handleEvent(ev, ctxRef);
+      }
+    },
+    getMeters: (handle) => {
+      void handle;
+      return { rms: 0, peak: 0, polyphony: 0 };
+    },
+    requestQualityProfile: (handle, next) => {
+      void handle;
+      void next;
+    }
+  };
+}

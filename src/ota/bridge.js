@@ -20,6 +20,19 @@ window.__OTA_BRIDGE__ = {
     listen("native-midi-chunk", (event) => {
       handler(event.payload);
     }),
+  createSynthEngine: (spec, sampleRate) =>
+    invoke("create_synth_engine", { spec, sampleRate: sampleRate ?? 48000 }),
+  releaseSynthEngine: (handleId) => invoke("release_synth_engine", { handleId }),
+  applySynthPreset: (handleId, preset) =>
+    invoke("apply_synth_preset", { handleId, preset }),
+  setSynthParam: (handleId, paramId, value) =>
+    invoke("set_synth_param", { handleId, paramId, value }),
+  sendSynthNoteEvent: (handleId, event) =>
+    invoke("send_synth_note_event", { handleId, event }),
+  listenNativeSynthAudioChunk: (handler) =>
+    listen("native-synth-chunk", (event) => {
+      handler(event.payload);
+    }),
   /** macOS overlay title bar: CSS drag regions are unreliable; use Tauri 2 `startDragging` from a pointer event. */
   startWindowDrag: () => {
     if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {

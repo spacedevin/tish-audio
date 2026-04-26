@@ -1,0 +1,230 @@
+/**
+ * Backend-agnostic engine specification (no WebAudio types).
+ * Backends compile this IR to WebAudio nodes, AudioWorklet processors, or native DSP.
+ */
+
+export const ENGINE_VOICING_POLY = "poly";
+export const ENGINE_VOICING_MONO = "mono";
+
+export const OSC_SINE = "sine";
+export const OSC_SAW = "saw";
+export const OSC_SQUARE = "square";
+export const OSC_POLYBLEP_SAW = "polyblep_saw";
+export const OSC_POLYBLEP_SQUARE = "polyblep_square";
+export const OSC_FM_OP = "fm_op";
+export const OSC_WAVETABLE = "wavetable";
+
+export const FILT_NONE = "none";
+export const FILT_BIQUAD_LP = "biquad_lp";
+export const FILT_SVF_LP = "svf_lp";
+export const FILT_LADDER = "ladder";
+
+export fn makeParam(id, label, min, max, defVal, curve) {
+  return {
+    id: String(id),
+    label: String(label || id),
+    min: min,
+    max: max,
+    defaultValue: defVal,
+    curve: curve || "linear"
+  };
+}
+
+export fn makeVoicing(mode, polyphony, glideMs) {
+  return {
+    mode: mode,
+    polyphony: polyphony,
+    glideMs: glideMs != null ? glideMs : 0
+  };
+}
+
+export fn makeEngineSpec(id, version, voicing, processorName, params, extras) {
+  return {
+    id: String(id),
+    version: Number(version) || 1,
+    voicing: voicing,
+    processorName: String(processorName),
+    params: params || [],
+    oscillators: extras && extras.oscillators ? extras.oscillators : [],
+    filters: extras && extras.filters ? extras.filters : [],
+    envelopes: extras && extras.envelopes ? extras.envelopes : [],
+    lfos: extras && extras.lfos ? extras.lfos : [],
+    modMatrix: extras && extras.modMatrix ? extras.modMatrix : [],
+    fx: extras && extras.fx ? extras.fx : [],
+    drive: extras && extras.drive != null ? extras.drive : 0,
+    oversample: extras && extras.oversample != null ? extras.oversample : 1,
+    requirements: extras && extras.requirements ? extras.requirements : {},
+    liteVoice: extras && extras.liteVoice ? extras.liteVoice : { osc: OSC_SAW, filt: FILT_BIQUAD_LP }
+  };
+}
+
+export fn specFmMatrixPro() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.35, "linear"),
+    makeParam("brightness", "Brightness", 0, 1, 0.55, "linear"),
+    makeParam("motion", "Motion", 0, 1, 0.35, "linear"),
+    makeParam("feedback", "FB", 0, 1, 0.2, "linear"),
+    makeParam("algorithm", "Algo", 0, 1, 0.2, "linear")
+  ];
+  return makeEngineSpec("fm_matrix_pro", 2, makeVoicing(ENGINE_VOICING_POLY, 16, 0), "fm-matrix", params, {
+    oscillators: [{ kind: OSC_FM_OP, count: 6 }],
+    filters: [{ kind: FILT_SVF_LP }],
+    oversample: 4,
+    liteVoice: { osc: OSC_SINE, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specHybridToxicX() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.35, "linear"),
+    makeParam("tone", "Tone", 0, 1, 0.5, "linear"),
+    makeParam("motion", "Motion", 0, 1, 0.4, "linear"),
+    makeParam("morph", "X/Y", 0, 1, 0.35, "linear")
+  ];
+  return makeEngineSpec("hybrid_toxic_x", 1, makeVoicing(ENGINE_VOICING_POLY, 12, 0), "hybrid-x", params, {
+    oscillators: [{ kind: OSC_POLYBLEP_SAW }, { kind: OSC_FM_OP }, { kind: OSC_WAVETABLE }],
+    filters: [{ kind: FILT_SVF_LP }, { kind: FILT_SVF_LP }],
+    oversample: 4,
+    liteVoice: { osc: OSC_SAW, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specWavetablePro() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.35, "linear"),
+    makeParam("position", "Scan", 0, 1, 0.4, "linear"),
+    makeParam("formant", "Formant", 0, 1, 0.25, "linear"),
+    makeParam("morph", "Morph", 0, 1, 0.45, "linear")
+  ];
+  return makeEngineSpec("wavetable_pro", 1, makeVoicing(ENGINE_VOICING_POLY, 12, 0), "wavetable-pro", params, {
+    oscillators: [{ kind: OSC_WAVETABLE }],
+    filters: [{ kind: FILT_SVF_LP }],
+    liteVoice: { osc: OSC_SAW, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specAnalogPoly() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.35, "linear"),
+    makeParam("cutoff", "Cutoff", 0, 1, 0.45, "linear"),
+    makeParam("res", "Res", 0, 1, 0.25, "linear"),
+    makeParam("chorus", "BBD", 0, 1, 0.35, "linear")
+  ];
+  return makeEngineSpec("analog_poly", 1, makeVoicing(ENGINE_VOICING_POLY, 8, 0), "analog-poly", params, {
+    oscillators: [{ kind: OSC_POLYBLEP_SAW }, { kind: OSC_SINE }],
+    filters: [{ kind: FILT_LADDER }],
+    liteVoice: { osc: OSC_SAW, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specAnalogMono() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.4, "linear"),
+    makeParam("cutoff", "Cutoff", 0, 1, 0.5, "linear"),
+    makeParam("glide", "Glide", 0, 1, 0.2, "linear"),
+    makeParam("drive", "Drive", 0, 1, 0.15, "linear")
+  ];
+  return makeEngineSpec("analog_mono", 1, makeVoicing(ENGINE_VOICING_MONO, 1, 120), "analog-mono", params, {
+    oscillators: [{ kind: OSC_POLYBLEP_SAW }, { kind: OSC_SINE }],
+    filters: [{ kind: FILT_LADDER }],
+    liteVoice: { osc: OSC_SQUARE, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specOrgan() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.35, "linear"),
+    makeParam("draw", "Draw", 0, 1, 0.55, "linear"),
+    makeParam("leslie", "Leslie", 0, 1, 0.4, "linear"),
+    makeParam("perc", "Perc", 0, 1, 0.2, "linear")
+  ];
+  return makeEngineSpec("organ", 1, makeVoicing(ENGINE_VOICING_POLY, 16, 0), "organ", params, {
+    oscillators: [{ kind: OSC_SINE, partials: 9 }],
+    filters: [{ kind: FILT_NONE }],
+    liteVoice: { osc: OSC_SINE, filt: FILT_NONE }
+  });
+}
+
+export fn specDrumXr() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.45, "linear"),
+    makeParam("tune", "Tune", 0, 1, 0.5, "linear"),
+    makeParam("decay", "Decay", 0, 1, 0.45, "linear"),
+    makeParam("drive", "Punch", 0, 1, 0.35, "linear")
+  ];
+  return makeEngineSpec("drum_xr", 1, makeVoicing(ENGINE_VOICING_POLY, 8, 0), "drum-xr", params, {
+    liteVoice: { osc: OSC_SINE, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specRompler() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.4, "linear"),
+    makeParam("tone", "Tone", 0, 1, 0.5, "linear"),
+    makeParam("release", "Release", 0, 1, 0.35, "linear"),
+    makeParam("start", "Start", 0, 1, 0, "linear")
+  ];
+  return makeEngineSpec("rompler", 1, makeVoicing(ENGINE_VOICING_POLY, 12, 0), "rompler", params, {
+    liteVoice: { osc: OSC_SINE, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specVocoder() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.35, "linear"),
+    makeParam("formant", "Formant", 0, 1, 0.5, "linear"),
+    makeParam("bands", "Bands", 0, 1, 0.65, "linear"),
+    makeParam("carrier", "Carrier", 0, 1, 0.45, "linear")
+  ];
+  return makeEngineSpec("vocoder", 1, makeVoicing(ENGINE_VOICING_POLY, 8, 0), "vocoder", params, {
+    liteVoice: { osc: OSC_SAW, filt: FILT_BIQUAD_LP }
+  });
+}
+
+export fn specPadAmbient() {
+  const params = [
+    makeParam("level", "Level", 0, 1, 0.35, "linear"),
+    makeParam("space", "Space", 0, 1, 0.55, "linear"),
+    makeParam("diffusion", "Diffusion", 0, 1, 0.45, "linear"),
+    makeParam("damp", "Damp", 0, 1, 0.35, "linear")
+  ];
+  return makeEngineSpec("pad_ambient", 1, makeVoicing(ENGINE_VOICING_POLY, 8, 0), "pad-ambient", params, {
+    filters: [{ kind: FILT_SVF_LP }, { kind: FILT_SVF_LP }],
+    liteVoice: { osc: OSC_SINE, filt: FILT_SVF_LP }
+  });
+}
+
+export fn specForModuleType(moduleType) {
+  const t = String(moduleType);
+  if (t === "fm_4op") {
+    return specFmMatrixPro();
+  }
+  if (t === "hybrid_toxic_x") {
+    return specHybridToxicX();
+  }
+  if (t === "wavetable_morph") {
+    return specWavetablePro();
+  }
+  if (t === "analog_poly_juniper") {
+    return specAnalogPoly();
+  }
+  if (t === "analog_mono_lead") {
+    return specAnalogMono();
+  }
+  if (t === "organ_drawbars") {
+    return specOrgan();
+  }
+  if (t === "drum_machine_xr") {
+    return specDrumXr();
+  }
+  if (t === "rompler_90s") {
+    return specRompler();
+  }
+  if (t === "vocoder_pad") {
+    return specVocoder();
+  }
+  if (t === "pad_micro") {
+    return specPadAmbient();
+  }
+  return null;
+}

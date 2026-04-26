@@ -1,0 +1,28 @@
+import { MODULE_REGISTRY } from "../modules/registry.tish"
+import { validateRackManifest, normalizeRackManifest } from "./manifest.tish"
+
+export fn builtinsAsManifests() {
+  const keys = Object.keys(MODULE_REGISTRY);
+  const out = [];
+  let i = 0;
+  while (i < keys.length) {
+    const type = keys[i];
+    i = i + 1;
+    const mod = MODULE_REGISTRY[type];
+    if (!mod) continue;
+    const manifest = {
+      id: String(type),
+      name: mod.metadata && mod.metadata.label ? String(mod.metadata.label) : String(type),
+      version: "1.0.0",
+      era: "builtin",
+      requirements: { irVersion: 1 },
+      paintSceneRef: String(type) + ".paintScene",
+      audioBuildRef: String(type) + ".buildAudio",
+      presets: [],
+      license: "builtin"
+    };
+    const v = validateRackManifest(manifest);
+    if (v.ok) out.push(normalizeRackManifest(manifest));
+  }
+  return out;
+}

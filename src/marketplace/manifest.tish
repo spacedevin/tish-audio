@@ -1,0 +1,27 @@
+export fn validateRackManifest(m) {
+  if (!m || typeof m !== "object") return { ok: false, reason: "manifest must be object" };
+  const required = ["id", "name", "version", "era", "requirements", "paintSceneRef", "audioBuildRef", "presets", "license"];
+  let i = 0;
+  while (i < required.length) {
+    const k = required[i];
+    if (m[k] == null) return { ok: false, reason: "missing " + k };
+    i = i + 1;
+  }
+  if (!Array.isArray(m.presets)) return { ok: false, reason: "presets must be array" };
+  return { ok: true, reason: "ok" };
+}
+
+export fn normalizeRackManifest(m) {
+  return {
+    id: String(m.id || ""),
+    name: String(m.name || ""),
+    version: String(m.version || "0.0.0"),
+    era: String(m.era || "modern"),
+    requirements: m.requirements || { irVersion: 1 },
+    paintSceneRef: String(m.paintSceneRef || ""),
+    audioBuildRef: String(m.audioBuildRef || ""),
+    presets: Array.isArray(m.presets) ? m.presets : [],
+    sampleBanks: Array.isArray(m.sampleBanks) ? m.sampleBanks : [],
+    license: String(m.license || "proprietary")
+  };
+}

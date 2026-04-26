@@ -1,0 +1,131 @@
+import { registerWorkletProcessor } from "../processorShell.tish"
+import { envInit, envSetSampleRate, envTrigger, envTick, envRelease } from "../lib/mseg.tish"
+
+export fn hzFromMidi(n) {
+  return 440 * Math.pow(2, (n - 69) / 12);
+}
+
+export fn organConstructor() {
+  AudioWorkletProcessor.call(this);
+  this.voices = [];
+  let i = 0;
+  while (i < 12) {
+    this.voices.push({
+      active: 0,
+      note: 0,
+      ph: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+      env: envInit(),
+      rootHz: 220,
+      vel: 0.7
+    });
+    i = i + 1;
+  }
+  this.params = { draw: 0.55, leslie: 0.4, perc: 0.2 };
+  this.srReady = 0;
+  this.lesPh = 0;
+  this.port.onmessage = (e) => {
+    const d = e.data;
+    if (!d) {
+      return;
+    }
+    if (d.kind === "params" && d.params) {
+      this.params = { ...this.params, ...d.params };
+      return;
+    }
+    if (d.kind === "noteOn") {
+      const note = d.note != null ? d.note : 60;
+      const vel = d.velocity != null ? d.velocity : 96;
+      let slot = -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        if (this.voices[j].active === 0) {
+          slot = j;
+          break;
+        }
+        j = j + 1;
+      }
+      if (slot < 0) {
+        slot = 0;
+      }
+      const v = this.voices[slot];
+      v.active = 1;
+      v.note = note;
+      v.rootHz = hzFromMidi(note);
+      v.vel = Math.max(0.05, Math.min(1, vel / 127));
+      let k = 0;
+      while (k < 9) {
+        v.ph[k] = 0;
+        k = k + 1;
+      }
+      const pk = this.params.perc != null ? this.params.perc : 0.2;
+      envTrigger(v.env, v.vel, 0.001, 0.05 + pk * 0.15, 0.85, 0.08 + pk * 0.2);
+      return;
+    }
+    if (d.kind === "noteOff") {
+      const note = d.note != null ? d.note : -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        const v = this.voices[j];
+        if (v.active && v.note === note) {
+          envRelease(v.env);
+        }
+        j = j + 1;
+      }
+    }
+  };
+}
+
+export fn organProcess(inputs, outputs, parameters) {
+  const sr = sampleRate;
+  if (this.srReady === 0) {
+    let i = 0;
+    while (i < this.voices.length) {
+      envSetSampleRate(this.voices[i].env, sr);
+      i = i + 1;
+    }
+    this.srReady = 1;
+  }
+  const ratios = [0.5, 1.5, 2, 3, 4, 5, 6, 8, 10];
+  const amps = [0.35, 0.5, 0.55, 0.45, 0.4, 0.32, 0.28, 0.22, 0.18];
+  const out0 = outputs[0][0];
+  const dr = this.params.draw != null ? this.params.draw : (this.params.tone != null ? this.params.tone : 0.55);
+  const les = this.params.leslie != null ? this.params.leslie : 0.4;
+  let si = 0;
+  while (si < out0.length) {
+    this.lesPh = this.lesPh + (2 + les * 4) / sr;
+    const lfo = Math.sin(6.283185307179586 * this.lesPh) * les * 0.02;
+    let acc = 0;
+    let j = 0;
+    while (j < this.voices.length) {
+      const v = this.voices[j];
+      j = j + 1;
+      if (!v.active) {
+        continue;
+      }
+      const eg = envTick(v.env);
+      if (eg <= 0.00001 && v.env.stage === 0) {
+        v.active = 0;
+        continue;
+      }
+      const fund = v.rootHz * (1 + lfo);
+      let part = 0;
+      let k = 0;
+      while (k < 9) {
+        const hz = fund * ratios[k] * (0.85 + dr * 0.35);
+        v.ph[k] = v.ph[k] + hz / sr;
+        part = part + Math.sin(6.283185307179586 * v.ph[k]) * amps[k] * (0.3 + dr * 0.7);
+        k = k + 1;
+      }
+      acc = acc + part * eg * 0.06 * v.vel;
+    }
+    out0[si] = Math.max(-1, Math.min(1, acc));
+    si = si + 1;
+  }
+  return true;
+}
+
+export fn registerOrgan() {
+  registerWorkletProcessor("organ", organConstructor, organProcess);
+}
+
+registerOrgan();

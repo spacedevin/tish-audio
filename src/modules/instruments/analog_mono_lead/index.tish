@@ -1,0 +1,24 @@
+import { buildPresetSet } from "../common.tish"
+import { analogMonoView, analogMonoPaintScene, analogMonoInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const analog_mono_lead_type = "analog_mono_lead";
+export const analog_mono_lead_category = "INSTRUMENTS";
+export const analog_mono_lead_metadata = {
+  label: "Analog Mono Lead",
+  color: "from-amber-600 to-orange-900",
+  theme: "dark",
+  defaultParams: { level: 0.5, tone: 0.67, motion: 0.31 },
+  presets: buildPresetSet("Mono", 16, { level: 0.5, tone: 0.67, motion: 0.31 })
+};
+export const analog_mono_lead_layout = { width: 640, height: 216 };
+export const analog_mono_lead_View = analogMonoView;
+export const analog_mono_lead_paintScene = analogMonoPaintScene;
+export const analog_mono_lead_inputBindings = analogMonoInputBindings;
+export const analog_mono_lead_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.5, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.67, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.31, taper: "lin" }
+];
+export const analog_mono_lead_requirements = { irVersion: 1 };
+export const analog_mono_lead_buildAudio = makeEngineBuildAudio("analog_mono_lead");

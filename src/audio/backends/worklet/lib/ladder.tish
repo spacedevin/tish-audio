@@ -1,0 +1,19 @@
+/** Simplified Moog-style ladder (4 one-pole stages + feedback). */
+
+export fn ladderInit() {
+  return { z0: 0, z1: 0, z2: 0, z3: 0 };
+}
+
+export fn ladderTick(s, input, cutoffHz, res, sampleRate, drive) {
+  const f = 2 * Math.sin(3.141592653589793 * Math.min(0.49, cutoffHz / sampleRate));
+  const fb = res * 4 * (1 - 0.15 * f);
+  let x = input - fb * s.z3;
+  if (drive > 0.001) {
+    x = Math.tanh(x * (1 + drive * 8));
+  }
+  s.z0 = s.z0 + f * (x - s.z0);
+  s.z1 = s.z1 + f * (s.z0 - s.z1);
+  s.z2 = s.z2 + f * (s.z1 - s.z2);
+  s.z3 = s.z3 + f * (s.z2 - s.z3);
+  return s.z3;
+}

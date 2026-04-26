@@ -1,0 +1,26 @@
+import { buildPresetSet } from "../common.tish"
+import { fmMatrixProView, fmMatrixProPaintScene, fmMatrixProInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const fm_4op_type = "fm_4op";
+export const fm_4op_category = "INSTRUMENTS";
+export const fm_4op_metadata = {
+  label: "FM Matrix Pro",
+  color: "from-amber-700 to-yellow-900",
+  theme: "dark",
+  defaultParams: { level: 0.46, tone: 0.56, motion: 0.52, feedback: 0.2, algorithm: 0.2 },
+  presets: buildPresetSet("FM4", 32, { level: 0.46, tone: 0.56, motion: 0.52, feedback: 0.2, algorithm: 0.2 })
+};
+export const fm_4op_layout = { width: 640, height: 216 };
+export const fm_4op_View = fmMatrixProView;
+export const fm_4op_paintScene = fmMatrixProPaintScene;
+export const fm_4op_inputBindings = fmMatrixProInputBindings;
+export const fm_4op_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.46, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.56, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.52, taper: "lin" },
+  { id: "feedback", min: 0, max: 1, def: 0.2, taper: "lin" },
+  { id: "algorithm", min: 0, max: 1, def: 0.2, taper: "lin" }
+];
+export const fm_4op_requirements = { irVersion: 1, workletUrls: [] };
+export const fm_4op_buildAudio = makeEngineBuildAudio("fm_4op");

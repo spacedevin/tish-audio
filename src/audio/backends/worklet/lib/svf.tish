@@ -1,0 +1,19 @@
+/** ZDF-style state-variable filter (Chamberlin / TPT-style numerics). */
+
+export fn svfInit() {
+  return { ic1: 0, ic2: 0 };
+}
+
+export fn svfTick(s, input, cutoffHz, res, sampleRate) {
+  const g = Math.tan(3.141592653589793 * cutoffHz / sampleRate);
+  const k = 2 - 2 * res;
+  const a1 = 1 / (1 + g * (g + k));
+  const a2 = g * a1;
+  const a3 = g * a2;
+  const v0 = a1 * input - a2 * s.ic1 - a3 * s.ic2;
+  const v1 = a2 * input + a2 * v0 + a1 * s.ic1;
+  const v2 = a3 * input + a3 * v0 + a2 * s.ic1 + s.ic2;
+  s.ic1 = 2 * v1 - s.ic1;
+  s.ic2 = 2 * v2 - s.ic2;
+  return { lp: v2, bp: v1, hp: v0 - k * v1 - v2 };
+}

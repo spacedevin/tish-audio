@@ -1,0 +1,116 @@
+import { registerWorkletProcessor } from "../processorShell.tish"
+import { envInit, envSetSampleRate, envTrigger, envTick, envRelease } from "../lib/mseg.tish"
+import { svfInit, svfTick } from "../lib/svf.tish"
+
+export fn hzFromMidi(n) {
+  return 440 * Math.pow(2, (n - 69) / 12);
+}
+
+export fn wtConstructor() {
+  AudioWorkletProcessor.call(this);
+  this.voices = [];
+  let i = 0;
+  while (i < 10) {
+    this.voices.push({ active: 0, note: 0, ph: 0, ph2: 0, env: envInit(), svf: svfInit(), hz: 220, vel: 0.7 });
+    i = i + 1;
+  }
+  this.params = { position: 0.4, formant: 0.25, morph: 0.45 };
+  this.srReady = 0;
+  this.port.onmessage = (e) => {
+    const d = e.data;
+    if (!d) {
+      return;
+    }
+    if (d.kind === "params" && d.params) {
+      this.params = { ...this.params, ...d.params };
+      return;
+    }
+    if (d.kind === "noteOn") {
+      const note = d.note != null ? d.note : 60;
+      const vel = d.velocity != null ? d.velocity : 100;
+      let slot = -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        if (this.voices[j].active === 0) {
+          slot = j;
+          break;
+        }
+        j = j + 1;
+      }
+      if (slot < 0) {
+        slot = 0;
+      }
+      const v = this.voices[slot];
+      v.active = 1;
+      v.note = note;
+      v.hz = hzFromMidi(note);
+      v.vel = Math.max(0.05, Math.min(1, vel / 127));
+      v.ph = 0;
+      v.ph2 = 0;
+      envTrigger(v.env, v.vel, 0.006, 0.18, 0.68, 0.45);
+      return;
+    }
+    if (d.kind === "noteOff") {
+      const note = d.note != null ? d.note : -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        const v = this.voices[j];
+        if (v.active && v.note === note) {
+          envRelease(v.env);
+        }
+        j = j + 1;
+      }
+    }
+  };
+}
+
+export fn wtProcess(inputs, outputs, parameters) {
+  const sr = sampleRate;
+  if (this.srReady === 0) {
+    let i = 0;
+    while (i < this.voices.length) {
+      envSetSampleRate(this.voices[i].env, sr);
+      i = i + 1;
+    }
+    this.srReady = 1;
+  }
+  const out0 = outputs[0][0];
+  const pos = this.params.position != null ? this.params.position : (this.params.tone != null ? this.params.tone : 0.4);
+  const form = this.params.formant != null ? this.params.formant : 0.25;
+  const morph = this.params.morph != null ? this.params.morph : 0.45;
+  let si = 0;
+  while (si < out0.length) {
+    let acc = 0;
+    let j = 0;
+    while (j < this.voices.length) {
+      const v = this.voices[j];
+      j = j + 1;
+      if (!v.active) {
+        continue;
+      }
+      const eg = envTick(v.env);
+      if (eg <= 0.00001 && v.env.stage === 0) {
+        v.active = 0;
+        continue;
+      }
+      const dt = v.hz / sr;
+      v.ph = v.ph + dt;
+      v.ph2 = v.ph2 + dt * (2 + pos * 4);
+      let w = Math.sin(6.283185307179586 * v.ph);
+      const w2 = Math.sin(6.283185307179586 * (v.ph * (1 + form * 3) + v.ph2 * morph));
+      w = Math.tanh(w * (1.2 + morph * 2) + w2 * 0.45);
+      const cut = 350 + pos * 9000 + form * 3000;
+      const f = svfTick(v.svf, w, cut, 0.18, sr);
+      acc = acc + f.lp * eg * 0.22;
+    }
+    out0[si] = Math.max(-1, Math.min(1, acc));
+    si = si + 1;
+  }
+  return true;
+}
+
+export fn registerWt() {
+  registerWorkletProcessor("wavetable-pro", wtConstructor, wtProcess);
+}
+
+registerWt();

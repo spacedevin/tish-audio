@@ -1,0 +1,21 @@
+export fn createLfo(ctx, opts) {
+  const o = opts || {};
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = o.type || "sine";
+  osc.frequency.value = Number(o.rateHz) || 5;
+  gain.gain.value = Number(o.depth) || 0;
+  osc.connect(gain);
+  osc.start();
+  return {
+    osc: osc,
+    out: gain,
+    setRate: (hz) => { try { osc.frequency.setValueAtTime(Number(hz) || 0, ctx.currentTime); } catch (e1) {} },
+    setDepth: (d) => { try { gain.gain.setValueAtTime(Number(d) || 0, ctx.currentTime); } catch (e2) {} },
+    dispose: () => {
+      try { osc.stop(); } catch (e3) {}
+      try { osc.disconnect(); } catch (e4) {}
+      try { gain.disconnect(); } catch (e5) {}
+    }
+  };
+}

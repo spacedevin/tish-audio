@@ -1,0 +1,127 @@
+import { registerWorkletProcessor } from "../processorShell.tish"
+import { envInit, envSetSampleRate, envTrigger, envTick, envRelease } from "../lib/mseg.tish"
+import { svfInit, svfTick } from "../lib/svf.tish"
+
+export fn hzFromMidi(n) {
+  return 440 * Math.pow(2, (n - 69) / 12);
+}
+
+export fn padConstructor() {
+  AudioWorkletProcessor.call(this);
+  this.voices = [];
+  let i = 0;
+  while (i < 8) {
+    this.voices.push({
+      active: 0,
+      note: 0,
+      ph: 0,
+      env: envInit(),
+      svf1: svfInit(),
+      svf2: svfInit(),
+      hz: 220,
+      vel: 0.7,
+      fb1: 0,
+      fb2: 0
+    });
+    i = i + 1;
+  }
+  this.params = { space: 0.55, diffusion: 0.45, damp: 0.35 };
+  this.srReady = 0;
+  this.port.onmessage = (e) => {
+    const d = e.data;
+    if (!d) {
+      return;
+    }
+    if (d.kind === "params" && d.params) {
+      this.params = { ...this.params, ...d.params };
+      return;
+    }
+    if (d.kind === "noteOn") {
+      const note = d.note != null ? d.note : 60;
+      const vel = d.velocity != null ? d.velocity : 90;
+      let slot = -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        if (this.voices[j].active === 0) {
+          slot = j;
+          break;
+        }
+        j = j + 1;
+      }
+      if (slot < 0) {
+        slot = 0;
+      }
+      const v = this.voices[slot];
+      v.active = 1;
+      v.note = note;
+      v.hz = hzFromMidi(note);
+      v.vel = Math.max(0.05, Math.min(1, vel / 127));
+      v.ph = 0;
+      v.fb1 = 0;
+      v.fb2 = 0;
+      envTrigger(v.env, v.vel, 0.04, 0.25, 0.82, 1.2);
+      return;
+    }
+    if (d.kind === "noteOff") {
+      const note = d.note != null ? d.note : -1;
+      let j = 0;
+      while (j < this.voices.length) {
+        const v = this.voices[j];
+        if (v.active && v.note === note) {
+          envRelease(v.env);
+        }
+        j = j + 1;
+      }
+    }
+  };
+}
+
+export fn padProcess(inputs, outputs, parameters) {
+  const sr = sampleRate;
+  if (this.srReady === 0) {
+    let i = 0;
+    while (i < this.voices.length) {
+      envSetSampleRate(this.voices[i].env, sr);
+      i = i + 1;
+    }
+    this.srReady = 1;
+  }
+  const out0 = outputs[0][0];
+  const sp = this.params.space != null ? this.params.space : (this.params.motion != null ? this.params.motion : 0.55);
+  const df = this.params.diffusion != null ? this.params.diffusion : 0.45;
+  const damp = this.params.damp != null ? this.params.damp : 0.35;
+  let si = 0;
+  while (si < out0.length) {
+    let acc = 0;
+    let j = 0;
+    while (j < this.voices.length) {
+      const v = this.voices[j];
+      j = j + 1;
+      if (!v.active) {
+        continue;
+      }
+      const eg = envTick(v.env);
+      if (eg <= 0.00001 && v.env.stage === 0) {
+        v.active = 0;
+        continue;
+      }
+      v.ph = v.ph + v.hz / sr;
+      let x = Math.sin(6.283185307179586 * v.ph) * 0.5;
+      x = x + v.fb1 * (0.55 + sp * 0.35);
+      const a = svfTick(v.svf1, x, 400 + damp * 6000, 0.2, sr);
+      v.fb1 = a.lp * (0.35 + df * 0.4);
+      const b = svfTick(v.svf2, a.lp, 900 + sp * 4000, 0.25, sr);
+      v.fb2 = b.lp * 0.3;
+      acc = acc + (a.lp + b.lp + v.fb2) * eg * 0.08;
+    }
+    out0[si] = Math.max(-1, Math.min(1, acc));
+    si = si + 1;
+  }
+  return true;
+}
+
+export fn registerPad() {
+  registerWorkletProcessor("pad-ambient", padConstructor, padProcess);
+}
+
+registerPad();

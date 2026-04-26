@@ -1,0 +1,24 @@
+import { buildPresetSet } from "../common.tish"
+import { vocoderPadView, vocoderPadPaintScene, vocoderPadInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const vocoder_pad_type = "vocoder_pad";
+export const vocoder_pad_category = "INSTRUMENTS";
+export const vocoder_pad_metadata = {
+  label: "Vocoder Pad",
+  color: "from-zinc-600 to-zinc-900",
+  theme: "dark",
+  defaultParams: { level: 0.44, tone: 0.57, motion: 0.5 },
+  presets: buildPresetSet("Vocoder", 12, { level: 0.44, tone: 0.57, motion: 0.5 })
+};
+export const vocoder_pad_layout = { width: 640, height: 216 };
+export const vocoder_pad_View = vocoderPadView;
+export const vocoder_pad_paintScene = vocoderPadPaintScene;
+export const vocoder_pad_inputBindings = vocoderPadInputBindings;
+export const vocoder_pad_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.44, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.57, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.5, taper: "lin" }
+];
+export const vocoder_pad_requirements = { irVersion: 1 };
+export const vocoder_pad_buildAudio = makeEngineBuildAudio("vocoder_pad");

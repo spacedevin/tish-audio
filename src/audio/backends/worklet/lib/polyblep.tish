@@ -1,0 +1,32 @@
+/** PolyBLEP anti-aliasing helpers (minimal). */
+
+export fn polyblepWrap(dt, t) {
+  if (t < dt) {
+    const x = t / dt;
+    return x + x - x * x - 1;
+  }
+  if (t > 1 - dt) {
+    const x = (t - 1) / dt;
+    return x * x + x + x + 1;
+  }
+  return 0;
+}
+
+export fn polyblepSaw(dt, phase) {
+  let t = phase - Math.floor(phase);
+  let v = 2 * t - 1;
+  v = v - polyblepWrap(dt, t);
+  return v;
+}
+
+export fn polyblepSquare(dt, phase) {
+  let t = phase - Math.floor(phase);
+  let v = t < 0.5 ? 1 : -1;
+  v = v + polyblepWrap(dt, t);
+  v = v - polyblepWrap(dt, (t + 0.5) - Math.floor(t + 0.5));
+  return v;
+}
+
+export fn blepSine(phase) {
+  return Math.sin(6.283185307179586 * phase);
+}

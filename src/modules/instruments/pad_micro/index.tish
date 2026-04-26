@@ -1,0 +1,24 @@
+import { buildPresetSet } from "../common.tish"
+import { padMicroView, padMicroPaintScene, padMicroInputBindings } from "../instrumentRacks.tish"
+import { makeEngineBuildAudio } from "../../../audio/synth/engineAdapter.tish"
+
+export const pad_micro_type = "pad_micro";
+export const pad_micro_category = "INSTRUMENTS";
+export const pad_micro_metadata = {
+  label: "Pad Micro",
+  color: "from-cyan-400 to-blue-700",
+  theme: "dark",
+  defaultParams: { level: 0.42, tone: 0.48, motion: 0.28 },
+  presets: buildPresetSet("Pad Micro", 12, { level: 0.42, tone: 0.48, motion: 0.28 })
+};
+export const pad_micro_layout = { width: 640, height: 216 };
+export const pad_micro_View = padMicroView;
+export const pad_micro_paintScene = padMicroPaintScene;
+export const pad_micro_inputBindings = padMicroInputBindings;
+export const pad_micro_parameters = [
+  { id: "level", min: 0, max: 1, def: 0.42, taper: "lin" },
+  { id: "tone", min: 0, max: 1, def: 0.48, taper: "lin" },
+  { id: "motion", min: 0, max: 1, def: 0.28, taper: "lin" }
+];
+export const pad_micro_requirements = { irVersion: 1 };
+export const pad_micro_buildAudio = makeEngineBuildAudio("pad_micro");
