@@ -73,6 +73,8 @@ const SMK_TRANSPORT_NOTES_DEFAULT = [94, 93, 95];
 const SMK_TRANSPORT_RECORDER_NOTES_DEFAULT = null;
 const SMK_TRANSPORT_LABELS = ["PLAY", "STOP", "REC"];
 const SMK_KNOB_LABELS_A = ["Mode", "Oct", "Latch", "Gate", "Swing", "Tempo", "Rate", "Transpose"];
+const SMK_OCTAVE_AUTO_MIN = DEFAULT_KEYBED_ROOT - 36;
+const SMK_OCTAVE_AUTO_MAX = DEFAULT_KEYBED_ROOT + 36;
 
 const cloneKeys = (keys) => {
   const o = {};
@@ -119,6 +121,7 @@ const freshState = () => {
     transportHitAt: { play: 0, stop: 0, rec: 0 },
     pitchNorm: 0.5,
     modNorm: 0.0,
+    keybedRootDynamic: DEFAULT_KEYBED_ROOT,
     padBankB: false,
     knobBankB: false,
     lastKnobBSlot: -1
@@ -354,6 +357,7 @@ const applyMidiToState = (prev, ev, opts) => {
     transportHitAt: { play: tHitPrev.play || 0, stop: tHitPrev.stop || 0, rec: tHitPrev.rec || 0 },
     pitchNorm: prev.pitchNorm,
     modNorm: prev.modNorm,
+    keybedRootDynamic: Number.isFinite(prev.keybedRootDynamic) ? prev.keybedRootDynamic : keybedRoot,
     padBankB: prev.padBankB === true,
     knobBankB: prev.knobBankB === true,
     lastKnobBSlot: prev.lastKnobBSlot != null && Number.isFinite(prev.lastKnobBSlot) ? prev.lastKnobBSlot : -1
@@ -413,7 +417,15 @@ const applyMidiToState = (prev, ev, opts) => {
         return next;
       }
     }
-    if (n >= keybedRoot && n < keybedRoot + SMK_KEYS) {
+    let kbRoot = Number.isFinite(next.keybedRootDynamic) ? next.keybedRootDynamic : keybedRoot;
+    while (n < kbRoot && kbRoot > SMK_OCTAVE_AUTO_MIN) {
+      kbRoot = kbRoot - 12;
+    }
+    while (n >= kbRoot + SMK_KEYS && kbRoot < SMK_OCTAVE_AUTO_MAX) {
+      kbRoot = kbRoot + 12;
+    }
+    next.keybedRootDynamic = kbRoot;
+    if (n >= kbRoot && n < kbRoot + SMK_KEYS) {
       next.keys[String(n)] = vel;
     }
     return next;
@@ -444,7 +456,8 @@ const applyMidiToState = (prev, ev, opts) => {
         return next;
       }
     }
-    if (n >= keybedRoot && n < keybedRoot + SMK_KEYS) {
+    const kbRoot = Number.isFinite(next.keybedRootDynamic) ? next.keybedRootDynamic : keybedRoot;
+    if (n >= kbRoot && n < kbRoot + SMK_KEYS) {
       Reflect.deleteProperty(next.keys, String(n));
     }
     return next;
@@ -520,31 +533,127 @@ const copyEvHints = (base, ev) => {
   return o;
 };
 
-const transformSmkForwardMidi = (ev, transportFrom, transportTo, knobBNotes) => {
+const transformSmkForwardMidi = (ev, opts) => {
+  const transportFrom = opts && opts.transportFrom ? opts.transportFrom : [];
+  const knobBNotes = opts && opts.knobBNotes ? opts.knobBNotes : [];
+  const padSlotsA = opts ? opts.padSlotsA : null;
+  const padSlotsB = opts ? opts.padSlotsB : null;
+  const knobBCcs = opts && Array.isArray(opts.knobBCcs) ? opts.knobBCcs : null;
+  const knobBPort = opts && Number.isFinite(opts.knobBPort) ? opts.knobBPort : SMK_KNOB_B_PORT_DEFAULT;
+  const keybedRootDynamic = opts && Number.isFinite(opts.keybedRootDynamic) ? opts.keybedRootDynamic : DEFAULT_KEYBED_ROOT;
+  const transportLabels = ["play", "stop", "rec"];
   if (!ev || ev.kind == null) {
-    return ev;
+    return null;
   }
+  const out = { port: null, event: null };
+  const ch = ev.channel != null ? ev.channel : -1;
   if (ev.kind === "noteOn" || ev.kind === "noteOff") {
     const n = ev.note;
     if (indexInIntList(n, knobBNotes) >= 0) {
       return null;
     }
-    const ti = indexInIntList(n, transportFrom);
-    if (ti >= 0 && transportTo && transportTo[ti] != null) {
-      const o = {
+    const hitA = resolvePadSlotIdx(n, ch, padSlotsA);
+    if (hitA >= 0) {
+      const pA = { kind: ev.kind, inputId: ev.inputId, channel: 9, note: n, when: ev.when, smkRole: "padA" };
+      if (ev.velocity != null) { pA.velocity = ev.velocity; }
+      out.port = "pads";
+      out.event = copyEvHints(pA, ev);
+      return out;
+    }
+    const hitB = resolvePadSlotIdx(n, ch, padSlotsB);
+    if (hitB >= 0) {
+      const pB = { kind: ev.kind, inputId: ev.inputId, channel: 10, note: n, when: ev.when, smkRole: "padB" };
+      if (ev.velocity != null) { pB.velocity = ev.velocity; }
+      out.port = "pads";
+      out.event = copyEvHints(pB, ev);
+      return out;
+    }
+    if (indexInIntList(n, transportFrom) >= 0) {
+      const ti = indexInIntList(n, transportFrom);
+      out.port = "knobs";
+      out.event = copyEvHints({
         kind: ev.kind,
         inputId: ev.inputId,
         channel: ev.channel,
-        note: transportTo[ti],
-        when: ev.when
-      };
-      if (ev.velocity != null) {
-        o.velocity = ev.velocity;
-      }
-      return copyEvHints(o, ev);
+        note: ev.note,
+        velocity: ev.velocity,
+        when: ev.when,
+        smkRole: "transport",
+        smkTransportAction: ti >= 0 && ti < transportLabels.length ? transportLabels[ti] : null
+      }, ev);
+      return out;
     }
+    if (n >= keybedRootDynamic && n < keybedRootDynamic + SMK_KEYS) {
+      out.port = "keys";
+      out.event = copyEvHints({
+        kind: ev.kind,
+        inputId: ev.inputId,
+        channel: ev.channel,
+        note: ev.note,
+        velocity: ev.velocity,
+        when: ev.when,
+        smkRole: "keys"
+      }, ev);
+      return out;
+    }
+    return null;
   }
-  return ev;
+  if (ev.kind === "cc" || ev.kind === "pitchBend") {
+    out.port = "knobs";
+    let role = "knobs";
+    if (ev.kind === "pitchBend") {
+      const pbPort = ev.smkMidiInPort != null ? ev.smkMidiInPort : -1;
+      if (pbPort === knobBPort && ev.channel != null && ev.channel >= 0 && ev.channel < SMK_KNOB_DIGITAL) {
+        role = "knobB";
+      } else {
+        role = "pitch";
+      }
+    } else if (ev.kind === "cc" && ev.controller === MOD_CC) {
+      role = "mod";
+    } else if (ev.kind === "cc") {
+      const kA = knobIndexForCc(ev.controller, opts && opts.knobCcs ? opts.knobCcs : []);
+      const kB = knobIndexForCc(ev.controller, knobBCcs);
+      if (kA >= 0) {
+        role = "knobA";
+      } else if (kB >= 0) {
+        role = "knobB";
+      }
+    }
+    let smkSlot = null;
+    let smkKnobIndex = null;
+    if (role === "knobA" && ev.kind === "cc") {
+      const idxA = knobIndexForCc(ev.controller, opts && opts.knobCcs ? opts.knobCcs : []);
+      if (idxA >= 0) {
+        smkSlot = idxA + 1;
+        smkKnobIndex = idxA + 1;
+      }
+    } else if (role === "knobB") {
+      if (ev.kind === "cc") {
+        const idxB = knobIndexForCc(ev.controller, knobBCcs);
+        if (idxB >= 0) {
+          smkSlot = idxB + 1;
+          smkKnobIndex = idxB + 9;
+        }
+      } else if (ev.kind === "pitchBend" && ev.channel != null && ev.channel >= 0 && ev.channel < SMK_KNOB_DIGITAL) {
+        smkSlot = ev.channel + 1;
+        smkKnobIndex = ev.channel + 9;
+      }
+    }
+    out.event = copyEvHints({
+      kind: ev.kind,
+      inputId: ev.inputId,
+      channel: ev.channel,
+      controller: ev.controller,
+      value: ev.value,
+      value14: ev.value14,
+      when: ev.when,
+      smkRole: role,
+      smkSlot: smkSlot,
+      smkKnobIndex: smkKnobIndex
+    }, ev);
+    return out;
+  }
+  return null;
 };
 
 export fn smk25_face_buildAudio(ctx, node) {
@@ -556,7 +665,7 @@ export fn smk25_face_buildAudio(ctx, node) {
   inNode.connect(outNode);
 
   let state = freshState();
-  let forwardSink = null;
+  let forwardSinks = { keys: null, pads: null, knobs: null };
   let controlRoutes = {};
   let controlApply = null;
 
@@ -835,6 +944,7 @@ export fn smk25_face_buildAudio(ctx, node) {
   };
 
   let rxCounts = { noteOn: 0, noteOff: 0, cc: 0, pitchBend: 0, sysex: 0, other: 0 };
+  let rxByRoute = { keys: 0, pads: 0, knobs: 0 };
   let rxByPort = {
     "1": { noteOn: 0, cc: 0, pitchBend: 0, sysex: 0 },
     "2": { noteOn: 0, cc: 0, pitchBend: 0, sysex: 0 },
@@ -1009,9 +1119,24 @@ export fn smk25_face_buildAudio(ctx, node) {
       }
       si = si + 1;
     }
-    const fwd = transformSmkForwardMidi(ev, transportFromNotes, transportToNotes, knobBNotesOpt);
-    if (forwardSink && typeof forwardSink.handleEvent === "function" && fwd) {
-      forwardSink.handleEvent(fwd, ctx2);
+    const fwd = transformSmkForwardMidi(ev, {
+      transportFrom: transportFromNotes,
+      knobBNotes: knobBNotesOpt,
+      knobCcs: knobCcs,
+      knobBCcs: knobBCcsOpt,
+      knobBPort: SMK_KNOB_B_PORT_DEFAULT,
+      padSlotsA: padSlotsA,
+      padSlotsB: padSlotsB,
+      keybedRootDynamic: state.keybedRootDynamic
+    });
+    if (fwd && fwd.port && fwd.event) {
+      if (fwd.port === "keys" || fwd.port === "pads" || fwd.port === "knobs") {
+        rxByRoute[fwd.port] = (rxByRoute[fwd.port] || 0) + 1;
+      }
+      const sink = forwardSinks[fwd.port];
+      if (sink && typeof sink.handleEvent === "function") {
+        sink.handleEvent(fwd.event, ctx2);
+      }
     }
   };
 
@@ -1021,7 +1146,17 @@ export fn smk25_face_buildAudio(ctx, node) {
       controlApply = applyFn && typeof applyFn === "function" ? applyFn : null;
     },
     setMidiForward: (sink) => {
-      forwardSink = sink && typeof sink.handleEvent === "function" ? sink : null;
+      const nextSink = sink && typeof sink.handleEvent === "function" ? sink : null;
+      forwardSinks.keys = nextSink;
+      forwardSinks.pads = nextSink;
+      forwardSinks.knobs = nextSink;
+    },
+    setMidiForwardCombo: (portKey, sink) => {
+      const p = String(portKey || "");
+      if (p !== "keys" && p !== "pads" && p !== "knobs") {
+        return;
+      }
+      forwardSinks[p] = sink && typeof sink.handleEvent === "function" ? sink : null;
     },
     getTwinVisual: () => {
       return {
@@ -1045,6 +1180,7 @@ export fn smk25_face_buildAudio(ctx, node) {
         nowMs: nowMs(),
         pitchNorm: state.pitchNorm,
         modNorm: state.modNorm,
+        keybedRootDynamic: state.keybedRootDynamic,
         padBankB: state.padBankB === true,
         knobBankB: state.knobBankB === true,
         rxCounts: {
@@ -1059,6 +1195,11 @@ export fn smk25_face_buildAudio(ctx, node) {
           "1": { noteOn: rxByPort["1"].noteOn, cc: rxByPort["1"].cc, pitchBend: rxByPort["1"].pitchBend, sysex: rxByPort["1"].sysex },
           "2": { noteOn: rxByPort["2"].noteOn, cc: rxByPort["2"].cc, pitchBend: rxByPort["2"].pitchBend, sysex: rxByPort["2"].sysex },
           "3": { noteOn: rxByPort["3"].noteOn, cc: rxByPort["3"].cc, pitchBend: rxByPort["3"].pitchBend, sysex: rxByPort["3"].sysex }
+        },
+        rxByRoute: {
+          keys: rxByRoute.keys,
+          pads: rxByRoute.pads,
+          knobs: rxByRoute.knobs
         },
         lastCc: { port: lastCcInfo.port, ch1: lastCcInfo.ch1, cc: lastCcInfo.cc, val: lastCcInfo.val },
         lastNote: { port: lastNoteInfo.port, ch1: lastNoteInfo.ch1, note: lastNoteInfo.note, vel: lastNoteInfo.vel }
@@ -1235,7 +1376,7 @@ export fn smk25_face_buildAudio(ctx, node) {
       processMidiEvent(ev, ctx2, null);
     },
     dispose: () => {
-      forwardSink = null;
+      forwardSinks = { keys: null, pads: null, knobs: null };
       state = freshState();
       controlRoutes = {};
       controlApply = null;
@@ -1303,6 +1444,7 @@ export fn smk25_face_View(props) {
   const onRemove = props.onRemove;
   const onDragStart = props.onDragStart;
   const onToggleBypass = props.onToggleBypass;
+  const onAutoWirePreset = props.onAutoWirePreset;
   const audioDataMap = props.audioDataMap;
   const meterSync = props.meterSync;
 
@@ -1370,7 +1512,7 @@ export fn smk25_face_View(props) {
   const knobLearnTotal = knobCfg.learnTotal || SMK_KNOB_DIGITAL;
   const knobLearnBankLabel = knobCfg.learnBank === "B" ? "KNOB-B" : "KNOB-A";
 
-  const kbLo = DEFAULT_KEYBED_ROOT;
+  const kbLo = Number.isFinite(vis.keybedRootDynamic) ? vis.keybedRootDynamic : DEFAULT_KEYBED_ROOT;
   const whiteKeyEls = [];
   const blackKeyEls = [];
   let whiteCount = 0;
@@ -1617,6 +1759,9 @@ export fn smk25_face_View(props) {
             <div class="flex items-center gap-1.5 shrink-0 pointer-events-auto">
               <div class="px-2 py-0.5 rounded bg-red-950/80 border border-red-900/80 text-red-400 font-mono text-[12px] font-black tracking-widest shadow-inner">127</div>
               <div class="flex gap-0.5">
+                <span class="px-1.5 py-0.5 rounded border border-violet-500/60 bg-violet-900/30 text-violet-100 text-[7px] font-bold uppercase tracking-wider">{"KEYS " + String((vis.rxByRoute && vis.rxByRoute.keys) || 0)}</span>
+                <span class="px-1.5 py-0.5 rounded border border-amber-500/60 bg-amber-900/30 text-amber-100 text-[7px] font-bold uppercase tracking-wider">{"PADS " + String((vis.rxByRoute && vis.rxByRoute.pads) || 0)}</span>
+                <span class="px-1.5 py-0.5 rounded border border-fuchsia-500/60 bg-fuchsia-900/30 text-fuchsia-100 text-[7px] font-bold uppercase tracking-wider">{"KNOBS " + String((vis.rxByRoute && vis.rxByRoute.knobs) || 0)}</span>
                 <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider transition-all duration-75 " + playVis.cls} style={{ boxShadow: playVis.shadow }}>PLAY</span>
                 <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider transition-all duration-75 " + stopVis.cls} style={{ boxShadow: stopVis.shadow }}>STOP</span>
                 <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider transition-all duration-75 " + recVis.cls} style={{ boxShadow: recVis.shadow }}>REC</span>
@@ -1653,6 +1798,11 @@ export fn smk25_face_View(props) {
               </div>
             )}
             <div class="flex gap-0.5 shrink-0 pointer-events-auto">
+              <button
+                title="Add and wire a default SMK router chain"
+                onPointerDown={(e) => { e.stopPropagation(); if (onAutoWirePreset) { onAutoWirePreset(node.id); } }}
+                class="px-1.5 py-0.5 rounded border border-emerald-500/60 bg-emerald-900/40 text-emerald-100 font-bold text-[6px] hover:bg-emerald-800/60 pointer-events-auto"
+              >Auto Wire</button>
               <button
                 title="Twist each knob in order to map CCs to slots 1..8 on KNOB-A"
                 onPointerDown={(e) => { e.stopPropagation(); if (sink && sink.beginKnobLearn) { sink.beginKnobLearn("A"); } }}

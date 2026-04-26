@@ -4,12 +4,54 @@ import {
   MODULE_REGISTRY,
   isSmkControlOutputPort,
   isControlInputPort,
+  getNodeControlPorts,
   controlParamRangeForKey,
   isSmk25FaceMidiInputPort,
+  isSmk25FaceMidiOutputPort,
+  isMidiChannelSplitterOutputPort,
   isMidiGraphPortId,
   isComboStyleMidiPort
 } from "../modules/registry.tish"
 import { buildMidiInMidiSink } from "../midi/midiInSink.tish"
+import { buildControlInbound } from "../midi/controlInput.tish"
+
+const resolveMidiTargetSink = (toData, toPort) => {
+  if (!toData) {
+    return null;
+  }
+  if (toPort && toData.smkMidiInbound && toData.smkMidiInbound[toPort] && typeof toData.smkMidiInbound[toPort].handleEvent === "function") {
+    return toData.smkMidiInbound[toPort];
+  }
+  if (toData.controlInbound && toPort && toData.controlInbound[toPort] && typeof toData.controlInbound[toPort].handleEvent === "function") {
+    return toData.controlInbound[toPort];
+  }
+  if (toPort === "midi" && toData.midiSink && typeof toData.midiSink.handleEvent === "function") {
+    return toData.midiSink;
+  }
+  return null;
+};
+
+const createMidiFanoutSink = (sinks) => {
+  const targets = sinks && sinks.filter((s) => s && typeof s.handleEvent === "function");
+  if (!targets || targets.length === 0) {
+    return null;
+  }
+  if (targets.length === 1) {
+    return targets[0];
+  }
+  return {
+    handleEvent: (ev, ctx2) => {
+      let i = 0;
+      while (i < targets.length) {
+        const t = targets[i];
+        if (t && typeof t.handleEvent === "function") {
+          t.handleEvent(ev, ctx2);
+        }
+        i = i + 1;
+      }
+    }
+  };
+};
 
 const buildSmkControlRoutes = (smkNodeId, conns, graphNodes) => {
   const nodeById = {};
@@ -51,6 +93,13 @@ const sourcesRef = deps.sourcesRef
 const analyserRef = deps.analyserRef
 const pitchAnalyserRef = deps.pitchAnalyserRef
 const outGainRef = deps.outGainRef
+const nodeById = {};
+let nbi = 0;
+while (nbi < currentNodes.length) {
+const nn = currentNodes[nbi];
+nodeById[nn.id] = nn;
+nbi = nbi + 1;
+}
 
 Object.values(nodeAudioMapRef.current).forEach(n => {
 if (n.midiSink && typeof n.midiSink.dispose === "function") {
@@ -77,6 +126,7 @@ let nodeParamSync = null;
 let smartGateRuntime = null;
 let midiSink = null;
 let smkMidiInboundBox = null;
+let controlInbound = null;
 
 // BYPASS LOGIC
 if (node.bypassed && !node.isSystem && !['console_mixer', 'crossover', 'splitter', 'master_eq', 'graphic_eq', 'vu_meter', 'midi_recorder', 'smk25_face'].includes(node["type"])) {
@@ -114,6 +164,18 @@ if (built.smartGateRuntime) smartGateRuntime = built.smartGateRuntime;
 if (built.midiSink) midiSink = built.midiSink;
 if (built.smkMidiInbound && typeof built.smkMidiInbound === "object") {
   smkMidiInboundBox = built.smkMidiInbound;
+}
+if (built.controlInbound && typeof built.controlInbound === "object") {
+  controlInbound = built.controlInbound;
+}
+if (!controlInbound) {
+  const cPorts = getNodeControlPorts(node);
+  if (cPorts.length > 0 && deps.applyNodeParam && typeof deps.applyNodeParam === "function") {
+    const applyToParam = (paramKey, value) => {
+      deps.applyNodeParam(node.id, paramKey, value);
+    };
+    controlInbound = buildControlInbound(cPorts, applyToParam);
+  }
 }
 if (node["type"] === "smk25_face" && midiSink && typeof midiSink.installControlRoutes === "function") {
   const routes = buildSmkControlRoutes(node.id, currentConns, currentNodes);
@@ -756,15 +818,19 @@ analysers: analysers,
 _syncLiveParams: nodeParamSync,
 smartGateRuntime: smartGateRuntime,
 midiSink: midiSink,
-smkMidiInbound: smkMidiInboundBox
+smkMidiInbound: smkMidiInboundBox,
+controlInbound: controlInbound
 };
 });
 
 currentConns.forEach(conn => {
+const toNode = nodeById[conn.to];
+const dynCtrlPorts = getNodeControlPorts(toNode).map((p) => p.portId);
+const isDynamicControlIn = dynCtrlPorts.indexOf(conn.toPort) >= 0;
 if (isMidiGraphPortId(conn.fromPort) || isMidiGraphPortId(conn.toPort)) {
 return;
 }
-if (isSmkControlOutputPort(conn.fromPort) || isControlInputPort(conn.toPort)) {
+if (isSmkControlOutputPort(conn.fromPort) || isControlInputPort(conn.toPort) || isDynamicControlIn) {
 return;
 }
 const fromData = nodeAudioMapRef.current[conn.from];
@@ -778,42 +844,69 @@ outAudioNode.connect(inAudioNode);
 }
 });
 
+const midiRouteMap = {};
+const pushMidiRoute = (fromId, fromPort, setterKind, sink) => {
+  if (!sink || !fromId || !fromPort || !setterKind) {
+    return;
+  }
+  const k = String(fromId) + "::" + String(fromPort) + "::" + String(setterKind);
+  if (!midiRouteMap[k]) {
+    midiRouteMap[k] = { fromId: fromId, fromPort: fromPort, setterKind: setterKind, targets: [] };
+  }
+  midiRouteMap[k].targets.push(sink);
+};
+
 currentConns.forEach((conn) => {
-const fp = conn.fromPort;
-const tp = conn.toPort;
-const fromData = nodeAudioMapRef.current[conn.from];
-const toData = nodeAudioMapRef.current[conn.to];
-if (fp === "midi" && tp === "midi") {
-if (fromData && fromData.midiSink && typeof fromData.midiSink.setMidiForward === "function") {
-const nextSink = toData && toData.midiSink ? toData.midiSink : null;
-fromData.midiSink.setMidiForward(nextSink);
-}
-return;
-}
-if (fp === "midi" && isSmk25FaceMidiInputPort(tp)) {
-if (fromData && fromData.midiSink && typeof fromData.midiSink.setMidiForward === "function" && toData && toData.smkMidiInbound) {
-const inbound = toData.smkMidiInbound[tp];
-if (inbound && typeof inbound.handleEvent === "function") {
-fromData.midiSink.setMidiForward(inbound);
-}
-}
-return;
-}
-if (
-fromData &&
-fromData.midiSink &&
-typeof fromData.midiSink.setMidiForwardCombo === "function" &&
-isComboStyleMidiPort(fp) &&
-isSmk25FaceMidiInputPort(tp) &&
-toData &&
-toData.smkMidiInbound
-) {
-const inbound = toData.smkMidiInbound[tp];
-if (inbound && typeof inbound.handleEvent === "function") {
-fromData.midiSink.setMidiForwardCombo(fp, inbound);
-}
-}
+  const fp = conn.fromPort;
+  const tp = conn.toPort;
+  const fromData = nodeAudioMapRef.current[conn.from];
+  const toData = nodeAudioMapRef.current[conn.to];
+  const fromSink = fromData && fromData.midiSink ? fromData.midiSink : null;
+  const toNode = nodeById[conn.to];
+  const dynCtrlPorts = getNodeControlPorts(toNode).map((p) => p.portId);
+  const targetSink = resolveMidiTargetSink(toData, tp);
+
+  if (!fromSink || !targetSink) {
+    return;
+  }
+
+  const toIsMidiLike = isMidiGraphPortId(tp) || dynCtrlPorts.indexOf(tp) >= 0;
+  if (!toIsMidiLike) {
+    return;
+  }
+
+  if (
+    fp === "midi" &&
+    typeof fromSink.setMidiForward === "function"
+  ) {
+    pushMidiRoute(conn.from, fp, "single", targetSink);
+    return;
+  }
+
+  if (
+    typeof fromSink.setMidiForwardCombo === "function" &&
+    (isMidiGraphPortId(fp) || isSmk25FaceMidiOutputPort(fp) || isMidiChannelSplitterOutputPort(fp))
+  ) {
+    pushMidiRoute(conn.from, fp, "combo", targetSink);
+  }
 });
+
+const routeRows = Object.values(midiRouteMap);
+let rri = 0;
+while (rri < routeRows.length) {
+  const row = routeRows[rri];
+  const fromData = nodeAudioMapRef.current[row.fromId];
+  const fromSink = fromData && fromData.midiSink ? fromData.midiSink : null;
+  const fanoutSink = createMidiFanoutSink(row.targets);
+  if (fromSink) {
+    if (row.setterKind === "single" && typeof fromSink.setMidiForward === "function") {
+      fromSink.setMidiForward(fanoutSink);
+    } else if (row.setterKind === "combo" && typeof fromSink.setMidiForwardCombo === "function") {
+      fromSink.setMidiForwardCombo(row.fromPort, fanoutSink);
+    }
+  }
+  rri = rri + 1;
+}
 
 let ni = 0;
 while (ni < currentNodes.length) {

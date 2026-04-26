@@ -20,6 +20,8 @@ import * as hall_verb from './hall_verb/index.tish';
 import * as metal from './metal/index.tish';
 import * as midi_poly from './midi_poly/index.tish';
 import * as midi_recorder from './midi_recorder/index.tish';
+import * as midi_channel_splitter from './midi_channel_splitter/index.tish';
+import * as midi_semantic_splitter from './midi_semantic_splitter/index.tish';
 import * as smk25_face from './smk25_face/index.tish';
 import * as muff from './muff/index.tish';
 import * as noise_gate from './noise_gate/index.tish';
@@ -226,6 +228,24 @@ export const MODULE_REGISTRY = {
     buildAudio: midi_recorder.midi_recorder_buildAudio,
     acceptsMidiInput: true,
     /** May emit a second MIDI cable (pass-through to downstream synth). */
+    midiThrough: true,
+  },
+  'midi_channel_splitter': {
+    type: midi_channel_splitter.midi_channel_splitter_type,
+    category: midi_channel_splitter.midi_channel_splitter_category,
+    metadata: midi_channel_splitter.midi_channel_splitter_metadata,
+    View: midi_channel_splitter.midi_channel_splitter_View,
+    buildAudio: midi_channel_splitter.midi_channel_splitter_buildAudio,
+    acceptsMidiInput: true,
+    midiThrough: true,
+  },
+  'midi_semantic_splitter': {
+    type: midi_semantic_splitter.midi_semantic_splitter_type,
+    category: midi_semantic_splitter.midi_semantic_splitter_category,
+    metadata: midi_semantic_splitter.midi_semantic_splitter_metadata,
+    View: midi_semantic_splitter.midi_semantic_splitter_View,
+    buildAudio: midi_semantic_splitter.midi_semantic_splitter_buildAudio,
+    acceptsMidiInput: true,
     midiThrough: true,
   },
   'smk25_face': {
@@ -499,6 +519,8 @@ const LEGACY_LIBRARY = {
     { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
     { type: 'midi_poly', label: 'MIDI Poly', color: 'from-violet-600 to-indigo-900', theme: 'dark', defaultParams: { level: 0.35, waveform: 0, brightness: 0.5 } },
     { type: 'midi_recorder', label: 'MIDI Recorder', color: 'from-amber-900 to-neutral-900', theme: 'dark', defaultParams: {} },
+    { type: 'midi_channel_splitter', label: 'MIDI Ch Splitter', color: 'from-emerald-900 via-teal-900 to-neutral-950', theme: 'dark', defaultParams: {} },
+    { type: 'midi_semantic_splitter', label: 'MIDI Semantic Split', color: 'from-violet-900 via-fuchsia-950 to-neutral-950', theme: 'dark', defaultParams: {} },
     { type: 'smk25_face', label: 'SMK-25 layout', color: 'from-violet-900 via-purple-950 to-neutral-950', theme: 'dark', defaultParams: {} },
     { type: 'crossover', label: 'Freq Split', color: 'from-blue-800 to-indigo-950', theme: 'dark', defaultParams: { freq: 800 } },
     { type: 'splitter', label: 'Splitter', color: 'from-zinc-700 to-zinc-900', theme: 'dark', defaultParams: { output: 1.0 } }
@@ -521,9 +543,86 @@ export fn isControlInputPort(portId) {
   return portId === "ctrl";
 }
 
+const MODULES_WITHOUT_AUTO_CONTROL_PORTS = {
+  smk25_face: true,
+  midi_recorder: true,
+  midi_poly: true,
+  midi_channel_splitter: true,
+  midi_semantic_splitter: true
+};
+
+export fn getNodeControlPorts(node) {
+  if (!node || !node["type"] || MODULES_WITHOUT_AUTO_CONTROL_PORTS[node["type"]] === true) {
+    return [];
+  }
+  if (node["type"] === "console_mixer") {
+    const p = node.params || {};
+    const ch = Number.isFinite(p.channels) ? p.channels : 4;
+    const out = [];
+    let i = 1;
+    while (i <= ch) {
+      out.push({ portId: "ch" + String(i), paramKey: "ch" + String(i), min: 0, max: 1, accepts: "any" });
+      i = i + 1;
+    }
+    out.push({ portId: "master", paramKey: "master", min: 0, max: 1, accepts: "any" });
+    return out;
+  }
+  const reg = MODULE_REGISTRY[node["type"]];
+  const dp = reg && reg.metadata && reg.metadata.defaultParams ? reg.metadata.defaultParams : null;
+  let sourceParams = dp;
+  if ((!sourceParams || typeof sourceParams !== "object") && node.params && typeof node.params === "object") {
+    sourceParams = node.params;
+  }
+  if (!sourceParams || typeof sourceParams !== "object") {
+    return [];
+  }
+  const keys = Object.keys(sourceParams);
+  const out = [];
+  let i = 0;
+  while (i < keys.length) {
+    const k = keys[i];
+    if (k !== "uiForm" && k !== "channels") {
+      const range = controlParamRangeForKey(node["type"], k);
+      out.push({ portId: k, paramKey: k, min: range.min, max: range.max, accepts: "any" });
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
 /** SMK-25 layout: three logical MIDI inputs (device USB endpoints → separate patch jacks). */
 export fn isSmk25FaceMidiInputPort(portId) {
   return portId === "midi1" || portId === "midi2" || portId === "midi3";
+}
+
+export fn isSmk25FaceMidiOutputPort(portId) {
+  return portId === "keys" || portId === "pads" || portId === "knobs";
+}
+
+export fn isMidiChannelSplitterOutputPort(portId) {
+  const s = String(portId || "");
+  if (s.length < 3 || s.slice(0, 2) !== "ch") {
+    return false;
+  }
+  const n = parseInt(s.slice(2), 10);
+  return Number.isFinite(n) && n >= 1 && n <= 16;
+}
+
+export fn isSemanticMidiPort(portId) {
+  const p = String(portId || "");
+  if (p.slice(0, 4) === "knob") {
+    const n = parseInt(p.slice(4), 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 16) {
+      return true;
+    }
+  }
+  return (
+    p === "pitch" ||
+    p === "mode" ||
+    p === "play" ||
+    p === "stop" ||
+    p === "rec"
+  );
 }
 
 /** midi1…midi8 — combo MIDI_IN outs or other multi-leg MIDI edges (never Web Audio). */
@@ -537,7 +636,14 @@ export fn isComboStyleMidiPort(portId) {
 }
 
 export fn isMidiGraphPortId(portId) {
-  return portId === "midi" || isSmk25FaceMidiInputPort(portId) || isComboStyleMidiPort(portId);
+  return (
+    portId === "midi" ||
+    isSmk25FaceMidiInputPort(portId) ||
+    isSmk25FaceMidiOutputPort(portId) ||
+    isSemanticMidiPort(portId) ||
+    isMidiChannelSplitterOutputPort(portId) ||
+    isComboStyleMidiPort(portId)
+  );
 }
 
 export fn getMidiInOutPortIds(node) {
@@ -625,27 +731,109 @@ export fn controlParamRangeForKey(moduleType, paramKey) {
       return { min: 0, max: 8 };
     }
   }
+  if (t === "overdrive" || t === "screamer" || t === "blues_od" || t === "ds1" || t === "fuzz" || t === "octa_fuzz") {
+    if (key === "drive") return { min: 0, max: 1000 };
+    if (key === "tone" || key === "filter") return { min: 100, max: 5000 };
+    if (key === "level") return { min: 0, max: 1 };
+  }
+  if (t === "rat") {
+    if (key === "drive") return { min: 0, max: 1000 };
+    if (key === "filter") return { min: 100, max: 5000 };
+    if (key === "level") return { min: 0, max: 1 };
+  }
+  if (t === "metal") {
+    if (key === "drive") return { min: 0, max: 1000 };
+    if (key === "midFreq") return { min: 100, max: 3000 };
+    if (key === "midCut") return { min: -24, max: 12 };
+    if (key === "level") return { min: 0, max: 1 };
+  }
+  if (t === "centaur") {
+    if (key === "drive") return { min: 0, max: 1000 };
+    if (key === "highs") return { min: 0, max: 10 };
+    if (key === "output") return { min: 0, max: 1 };
+  }
+  if (t === "amp_tweed" || t === "amp_stack" || t === "amp_modern") {
+    if (key === "gain") return { min: 0, max: 100 };
+    if (key === "bass" || key === "mid" || key === "treble") return { min: 0, max: 2 };
+    if (key === "presence") return { min: 500, max: 8000 };
+    if (key === "master") return { min: 0, max: 1 };
+  }
+  if (t === "chorus") {
+    if (key === "rate") return { min: 0.1, max: 10 };
+    if (key === "depth") return { min: 0, max: 1 };
+  }
+  if (t === "flanger") {
+    if (key === "rate") return { min: 0.1, max: 5 };
+    if (key === "depth") return { min: 0, max: 0.02 };
+    if (key === "feedback") return { min: 0, max: 0.95 };
+  }
+  if (t === "vibrato") {
+    if (key === "rate") return { min: 0.1, max: 10 };
+    if (key === "depth") return { min: 0, max: 0.01 };
+  }
+  if (t === "rotary") {
+    if (key === "rate") return { min: 0.1, max: 12 };
+    if (key === "mix") return { min: 0, max: 1 };
+  }
+  if (t === "phaser") {
+    if (key === "rate") return { min: 0.1, max: 10 };
+    if (key === "sweep") return { min: 100, max: 2000 };
+  }
+  if (t === "auto_wah" || t === "tron") {
+    if (key === "rate") return { min: 0.1, max: 12 };
+    if (key === "sweep") return { min: 100, max: 4000 };
+    if (key === "baseFreq") return { min: 80, max: 2000 };
+  }
+  if (t === "eq7") {
+    if (key === "level") return { min: 0, max: 2 };
+    if (key.slice(0, 1) === "b") return { min: -18, max: 18 };
+  }
+  if (t === "console_mixer") {
+    if (key === "master" || key.slice(0, 2) === "ch") return { min: 0, max: 1 };
+  }
+  if (t === "master_eq") {
+    if (key === "level") return { min: 0, max: 2 };
+    if (key === "sub" || key === "low" || key === "mid" || key === "high" || key === "air") return { min: -1, max: 1 };
+  }
+  if (t === "graphic_eq") {
+    if (key === "level") return { min: 0, max: 2 };
+    if (key.slice(0, 1) === "b") return { min: -1, max: 1 };
+  }
+  if (t === "midi_poly") {
+    if (key === "level") return { min: 0, max: 1 };
+    if (key === "waveform") return { min: 0, max: 3 };
+    if (key === "brightness") return { min: 0, max: 1 };
+  }
+  if (key === "time") return { min: 0, max: 8 };
+  if (key === "threshold") return { min: -60, max: 0 };
+  if (key === "ratio") return { min: 1, max: 20 };
+  if (key === "makeup") return { min: 0, max: 8 };
+  if (key === "mix" || key === "feedback" || key === "depth" || key === "spread" || key === "sheen" || key === "age") return { min: 0, max: 1 };
+  if (key === "drive" || key === "gain") return { min: 0, max: 1000 };
+  if (key.indexOf("freq") >= 0 || key.indexOf("Freq") >= 0 || key === "tone" || key === "filter" || key === "cut" || key === "dark" || key === "presence" || key === "sweep" || key === "baseFreq") {
+    return { min: 80, max: 8000 };
+  }
+  if (key === "level" || key === "output" || key === "master") return { min: 0, max: 1 };
+  if (key.slice(0, 1) === "b") return { min: -1, max: 1 };
   return { min: 0, max: 1 };
 }
 
 const SMK25_FACE_OUT_PORTS = [
-  "midi",
-  "ctrl1",
-  "ctrl2",
-  "ctrl3",
-  "ctrl4",
-  "ctrl5",
-  "ctrl6",
-  "ctrl7",
-  "ctrl8",
-  "ctrl9",
-  "ctrl10",
-  "ctrl11",
-  "ctrl12",
-  "ctrl13",
-  "ctrl14",
-  "ctrl15",
-  "ctrl16"
+  "keys",
+  "pads",
+  "knobs"
+];
+
+const MIDI_CHANNEL_SPLITTER_OUT_PORTS = [
+  "ch1", "ch2", "ch3", "ch4",
+  "ch5", "ch6", "ch7", "ch8",
+  "ch9", "ch10", "ch11", "ch12",
+  "ch13", "ch14", "ch15", "ch16"
+];
+const MIDI_SEMANTIC_SPLITTER_OUT_PORTS = [
+  "knob1", "knob2", "knob3", "knob4", "knob5", "knob6", "knob7", "knob8",
+  "knob9", "knob10", "knob11", "knob12", "knob13", "knob14", "knob15", "knob16",
+  "play", "stop", "rec", "pitch", "mode"
 ];
 
 export const getNodePorts = (node) => {
@@ -653,6 +841,8 @@ export const getNodePorts = (node) => {
   if (node["type"] === 'MIDI_IN') return { "in": [], "out": getMidiInOutPortIds(node) };
   if (node["type"] === 'SYS_IN') return { "in": ['main'], "out": ['main'] };
   if (node["type"] === 'midi_recorder') return { "in": ['midi'], "out": ['midi'] };
+  if (node["type"] === 'midi_channel_splitter') return { "in": ['midi'], "out": MIDI_CHANNEL_SPLITTER_OUT_PORTS };
+  if (node["type"] === 'midi_semantic_splitter') return { "in": ['midi'], "out": MIDI_SEMANTIC_SPLITTER_OUT_PORTS };
   if (node["type"] === 'smk25_face') {
     return { "in": ['midi1', 'midi2', 'midi3'], "out": SMK25_FACE_OUT_PORTS };
   }
@@ -675,11 +865,35 @@ export const getNodePorts = (node) => {
     const numCh = node.params.channels || 4;
     const ins = [];
     for(let i=1; i<=numCh; i = i + 1) ins.push("ch" + String(i));
+    if (ins.indexOf("master") < 0) {
+      ins.push("master");
+    }
     return { "in": ins, "out": ['main'] };
   }
   const regMod = MODULE_REGISTRY[node["type"]];
   if (regMod && regMod.acceptsControlInput === true) {
-    return { "in": ['main', 'ctrl'], "out": ['main'] };
+    const ctrlPorts = getNodeControlPorts(node).map((p) => p.portId);
+    const ins = ['main', 'ctrl'];
+    let i = 0;
+    while (i < ctrlPorts.length) {
+      if (ins.indexOf(ctrlPorts[i]) < 0) {
+        ins.push(ctrlPorts[i]);
+      }
+      i = i + 1;
+    }
+    return { "in": ins, "out": ['main'] };
+  }
+  const autoCtrl = getNodeControlPorts(node).map((p) => p.portId);
+  if (autoCtrl.length > 0) {
+    const ins = ['main'];
+    let i = 0;
+    while (i < autoCtrl.length) {
+      if (ins.indexOf(autoCtrl[i]) < 0) {
+        ins.push(autoCtrl[i]);
+      }
+      i = i + 1;
+    }
+    return { "in": ins, "out": ['main'] };
   }
   return { "in": ['main'], "out": ['main'] };
 };

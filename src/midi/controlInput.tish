@@ -1,0 +1,65 @@
+const normalizeMidiEvent = (ev, accepts) => {
+  if (!ev || !accepts) {
+    return null;
+  }
+  if (accepts === "pitchBend" && ev.kind === "pitchBend" && Number.isFinite(ev.value14)) {
+    return Math.min(1, Math.max(0, ev.value14 / 16383));
+  }
+  if (accepts === "note" && ev.kind === "noteOn" && Number.isFinite(ev.note)) {
+    return Math.min(1, Math.max(0, ev.note / 127));
+  }
+  if (accepts === "velocity" && ev.kind === "noteOn" && Number.isFinite(ev.velocity)) {
+    return Math.min(1, Math.max(0, ev.velocity / 127));
+  }
+  if (accepts === "cc" && ev.kind === "cc" && Number.isFinite(ev.value)) {
+    return Math.min(1, Math.max(0, ev.value / 127));
+  }
+  if (accepts === "any") {
+    if (ev.kind === "cc" && Number.isFinite(ev.value)) {
+      return Math.min(1, Math.max(0, ev.value / 127));
+    }
+    if (ev.kind === "pitchBend" && Number.isFinite(ev.value14)) {
+      return Math.min(1, Math.max(0, ev.value14 / 16383));
+    }
+    if (ev.kind === "noteOn" && Number.isFinite(ev.velocity)) {
+      return Math.min(1, Math.max(0, ev.velocity / 127));
+    }
+  }
+  return null;
+};
+
+const mapNormToRange = (t, min, max) => {
+  const lo = Number(min);
+  const hi = Number(max);
+  const a = Number.isFinite(lo) ? lo : 0;
+  const b = Number.isFinite(hi) ? hi : 1;
+  return a + Math.min(1, Math.max(0, t)) * (b - a);
+};
+
+export fn buildControlInbound(controlPorts, applyToParam) {
+  if (!Array.isArray(controlPorts) || !controlPorts.length || typeof applyToParam !== "function") {
+    return null;
+  }
+  const inbound = {};
+  let i = 0;
+  while (i < controlPorts.length) {
+    const c = controlPorts[i];
+    const portId = c && c.portId != null ? String(c.portId) : "";
+    if (portId.length) {
+      inbound[portId] = {
+        handleEvent: (ev, ctx2) => {
+          void ctx2;
+          const accepts = c.accepts != null ? String(c.accepts) : "any";
+          const t = normalizeMidiEvent(ev, accepts);
+          if (!Number.isFinite(t)) {
+            return;
+          }
+          const mapped = mapNormToRange(t, c.min, c.max);
+          applyToParam(c.paramKey, mapped);
+        }
+      };
+    }
+    i = i + 1;
+  }
+  return inbound;
+}

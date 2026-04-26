@@ -5,6 +5,7 @@ import {
   MODULE_REGISTRY,
   isSmkControlOutputPort,
   isControlInputPort,
+  getNodeControlPorts,
   defaultCtrlParamKeyForModuleType,
   isSmk25FaceMidiInputPort,
   isMidiGraphPortId,
@@ -578,15 +579,167 @@ if (!template) return;
 
 const regMeta = MODULE_REGISTRY[moduleType] && MODULE_REGISTRY[moduleType].metadata ? MODULE_REGISTRY[moduleType].metadata : null;
 const vsFromReg = regMeta && regMeta.visualStyle ? regMeta.visualStyle : null;
-setNodes(prev => [...prev, { 
-id: Math.random().toString(36).substr(2, 9), 
-...template, 
+const newId = Math.random().toString(36).substr(2, 9);
+const newNode = {
+id: newId,
+...template,
 visualStyle: vsFromReg,
 params: { ...template.defaultParams },
-bypassed: false, 
-x: 300 + Math.random() * 100, 
-y: 200 + Math.random() * 100 
-}]);
+bypassed: false,
+x: 300 + Math.random() * 100,
+y: 200 + Math.random() * 100
+};
+
+if (moduleType !== "smk25_face") {
+setNodes(prev => [...prev, newNode]);
+return;
+}
+
+const semanticId = Math.random().toString(36).substr(2, 9);
+const keysPolyId = Math.random().toString(36).substr(2, 9);
+const padsPolyId = Math.random().toString(36).substr(2, 9);
+runBatched(() => {
+setNodes((prev) => {
+const next = [...prev, newNode];
+const nonSystemCount = prev.filter((n) => !n.isSystem).length;
+if (nonSystemCount === 0) {
+  const semTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_semantic_splitter");
+  const polyTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_poly");
+  if (semTpl) {
+    next.push({
+      id: semanticId,
+      ...semTpl,
+      params: { ...semTpl.defaultParams },
+      bypassed: false,
+      x: newNode.x + 360,
+      y: newNode.y + 60
+    });
+  }
+  if (polyTpl) {
+    next.push({
+      id: keysPolyId,
+      ...polyTpl,
+      label: "Keys Poly",
+      params: { ...polyTpl.defaultParams },
+      bypassed: false,
+      x: newNode.x + 360,
+      y: newNode.y - 120
+    });
+    next.push({
+      id: padsPolyId,
+      ...polyTpl,
+      label: "Pads Poly",
+      params: { ...polyTpl.defaultParams },
+      bypassed: false,
+      x: newNode.x + 360,
+      y: newNode.y - 10
+    });
+  }
+}
+return next;
+});
+setConnections((prev) => {
+let next = prev.slice();
+const hadNonSystem = nodesRef.current.filter((n) => !n.isSystem).length > 0;
+if (hadNonSystem) {
+  return next;
+}
+const addEdge = (from, fromPort, to, toPort) => {
+  if (!from || !to) return;
+  if (next.some((c) => c.from === from && c.fromPort === fromPort && c.to === to && c.toPort === toPort)) return;
+  next.push({ id: Math.random().toString(36).substr(2, 9), from: from, fromPort: fromPort, to: to, toPort: toPort });
+};
+addEdge(newId, "keys", keysPolyId, "midi");
+addEdge(newId, "pads", padsPolyId, "midi");
+addEdge(newId, "knobs", semanticId, "midi");
+addEdge(keysPolyId, "main", "sys_out", "main");
+addEdge(padsPolyId, "main", "sys_out", "main");
+const midiIns = nodesRef.current.filter((n) => n["type"] === "MIDI_IN");
+let mi = 0;
+while (mi < midiIns.length) {
+  const mn = midiIns[mi];
+  const mp = mn.params || {};
+  if (mp.midiComboLayout === "smk25" && Array.isArray(mp.midiInputIds) && mp.midiInputIds.length) {
+    const cap = mp.midiInputIds.length < 3 ? mp.midiInputIds.length : 3;
+    let pi = 0;
+    while (pi < cap) {
+      const p = "midi" + String(pi + 1);
+      addEdge(mn.id, p, newId, p);
+      pi = pi + 1;
+    }
+  } else {
+    addEdge(mn.id, "midi", newId, "midi1");
+  }
+  mi = mi + 1;
+}
+return next;
+});
+});
+};
+
+const autoWireSmkPreset = (smkId) => {
+if (!smkId) return;
+const smk = nodesRef.current.find((n) => n.id === smkId && n["type"] === "smk25_face");
+if (!smk) return;
+const semanticId = Math.random().toString(36).substr(2, 9);
+const keysPolyId = Math.random().toString(36).substr(2, 9);
+const padsPolyId = Math.random().toString(36).substr(2, 9);
+const semTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_semantic_splitter");
+const polyTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_poly");
+runBatched(() => {
+setNodes((prev) => {
+const next = prev.slice();
+if (semTpl && !next.some((n) => n["type"] === "midi_semantic_splitter")) {
+next.push({
+id: semanticId,
+...semTpl,
+params: { ...semTpl.defaultParams },
+bypassed: false,
+x: smk.x + 360,
+y: smk.y + 60
+});
+}
+if (polyTpl) {
+if (!next.some((n) => n.id === keysPolyId)) {
+next.push({
+id: keysPolyId,
+...polyTpl,
+label: "Keys Poly",
+params: { ...polyTpl.defaultParams },
+bypassed: false,
+x: smk.x + 360,
+y: smk.y - 120
+});
+}
+if (!next.some((n) => n.id === padsPolyId)) {
+next.push({
+id: padsPolyId,
+...polyTpl,
+label: "Pads Poly",
+params: { ...polyTpl.defaultParams },
+bypassed: false,
+x: smk.x + 360,
+y: smk.y - 10
+});
+}
+}
+return next;
+});
+setConnections((prev) => {
+let next = prev.slice();
+const addEdge = (from, fromPort, to, toPort) => {
+if (!from || !to) return;
+if (next.some((c) => c.from === from && c.fromPort === fromPort && c.to === to && c.toPort === toPort)) return;
+next.push({ id: Math.random().toString(36).substr(2, 9), from: from, fromPort: fromPort, to: to, toPort: toPort });
+};
+addEdge(smkId, "keys", keysPolyId, "midi");
+addEdge(smkId, "pads", padsPolyId, "midi");
+addEdge(smkId, "knobs", semanticId, "midi");
+addEdge(keysPolyId, "main", "sys_out", "main");
+addEdge(padsPolyId, "main", "sys_out", "main");
+return next;
+});
+});
 };
 
 const removeNode = (id) => {
@@ -686,10 +839,12 @@ setNodes(prev => prev.map(n => n.id === id ? { ...n, bypassed: !n.bypassed } : n
 const addConnection = (fromId, fromPort, toId, toPort, ctrlParamOpt) => {
 if (fromId === toId) return;
 const fromNHead = nodesRef.current.find((n) => n.id === fromId);
-const fromIsMidi =
-  fromPort === "midi" ||
-  !!(fromNHead && fromNHead["type"] === "MIDI_IN" && isComboStyleMidiPort(fromPort));
-const toIsMidiJack = toPort === "midi" || isSmk25FaceMidiInputPort(toPort);
+const fromIsMidi = isMidiGraphPortId(fromPort) && !isSmkControlOutputPort(fromPort);
+const toNHead = nodesRef.current.find((n) => n.id === toId);
+const toDynCtrlPorts = getNodeControlPorts(toNHead).map((p) => p.portId);
+const toIsMidiJack =
+  (isMidiGraphPortId(toPort) && !isSmkControlOutputPort(toPort)) ||
+  toDynCtrlPorts.indexOf(toPort) >= 0;
 const fromIsCtrl = isSmkControlOutputPort(fromPort);
 const toIsCtrl = isControlInputPort(toPort);
 
@@ -701,7 +856,8 @@ const fromN = nodesRef.current.find((n) => n.id === fromId);
 const toN = nodesRef.current.find((n) => n.id === toId);
 const toAcceptsMidi =
   (toN && toN["type"] === "smk25_face" && isSmk25FaceMidiInputPort(toPort)) ||
-  !!(toN && MODULE_REGISTRY[toN["type"]] && MODULE_REGISTRY[toN["type"]].acceptsMidiInput && toPort === "midi");
+  !!(toN && MODULE_REGISTRY[toN["type"]] && MODULE_REGISTRY[toN["type"]].acceptsMidiInput && isMidiGraphPortId(toPort)) ||
+  (getNodeControlPorts(toN).map((p) => p.portId).indexOf(toPort) >= 0);
 if (!fromN || !toN || !toAcceptsMidi) {
 return;
 }
@@ -717,11 +873,10 @@ return;
 midi.updateMidiBindingTarget(bid, toId);
 }
 setConnections((prev) => {
-let base = prev.filter((c) => !(c.from === fromId && c.fromPort === fromPort));
-if (base.some((c) => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) {
-return base;
+if (prev.some((c) => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort)) {
+return prev;
 }
-return [...base, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort: fromPort, to: toId, toPort: toPort }];
+return [...prev, { id: Math.random().toString(36).substr(2, 9), from: fromId, fromPort: fromPort, to: toId, toPort: toPort }];
 });
 return;
 }
@@ -740,16 +895,15 @@ const pKey =
     ? String(ctrlParamOpt).trim()
     : defaultCtrlParamKeyForModuleType(toC["type"]);
 setConnections((prev) => {
-let base = prev.filter((c) => !(c.from === fromId && c.fromPort === fromPort));
 if (
-  base.some(
+  prev.some(
     (c) => c.from === fromId && c.fromPort === fromPort && c.to === toId && c.toPort === toPort && c.ctrlParam === pKey
   )
 ) {
-return base;
+return prev;
 }
 return [
-  ...base,
+  ...prev,
   {
     id: Math.random().toString(36).substr(2, 9),
     from: fromId,
@@ -779,10 +933,8 @@ setConnections(prev => {
 const hit = prev.find(c => c.id === id);
 if (hit) {
 const fromN = nodesRef.current.find((n) => n.id === hit.from);
-const fromIsMidiOut =
-  hit.fromPort === "midi" ||
-  !!(fromN && fromN["type"] === "MIDI_IN" && isComboStyleMidiPort(hit.fromPort));
-if (fromIsMidiOut && (hit.toPort === "midi" || isSmk25FaceMidiInputPort(hit.toPort))) {
+const fromIsMidiOut = isMidiGraphPortId(hit.fromPort) && !isSmkControlOutputPort(hit.fromPort);
+if (fromIsMidiOut && (isMidiGraphPortId(hit.toPort) || getNodeControlPorts(nodesRef.current.find((n) => n.id === hit.to)).map((p) => p.portId).indexOf(hit.toPort) >= 0)) {
 if (fromN && fromN["type"] === "MIDI_IN") {
 const bid = fromN.params && fromN.params.midiBindingId;
 if (bid) {
@@ -790,8 +942,11 @@ const next = prev.filter((c) => c.id !== id);
 const stillMidiOut = next.some(
 (c) =>
   c.from === hit.from &&
-  (c.fromPort === "midi" || isComboStyleMidiPort(c.fromPort)) &&
-  (c.toPort === "midi" || isSmk25FaceMidiInputPort(c.toPort))
+  isMidiGraphPortId(c.fromPort) &&
+  (
+    isMidiGraphPortId(c.toPort) ||
+    getNodeControlPorts(nodesRef.current.find((n) => n.id === c.to)).map((p) => p.portId).indexOf(c.toPort) >= 0
+  )
 );
 if (!stillMidiOut) {
 midi.updateMidiBindingTarget(bid, null);
@@ -838,6 +993,7 @@ updateNodePos={updateNodePos}
 toggleNodeBypass={toggleNodeBypass}
 addConnection={addConnection}
 removeConnection={removeConnection}
+onAutoWireSmkPreset={autoWireSmkPreset}
 midiBindings={midi.midiBindings}
 />
 </div>

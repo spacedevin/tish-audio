@@ -1,0 +1,154 @@
+import { h, useEffect, useState } from "lattish"
+import { RackChassis } from "../../moduleKit/ui/index.tish"
+
+export const midi_semantic_splitter_type = "midi_semantic_splitter";
+export const midi_semantic_splitter_category = "UTILITY";
+
+export const midi_semantic_splitter_metadata = {
+  label: "MIDI Semantic Split",
+  color: "from-violet-900 via-fuchsia-950 to-neutral-950",
+  theme: "dark",
+  defaultParams: {}
+};
+
+const OUTS = [
+  "knob1", "knob2", "knob3", "knob4", "knob5", "knob6", "knob7", "knob8",
+  "knob9", "knob10", "knob11", "knob12", "knob13", "knob14", "knob15", "knob16",
+  "play", "stop", "rec", "pitch", "mode"
+];
+
+const roleToPorts = (ev) => {
+  const role = ev && ev.smkRole != null ? String(ev.smkRole) : "";
+  const knobIndex = ev && Number.isFinite(ev.smkKnobIndex) ? ev.smkKnobIndex : -1;
+  if (role === "knobA" || role === "knobB") {
+    const out = [];
+    if (knobIndex >= 1 && knobIndex <= 16) {
+      out.push("knob" + String(knobIndex));
+      if (knobIndex === 1) {
+        out.push("mode");
+      }
+    }
+    return out;
+  }
+  if (role === "transport") {
+    const act = ev && ev.smkTransportAction != null ? String(ev.smkTransportAction) : "";
+    if (act === "play" || act === "stop" || act === "rec") {
+      return [act];
+    }
+    return [];
+  }
+  if (role === "pitch") return ["pitch"];
+  return [];
+};
+
+const freshCounts = () => {
+  const o = {};
+  let i = 0;
+  while (i < OUTS.length) {
+    o[OUTS[i]] = 0;
+    i = i + 1;
+  }
+  return o;
+};
+
+export fn midi_semantic_splitter_buildAudio(ctx, node) {
+  void node;
+  const inNode = ctx.createGain();
+  inNode.gain.value = 0;
+  const outNode = ctx.createGain();
+  outNode.gain.value = 0;
+  inNode.connect(outNode);
+
+  let forwardByPort = {};
+  let counts = freshCounts();
+
+  const midiSink = {
+    setMidiForwardCombo: (portKey, sink) => {
+      const p = String(portKey || "");
+      if (OUTS.indexOf(p) < 0) {
+        return;
+      }
+      forwardByPort[p] = sink && typeof sink.handleEvent === "function" ? sink : null;
+    },
+    getVisualState: () => ({ counts: { ...counts } }),
+    handleEvent: (ev, ctx2) => {
+      if (!ev || !ctx2) {
+        return;
+      }
+      const ports = roleToPorts(ev);
+      let i = 0;
+      while (i < ports.length) {
+        const p = ports[i];
+        counts[p] = (counts[p] || 0) + 1;
+        const sink = forwardByPort[p];
+        if (sink && typeof sink.handleEvent === "function") {
+          sink.handleEvent(ev, ctx2);
+        }
+        i = i + 1;
+      }
+    },
+    dispose: () => {
+      forwardByPort = {};
+      counts = freshCounts();
+    }
+  };
+
+  return {
+    "in": inNode,
+    "out": outNode,
+    lfo: null,
+    nodeAnalyser: null,
+    inPorts: null,
+    outPorts: null,
+    analysers: {},
+    nodeParamSync: null,
+    smartGateRuntime: null,
+    midiSink: midiSink
+  };
+}
+
+export fn midi_semantic_splitter_View(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const audioDataMap = props.audioDataMap;
+  const previewOnly = props.previewOnly === true;
+  let [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 120);
+    return () => window.clearInterval(id);
+  }, []);
+  void tick;
+
+  const sink = audioDataMap && audioDataMap[node.id] && audioDataMap[node.id].midiSink;
+  const vis = sink && typeof sink.getVisualState === "function" ? sink.getVisualState() : { counts: freshCounts() };
+
+  const chips = [];
+  let i = 0;
+  while (i < OUTS.length) {
+    const p = OUTS[i];
+    chips.push(
+      <div key={"out-" + p} class="px-1 py-0.5 rounded border border-violet-600/40 bg-black/35 text-[7px] font-mono text-violet-100">
+        {p + ":" + String((vis.counts && vis.counts[p]) || 0)}
+      </div>
+    );
+    i = i + 1;
+  }
+
+  return (
+    <RackChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      typeLabel="Rack · Semantic MIDI router"
+    >
+      <div class="relative z-10 flex flex-col gap-2 w-full h-full px-3 py-2">
+        <div class="text-center text-[9px] font-bold uppercase tracking-wider text-violet-200">Functions only: knobs, transport, pitch, mode</div>
+        <div class="grid grid-cols-6 gap-1">{chips}</div>
+      </div>
+    </RackChassis>
+  );
+}

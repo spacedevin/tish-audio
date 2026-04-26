@@ -1,0 +1,141 @@
+import { h, useEffect, useState } from "lattish"
+import { PedalChassis } from "../../moduleKit/ui/index.tish"
+
+export const midi_channel_splitter_type = "midi_channel_splitter";
+export const midi_channel_splitter_category = "UTILITY";
+
+export const midi_channel_splitter_metadata = {
+  label: "MIDI Ch Splitter",
+  color: "from-emerald-900 via-teal-900 to-neutral-950",
+  theme: "dark",
+  defaultParams: {}
+};
+
+const CH_KEYS = [
+  "ch1", "ch2", "ch3", "ch4",
+  "ch5", "ch6", "ch7", "ch8",
+  "ch9", "ch10", "ch11", "ch12",
+  "ch13", "ch14", "ch15", "ch16"
+];
+
+const freshHits = () => {
+  const a = [];
+  let i = 0;
+  while (i < 16) {
+    a.push(0);
+    i = i + 1;
+  }
+  return a;
+};
+
+export fn midi_channel_splitter_buildAudio(ctx, node) {
+  void node;
+  const inNode = ctx.createGain();
+  inNode.gain.value = 0;
+  const outNode = ctx.createGain();
+  outNode.gain.value = 0;
+  inNode.connect(outNode);
+
+  let forwardByPort = {};
+  let lastHitAt = freshHits();
+
+  const midiSink = {
+    setMidiForward: (sink) => {
+      const next = sink && typeof sink.handleEvent === "function" ? sink : null;
+      let i = 0;
+      while (i < CH_KEYS.length) {
+        forwardByPort[CH_KEYS[i]] = next;
+        i = i + 1;
+      }
+    },
+    setMidiForwardCombo: (portKey, sink) => {
+      const p = String(portKey || "");
+      if (CH_KEYS.indexOf(p) < 0) {
+        return;
+      }
+      forwardByPort[p] = sink && typeof sink.handleEvent === "function" ? sink : null;
+    },
+    getVisualState: () => ({
+      lastHitAt: lastHitAt.slice()
+    }),
+    handleEvent: (ev, ctx2) => {
+      if (!ev || !ctx2) {
+        return;
+      }
+      const ch0 = Number.isFinite(ev.channel) ? ev.channel : 0;
+      const idx = Math.max(0, Math.min(15, ch0));
+      lastHitAt[idx] = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
+      const sink = forwardByPort["ch" + String(idx + 1)];
+      if (sink && typeof sink.handleEvent === "function") {
+        sink.handleEvent(ev, ctx2);
+      }
+    },
+    dispose: () => {
+      forwardByPort = {};
+      lastHitAt = freshHits();
+    }
+  };
+
+  return {
+    "in": inNode,
+    "out": outNode,
+    lfo: null,
+    nodeAnalyser: null,
+    inPorts: null,
+    outPorts: null,
+    analysers: {},
+    nodeParamSync: null,
+    smartGateRuntime: null,
+    midiSink: midiSink
+  };
+}
+
+export fn midi_channel_splitter_View(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const audioDataMap = props.audioDataMap;
+  const previewOnly = props.previewOnly === true;
+  let [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 80);
+    return () => window.clearInterval(id);
+  }, []);
+  void tick;
+  const sink = audioDataMap && audioDataMap[node.id] && audioDataMap[node.id].midiSink;
+  const vis = sink && typeof sink.getVisualState === "function" ? sink.getVisualState() : { lastHitAt: freshHits() };
+  const now = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
+
+  const cells = [];
+  let i = 0;
+  while (i < 16) {
+    const age = now - (vis.lastHitAt[i] || 0);
+    const active = age < 180;
+    cells.push(
+      <div key={"ch-" + String(i)} class={"rounded border px-1 py-0.5 text-[7px] font-mono text-center " + (active ? "border-emerald-300 bg-emerald-600/70 text-white" : "border-neutral-700 bg-neutral-900 text-neutral-400")}>
+        {"CH" + String(i + 1)}
+      </div>
+    );
+    i = i + 1;
+  }
+
+  return (
+    <PedalChassis
+      node={node}
+      onRemove={onRemove}
+      onDragStart={onDragStart}
+      onToggleBypass={onToggleBypass}
+      previewOnly={previewOnly}
+      panelW={280}
+      panelH={220}
+      isAmpSim={false}
+      isCompact={true}
+    >
+      <div class="flex flex-col gap-2 w-full h-full text-[8px]">
+        <div class="text-center text-neutral-300 uppercase tracking-wider font-bold">Split MIDI by channel</div>
+        <div class="grid grid-cols-4 gap-1">{cells}</div>
+      </div>
+    </PedalChassis>
+  );
+}
