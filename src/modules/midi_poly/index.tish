@@ -40,8 +40,10 @@ export fn midi_poly_View(props) {
   let [actRev, setActRev] = useState(0);
   useEffect(() => {
     let t = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.body && document.body.classList && document.body.classList.contains("tf-dragging")) return;
+      if (typeof window !== "undefined" && window.__perfMarkTick) window.__perfMarkTick("midi_poly");
       setActRev((r) => r + 1);
-    }, 50);
+    }, 120);
     return () => {
       window.clearInterval(t);
     };

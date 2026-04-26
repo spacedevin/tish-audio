@@ -56,6 +56,18 @@ import * as drum_machine_xr from './instruments/drum_machine_xr/index.tish';
 import * as rompler_90s from './instruments/rompler_90s/index.tish';
 import * as vocoder_pad from './instruments/vocoder_pad/index.tish';
 import * as analog_mono_lead from './instruments/analog_mono_lead/index.tish';
+import * as multibank_xv from './instruments/multibank_xv/index.tish';
+import * as mpc_pads from './instruments/mpc_pads/index.tish';
+import { memo } from "lattish"
+
+/* Wrap a module's View with lattish `memo` so re-renders triggered by
+   unrelated state changes elsewhere in the app skip the rack subtree
+   when its `node`/`onChange`/etc. props are shallow-equal to last time.
+   Returns the original view unchanged when there's nothing to wrap. */
+fn memoView(viewFn) {
+  if (typeof viewFn !== "function") return viewFn;
+  return memo(viewFn);
+}
 
 export const MODULE_REGISTRY = {
   'amp_modern': {
@@ -63,7 +75,7 @@ export const MODULE_REGISTRY = {
     category: amp_modern.amp_modern_category,
     metadata: amp_modern.amp_modern_metadata,
     layout: amp_modern.amp_modern_layout,
-    View: amp_modern.amp_modern_View,
+    View: memoView(amp_modern.amp_modern_View),
     buildAudio: amp_modern.amp_modern_buildAudio,
   },
   'amp_stack': {
@@ -71,7 +83,7 @@ export const MODULE_REGISTRY = {
     category: amp_stack.amp_stack_category,
     metadata: amp_stack.amp_stack_metadata,
     layout: amp_stack.amp_stack_layout,
-    View: amp_stack.amp_stack_View,
+    View: memoView(amp_stack.amp_stack_View),
     buildAudio: amp_stack.amp_stack_buildAudio,
   },
   'amp_tweed': {
@@ -79,7 +91,7 @@ export const MODULE_REGISTRY = {
     category: amp_tweed.amp_tweed_category,
     metadata: amp_tweed.amp_tweed_metadata,
     layout: amp_tweed.amp_tweed_layout,
-    View: amp_tweed.amp_tweed_View,
+    View: memoView(amp_tweed.amp_tweed_View),
     buildAudio: amp_tweed.amp_tweed_buildAudio,
   },
   'auto_wah': {
@@ -87,7 +99,7 @@ export const MODULE_REGISTRY = {
     category: auto_wah.auto_wah_category,
     metadata: auto_wah.auto_wah_metadata,
     layout: auto_wah.auto_wah_layout,
-    View: auto_wah.auto_wah_View,
+    View: memoView(auto_wah.auto_wah_View),
     buildAudio: auto_wah.auto_wah_buildAudio,
   },
   'bitcrush': {
@@ -95,7 +107,7 @@ export const MODULE_REGISTRY = {
     category: bitcrush.bitcrush_category,
     metadata: bitcrush.bitcrush_metadata,
     layout: bitcrush.bitcrush_layout,
-    View: bitcrush.bitcrush_View,
+    View: memoView(bitcrush.bitcrush_View),
     buildAudio: bitcrush.bitcrush_buildAudio,
   },
   'blues_od': {
@@ -103,7 +115,7 @@ export const MODULE_REGISTRY = {
     category: blues_od.blues_od_category,
     metadata: blues_od.blues_od_metadata,
     layout: blues_od.blues_od_layout,
-    View: blues_od.blues_od_View,
+    View: memoView(blues_od.blues_od_View),
     buildAudio: blues_od.blues_od_buildAudio,
   },
   'boost': {
@@ -111,7 +123,7 @@ export const MODULE_REGISTRY = {
     category: boost.boost_category,
     metadata: boost.boost_metadata,
     layout: boost.boost_layout,
-    View: boost.boost_View,
+    View: memoView(boost.boost_View),
     buildAudio: boost.boost_buildAudio,
   },
   'centaur': {
@@ -119,7 +131,7 @@ export const MODULE_REGISTRY = {
     category: centaur.centaur_category,
     metadata: centaur.centaur_metadata,
     layout: centaur.centaur_layout,
-    View: centaur.centaur_View,
+    View: memoView(centaur.centaur_View),
     buildAudio: centaur.centaur_buildAudio,
   },
   'chainsaw': {
@@ -127,7 +139,7 @@ export const MODULE_REGISTRY = {
     category: chainsaw.chainsaw_category,
     metadata: chainsaw.chainsaw_metadata,
     layout: chainsaw.chainsaw_layout,
-    View: chainsaw.chainsaw_View,
+    View: memoView(chainsaw.chainsaw_View),
     buildAudio: chainsaw.chainsaw_buildAudio,
   },
   'chorus': {
@@ -135,7 +147,7 @@ export const MODULE_REGISTRY = {
     category: chorus.chorus_category,
     metadata: chorus.chorus_metadata,
     layout: chorus.chorus_layout,
-    View: chorus.chorus_View,
+    View: memoView(chorus.chorus_View),
     buildAudio: chorus.chorus_buildAudio,
   },
   'compressor': {
@@ -143,7 +155,7 @@ export const MODULE_REGISTRY = {
     category: compressor.compressor_category,
     metadata: compressor.compressor_metadata,
     layout: compressor.compressor_layout,
-    View: compressor.compressor_View,
+    View: memoView(compressor.compressor_View),
     buildAudio: compressor.compressor_buildAudio,
     acceptsControlInput: true,
   },
@@ -152,7 +164,7 @@ export const MODULE_REGISTRY = {
     category: crossover.crossover_category,
     metadata: crossover.crossover_metadata,
     layout: crossover.crossover_layout,
-    View: crossover.crossover_View,
+    View: memoView(crossover.crossover_View),
     buildAudio: crossover.crossover_buildAudio,
   },
   'delay': {
@@ -160,7 +172,7 @@ export const MODULE_REGISTRY = {
     category: delay.delay_category,
     metadata: delay.delay_metadata,
     layout: delay.delay_layout,
-    View: delay.delay_View,
+    View: memoView(delay.delay_View),
     buildAudio: delay.delay_buildAudio,
     acceptsControlInput: true,
   },
@@ -169,7 +181,7 @@ export const MODULE_REGISTRY = {
     category: ds1.ds1_category,
     metadata: ds1.ds1_metadata,
     layout: ds1.ds1_layout,
-    View: ds1.ds1_View,
+    View: memoView(ds1.ds1_View),
     buildAudio: ds1.ds1_buildAudio,
   },
   'dub_layer': {
@@ -177,7 +189,7 @@ export const MODULE_REGISTRY = {
     category: dub_layer.dub_layer_category,
     metadata: dub_layer.dub_layer_metadata,
     layout: dub_layer.dub_layer_layout,
-    View: dub_layer.dub_layer_View,
+    View: memoView(dub_layer.dub_layer_View),
     buildAudio: dub_layer.dub_layer_buildAudio,
   },
   'eq7': {
@@ -185,7 +197,7 @@ export const MODULE_REGISTRY = {
     category: eq7.eq7_category,
     metadata: eq7.eq7_metadata,
     layout: eq7.eq7_layout,
-    View: eq7.eq7_View,
+    View: memoView(eq7.eq7_View),
     buildAudio: eq7.eq7_buildAudio,
   },
   'flanger': {
@@ -193,7 +205,7 @@ export const MODULE_REGISTRY = {
     category: flanger.flanger_category,
     metadata: flanger.flanger_metadata,
     layout: flanger.flanger_layout,
-    View: flanger.flanger_View,
+    View: memoView(flanger.flanger_View),
     buildAudio: flanger.flanger_buildAudio,
   },
   'fuzz': {
@@ -201,7 +213,7 @@ export const MODULE_REGISTRY = {
     category: fuzz.fuzz_category,
     metadata: fuzz.fuzz_metadata,
     layout: fuzz.fuzz_layout,
-    View: fuzz.fuzz_View,
+    View: memoView(fuzz.fuzz_View),
     buildAudio: fuzz.fuzz_buildAudio,
   },
   'hall_verb': {
@@ -209,7 +221,7 @@ export const MODULE_REGISTRY = {
     category: hall_verb.hall_verb_category,
     metadata: hall_verb.hall_verb_metadata,
     layout: hall_verb.hall_verb_layout,
-    View: hall_verb.hall_verb_View,
+    View: memoView(hall_verb.hall_verb_View),
     buildAudio: hall_verb.hall_verb_buildAudio,
     acceptsControlInput: true,
   },
@@ -218,14 +230,14 @@ export const MODULE_REGISTRY = {
     category: metal.metal_category,
     metadata: metal.metal_metadata,
     layout: metal.metal_layout,
-    View: metal.metal_View,
+    View: memoView(metal.metal_View),
     buildAudio: metal.metal_buildAudio,
   },
   'midi_poly': {
     type: midi_poly.midi_poly_type,
     category: midi_poly.midi_poly_category,
     metadata: midi_poly.midi_poly_metadata,
-    View: midi_poly.midi_poly_View,
+    View: memoView(midi_poly.midi_poly_View),
     buildAudio: midi_poly.midi_poly_buildAudio,
     /** Node audio box exposes `midiSink` — MIDI_IN bindings may route here. */
     acceptsMidiInput: true,
@@ -234,7 +246,7 @@ export const MODULE_REGISTRY = {
     type: midi_recorder.midi_recorder_type,
     category: midi_recorder.midi_recorder_category,
     metadata: midi_recorder.midi_recorder_metadata,
-    View: midi_recorder.midi_recorder_View,
+    View: memoView(midi_recorder.midi_recorder_View),
     buildAudio: midi_recorder.midi_recorder_buildAudio,
     acceptsMidiInput: true,
     /** May emit a second MIDI cable (pass-through to downstream synth). */
@@ -244,7 +256,7 @@ export const MODULE_REGISTRY = {
     type: midi_channel_splitter.midi_channel_splitter_type,
     category: midi_channel_splitter.midi_channel_splitter_category,
     metadata: midi_channel_splitter.midi_channel_splitter_metadata,
-    View: midi_channel_splitter.midi_channel_splitter_View,
+    View: memoView(midi_channel_splitter.midi_channel_splitter_View),
     buildAudio: midi_channel_splitter.midi_channel_splitter_buildAudio,
     acceptsMidiInput: true,
     midiThrough: true,
@@ -253,7 +265,7 @@ export const MODULE_REGISTRY = {
     type: midi_semantic_splitter.midi_semantic_splitter_type,
     category: midi_semantic_splitter.midi_semantic_splitter_category,
     metadata: midi_semantic_splitter.midi_semantic_splitter_metadata,
-    View: midi_semantic_splitter.midi_semantic_splitter_View,
+    View: memoView(midi_semantic_splitter.midi_semantic_splitter_View),
     buildAudio: midi_semantic_splitter.midi_semantic_splitter_buildAudio,
     acceptsMidiInput: true,
     midiThrough: true,
@@ -262,7 +274,7 @@ export const MODULE_REGISTRY = {
     type: smk25_face.smk25_face_type,
     category: smk25_face.smk25_face_category,
     metadata: smk25_face.smk25_face_metadata,
-    View: smk25_face.smk25_face_View,
+    View: memoView(smk25_face.smk25_face_View),
     buildAudio: smk25_face.smk25_face_buildAudio,
     acceptsMidiInput: true,
     midiThrough: true,
@@ -272,7 +284,7 @@ export const MODULE_REGISTRY = {
     category: muff.muff_category,
     metadata: muff.muff_metadata,
     layout: muff.muff_layout,
-    View: muff.muff_View,
+    View: memoView(muff.muff_View),
     buildAudio: muff.muff_buildAudio,
     acceptsControlInput: true,
   },
@@ -281,7 +293,7 @@ export const MODULE_REGISTRY = {
     category: noise_gate.noise_gate_category,
     metadata: noise_gate.noise_gate_metadata,
     layout: noise_gate.noise_gate_layout,
-    View: noise_gate.noise_gate_View,
+    View: memoView(noise_gate.noise_gate_View),
     buildAudio: noise_gate.noise_gate_buildAudio,
   },
   'octa_fuzz': {
@@ -289,7 +301,7 @@ export const MODULE_REGISTRY = {
     category: octa_fuzz.octa_fuzz_category,
     metadata: octa_fuzz.octa_fuzz_metadata,
     layout: octa_fuzz.octa_fuzz_layout,
-    View: octa_fuzz.octa_fuzz_View,
+    View: memoView(octa_fuzz.octa_fuzz_View),
     buildAudio: octa_fuzz.octa_fuzz_buildAudio,
   },
   'overdrive': {
@@ -297,7 +309,7 @@ export const MODULE_REGISTRY = {
     category: overdrive.overdrive_category,
     metadata: overdrive.overdrive_metadata,
     layout: overdrive.overdrive_layout,
-    View: overdrive.overdrive_View,
+    View: memoView(overdrive.overdrive_View),
     buildAudio: overdrive.overdrive_buildAudio,
   },
   'phaser': {
@@ -305,7 +317,7 @@ export const MODULE_REGISTRY = {
     category: phaser.phaser_category,
     metadata: phaser.phaser_metadata,
     layout: phaser.phaser_layout,
-    View: phaser.phaser_View,
+    View: memoView(phaser.phaser_View),
     buildAudio: phaser.phaser_buildAudio,
   },
   'plate_verb': {
@@ -313,7 +325,7 @@ export const MODULE_REGISTRY = {
     category: plate_verb.plate_verb_category,
     metadata: plate_verb.plate_verb_metadata,
     layout: plate_verb.plate_verb_layout,
-    View: plate_verb.plate_verb_View,
+    View: memoView(plate_verb.plate_verb_View),
     buildAudio: plate_verb.plate_verb_buildAudio,
     acceptsControlInput: true,
   },
@@ -322,7 +334,7 @@ export const MODULE_REGISTRY = {
     category: rat.rat_category,
     metadata: rat.rat_metadata,
     layout: rat.rat_layout,
-    View: rat.rat_View,
+    View: memoView(rat.rat_View),
     buildAudio: rat.rat_buildAudio,
   },
   'ribbon_sim': {
@@ -330,7 +342,7 @@ export const MODULE_REGISTRY = {
     category: ribbon_sim.ribbon_sim_category,
     metadata: ribbon_sim.ribbon_sim_metadata,
     layout: ribbon_sim.ribbon_sim_layout,
-    View: ribbon_sim.ribbon_sim_View,
+    View: memoView(ribbon_sim.ribbon_sim_View),
     buildAudio: ribbon_sim.ribbon_sim_buildAudio,
   },
   'rotary': {
@@ -338,7 +350,7 @@ export const MODULE_REGISTRY = {
     category: rotary.rotary_category,
     metadata: rotary.rotary_metadata,
     layout: rotary.rotary_layout,
-    View: rotary.rotary_View,
+    View: memoView(rotary.rotary_View),
     buildAudio: rotary.rotary_buildAudio,
   },
   'screamer': {
@@ -346,7 +358,7 @@ export const MODULE_REGISTRY = {
     category: screamer.screamer_category,
     metadata: screamer.screamer_metadata,
     layout: screamer.screamer_layout,
-    View: screamer.screamer_View,
+    View: memoView(screamer.screamer_View),
     buildAudio: screamer.screamer_buildAudio,
   },
   'shimmer_verb': {
@@ -354,7 +366,7 @@ export const MODULE_REGISTRY = {
     category: shimmer_verb.shimmer_verb_category,
     metadata: shimmer_verb.shimmer_verb_metadata,
     layout: shimmer_verb.shimmer_verb_layout,
-    View: shimmer_verb.shimmer_verb_View,
+    View: memoView(shimmer_verb.shimmer_verb_View),
     buildAudio: shimmer_verb.shimmer_verb_buildAudio,
     acceptsControlInput: true,
   },
@@ -363,7 +375,7 @@ export const MODULE_REGISTRY = {
     category: slapback.slapback_category,
     metadata: slapback.slapback_metadata,
     layout: slapback.slapback_layout,
-    View: slapback.slapback_View,
+    View: memoView(slapback.slapback_View),
     buildAudio: slapback.slapback_buildAudio,
   },
   'sm57_sim': {
@@ -371,7 +383,7 @@ export const MODULE_REGISTRY = {
     category: sm57_sim.sm57_sim_category,
     metadata: sm57_sim.sm57_sim_metadata,
     layout: sm57_sim.sm57_sim_layout,
-    View: sm57_sim.sm57_sim_View,
+    View: memoView(sm57_sim.sm57_sim_View),
     buildAudio: sm57_sim.sm57_sim_buildAudio,
   },
   'smart_gate': {
@@ -379,7 +391,7 @@ export const MODULE_REGISTRY = {
     category: smart_gate.smart_gate_category,
     metadata: smart_gate.smart_gate_metadata,
     layout: smart_gate.smart_gate_layout,
-    View: smart_gate.smart_gate_View,
+    View: memoView(smart_gate.smart_gate_View),
     buildAudio: smart_gate.smart_gate_buildAudio,
     tickFrame: smart_gate.smart_gate_tickFrame
   },
@@ -388,7 +400,7 @@ export const MODULE_REGISTRY = {
     category: splitter.splitter_category,
     metadata: splitter.splitter_metadata,
     layout: splitter.splitter_layout,
-    View: splitter.splitter_View,
+    View: memoView(splitter.splitter_View),
     buildAudio: splitter.splitter_buildAudio,
   },
   'spring_verb': {
@@ -396,7 +408,7 @@ export const MODULE_REGISTRY = {
     category: spring_verb.spring_verb_category,
     metadata: spring_verb.spring_verb_metadata,
     layout: spring_verb.spring_verb_layout,
-    View: spring_verb.spring_verb_View,
+    View: memoView(spring_verb.spring_verb_View),
     buildAudio: spring_verb.spring_verb_buildAudio,
     acceptsControlInput: true,
   },
@@ -405,7 +417,7 @@ export const MODULE_REGISTRY = {
     category: sub_mosh.sub_mosh_category,
     metadata: sub_mosh.sub_mosh_metadata,
     layout: sub_mosh.sub_mosh_layout,
-    View: sub_mosh.sub_mosh_View,
+    View: memoView(sub_mosh.sub_mosh_View),
     buildAudio: sub_mosh.sub_mosh_buildAudio,
   },
   'tape_echo': {
@@ -413,7 +425,7 @@ export const MODULE_REGISTRY = {
     category: tape_echo.tape_echo_category,
     metadata: tape_echo.tape_echo_metadata,
     layout: tape_echo.tape_echo_layout,
-    View: tape_echo.tape_echo_View,
+    View: memoView(tape_echo.tape_echo_View),
     buildAudio: tape_echo.tape_echo_buildAudio,
   },
   'tremolo': {
@@ -421,7 +433,7 @@ export const MODULE_REGISTRY = {
     category: tremolo.tremolo_category,
     metadata: tremolo.tremolo_metadata,
     layout: tremolo.tremolo_layout,
-    View: tremolo.tremolo_View,
+    View: memoView(tremolo.tremolo_View),
     buildAudio: tremolo.tremolo_buildAudio,
   },
   'tron': {
@@ -429,7 +441,7 @@ export const MODULE_REGISTRY = {
     category: tron.tron_category,
     metadata: tron.tron_metadata,
     layout: tron.tron_layout,
-    View: tron.tron_View,
+    View: memoView(tron.tron_View),
     buildAudio: tron.tron_buildAudio,
   },
   'u87_sim': {
@@ -437,7 +449,7 @@ export const MODULE_REGISTRY = {
     category: u87_sim.u87_sim_category,
     metadata: u87_sim.u87_sim_metadata,
     layout: u87_sim.u87_sim_layout,
-    View: u87_sim.u87_sim_View,
+    View: memoView(u87_sim.u87_sim_View),
     buildAudio: u87_sim.u87_sim_buildAudio,
   },
   'vibrato': {
@@ -445,7 +457,7 @@ export const MODULE_REGISTRY = {
     category: vibrato.vibrato_category,
     metadata: vibrato.vibrato_metadata,
     layout: vibrato.vibrato_layout,
-    View: vibrato.vibrato_View,
+    View: memoView(vibrato.vibrato_View),
     buildAudio: vibrato.vibrato_buildAudio,
   },
   'vocal_doubler': {
@@ -453,7 +465,7 @@ export const MODULE_REGISTRY = {
     category: vocal_doubler.vocal_doubler_category,
     metadata: vocal_doubler.vocal_doubler_metadata,
     layout: vocal_doubler.vocal_doubler_layout,
-    View: vocal_doubler.vocal_doubler_View,
+    View: memoView(vocal_doubler.vocal_doubler_View),
     buildAudio: vocal_doubler.vocal_doubler_buildAudio,
   },
   'pad_micro': {
@@ -461,7 +473,7 @@ export const MODULE_REGISTRY = {
     category: pad_micro.pad_micro_category,
     metadata: pad_micro.pad_micro_metadata,
     layout: pad_micro.pad_micro_layout,
-    View: pad_micro.pad_micro_View,
+    View: memoView(pad_micro.pad_micro_View),
     buildAudio: pad_micro.pad_micro_buildAudio,
     acceptsMidiInput: true,
     paintScene: pad_micro.pad_micro_paintScene,
@@ -474,7 +486,7 @@ export const MODULE_REGISTRY = {
     category: analog_poly_juniper.analog_poly_juniper_category,
     metadata: analog_poly_juniper.analog_poly_juniper_metadata,
     layout: analog_poly_juniper.analog_poly_juniper_layout,
-    View: analog_poly_juniper.analog_poly_juniper_View,
+    View: memoView(analog_poly_juniper.analog_poly_juniper_View),
     buildAudio: analog_poly_juniper.analog_poly_juniper_buildAudio,
     acceptsMidiInput: true,
     paintScene: analog_poly_juniper.analog_poly_juniper_paintScene,
@@ -487,7 +499,7 @@ export const MODULE_REGISTRY = {
     category: fm_4op.fm_4op_category,
     metadata: fm_4op.fm_4op_metadata,
     layout: fm_4op.fm_4op_layout,
-    View: fm_4op.fm_4op_View,
+    View: memoView(fm_4op.fm_4op_View),
     buildAudio: fm_4op.fm_4op_buildAudio,
     acceptsMidiInput: true,
     paintScene: fm_4op.fm_4op_paintScene,
@@ -500,7 +512,7 @@ export const MODULE_REGISTRY = {
     category: hybrid_toxic_x.hybrid_toxic_x_category,
     metadata: hybrid_toxic_x.hybrid_toxic_x_metadata,
     layout: hybrid_toxic_x.hybrid_toxic_x_layout,
-    View: hybrid_toxic_x.hybrid_toxic_x_View,
+    View: memoView(hybrid_toxic_x.hybrid_toxic_x_View),
     buildAudio: hybrid_toxic_x.hybrid_toxic_x_buildAudio,
     acceptsMidiInput: true,
     paintScene: hybrid_toxic_x.hybrid_toxic_x_paintScene,
@@ -513,7 +525,7 @@ export const MODULE_REGISTRY = {
     category: wavetable_morph.wavetable_morph_category,
     metadata: wavetable_morph.wavetable_morph_metadata,
     layout: wavetable_morph.wavetable_morph_layout,
-    View: wavetable_morph.wavetable_morph_View,
+    View: memoView(wavetable_morph.wavetable_morph_View),
     buildAudio: wavetable_morph.wavetable_morph_buildAudio,
     acceptsMidiInput: true,
     paintScene: wavetable_morph.wavetable_morph_paintScene,
@@ -526,7 +538,7 @@ export const MODULE_REGISTRY = {
     category: organ_drawbars.organ_drawbars_category,
     metadata: organ_drawbars.organ_drawbars_metadata,
     layout: organ_drawbars.organ_drawbars_layout,
-    View: organ_drawbars.organ_drawbars_View,
+    View: memoView(organ_drawbars.organ_drawbars_View),
     buildAudio: organ_drawbars.organ_drawbars_buildAudio,
     acceptsMidiInput: true,
     paintScene: organ_drawbars.organ_drawbars_paintScene,
@@ -539,7 +551,7 @@ export const MODULE_REGISTRY = {
     category: drum_machine_xr.drum_machine_xr_category,
     metadata: drum_machine_xr.drum_machine_xr_metadata,
     layout: drum_machine_xr.drum_machine_xr_layout,
-    View: drum_machine_xr.drum_machine_xr_View,
+    View: memoView(drum_machine_xr.drum_machine_xr_View),
     buildAudio: drum_machine_xr.drum_machine_xr_buildAudio,
     acceptsMidiInput: true,
     paintScene: drum_machine_xr.drum_machine_xr_paintScene,
@@ -552,7 +564,7 @@ export const MODULE_REGISTRY = {
     category: rompler_90s.rompler_90s_category,
     metadata: rompler_90s.rompler_90s_metadata,
     layout: rompler_90s.rompler_90s_layout,
-    View: rompler_90s.rompler_90s_View,
+    View: memoView(rompler_90s.rompler_90s_View),
     buildAudio: rompler_90s.rompler_90s_buildAudio,
     acceptsMidiInput: true,
     paintScene: rompler_90s.rompler_90s_paintScene,
@@ -565,7 +577,7 @@ export const MODULE_REGISTRY = {
     category: vocoder_pad.vocoder_pad_category,
     metadata: vocoder_pad.vocoder_pad_metadata,
     layout: vocoder_pad.vocoder_pad_layout,
-    View: vocoder_pad.vocoder_pad_View,
+    View: memoView(vocoder_pad.vocoder_pad_View),
     buildAudio: vocoder_pad.vocoder_pad_buildAudio,
     acceptsMidiInput: true,
     paintScene: vocoder_pad.vocoder_pad_paintScene,
@@ -578,13 +590,39 @@ export const MODULE_REGISTRY = {
     category: analog_mono_lead.analog_mono_lead_category,
     metadata: analog_mono_lead.analog_mono_lead_metadata,
     layout: analog_mono_lead.analog_mono_lead_layout,
-    View: analog_mono_lead.analog_mono_lead_View,
+    View: memoView(analog_mono_lead.analog_mono_lead_View),
     buildAudio: analog_mono_lead.analog_mono_lead_buildAudio,
     acceptsMidiInput: true,
     paintScene: analog_mono_lead.analog_mono_lead_paintScene,
     inputBindings: analog_mono_lead.analog_mono_lead_inputBindings,
     parameters: analog_mono_lead.analog_mono_lead_parameters,
     requirements: analog_mono_lead.analog_mono_lead_requirements,
+  },
+  'multibank_xv': {
+    type: multibank_xv.multibank_xv_type,
+    category: multibank_xv.multibank_xv_category,
+    metadata: multibank_xv.multibank_xv_metadata,
+    layout: multibank_xv.multibank_xv_layout,
+    View: memoView(multibank_xv.multibank_xv_View),
+    buildAudio: multibank_xv.multibank_xv_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: multibank_xv.multibank_xv_paintScene,
+    inputBindings: multibank_xv.multibank_xv_inputBindings,
+    parameters: multibank_xv.multibank_xv_parameters,
+    requirements: multibank_xv.multibank_xv_requirements,
+  },
+  'mpc_pads': {
+    type: mpc_pads.mpc_pads_type,
+    category: mpc_pads.mpc_pads_category,
+    metadata: mpc_pads.mpc_pads_metadata,
+    layout: mpc_pads.mpc_pads_layout,
+    View: memoView(mpc_pads.mpc_pads_View),
+    buildAudio: mpc_pads.mpc_pads_buildAudio,
+    acceptsMidiInput: true,
+    paintScene: mpc_pads.mpc_pads_paintScene,
+    inputBindings: mpc_pads.mpc_pads_inputBindings,
+    parameters: mpc_pads.mpc_pads_parameters,
+    requirements: mpc_pads.mpc_pads_requirements,
   },
 };
 
@@ -665,7 +703,9 @@ const LEGACY_LIBRARY = {
     { type: 'drum_machine_xr', label: 'Drum Machine XR', color: 'from-red-700 to-orange-900', theme: 'dark', defaultParams: { level: 0.5, tone: 0.45, motion: 0.6 } },
     { type: 'rompler_90s', label: 'Rompler 90s', color: 'from-blue-600 to-blue-900', theme: 'dark', defaultParams: { level: 0.5, tone: 0.52, motion: 0.48 } },
     { type: 'vocoder_pad', label: 'Vocoder Pad', color: 'from-zinc-600 to-zinc-900', theme: 'dark', defaultParams: { level: 0.44, tone: 0.57, motion: 0.5 } },
-    { type: 'analog_mono_lead', label: 'Analog Mono Lead', color: 'from-amber-600 to-orange-900', theme: 'dark', defaultParams: { level: 0.5, tone: 0.67, motion: 0.31 } }
+    { type: 'analog_mono_lead', label: 'Analog Mono Lead', color: 'from-amber-600 to-orange-900', theme: 'dark', defaultParams: { level: 0.5, tone: 0.67, motion: 0.31 } },
+    { type: 'multibank_xv', label: 'MultiBank XV-1000', color: 'from-sky-700 via-blue-900 to-indigo-950', theme: 'dark', defaultParams: { program: 0.0, level: 0.42, tone: 0.55, attack: 0.3, release: 0.4, mix: 0.5 } },
+    { type: 'mpc_pads', label: 'MPC-16 Velocity Pads', color: 'from-rose-700 via-orange-900 to-amber-950', theme: 'dark', defaultParams: { kit: 0.0, level: 0.5, tune: 0.5, swing: 0.0, decay: 0.5 } }
   ],
   UTILITY: [
     { type: 'vu_meter', label: 'VU Meter', color: 'from-slate-800 to-slate-950', theme: 'dark', defaultParams: { level: 1.0 } },
@@ -710,7 +750,9 @@ const MODULES_WITHOUT_AUTO_CONTROL_PORTS = {
   drum_machine_xr: true,
   rompler_90s: true,
   vocoder_pad: true,
-  analog_mono_lead: true
+  analog_mono_lead: true,
+  multibank_xv: true,
+  mpc_pads: true
 };
 
 export fn getNodeControlPorts(node) {
@@ -969,6 +1011,12 @@ export fn controlParamRangeForKey(moduleType, paramKey) {
   if (t === "pad_micro" || t === "analog_poly_juniper" || t === "fm_4op" || t === "hybrid_toxic_x" || t === "wavetable_morph" || t === "organ_drawbars" || t === "drum_machine_xr" || t === "rompler_90s" || t === "vocoder_pad" || t === "analog_mono_lead") {
     if (key === "level" || key === "tone" || key === "motion") return { min: 0, max: 1 };
   }
+  if (t === "multibank_xv") {
+    if (key === "program" || key === "level" || key === "tone" || key === "attack" || key === "release" || key === "mix") return { min: 0, max: 1 };
+  }
+  if (t === "mpc_pads") {
+    if (key === "kit" || key === "level" || key === "tune" || key === "swing" || key === "decay") return { min: 0, max: 1 };
+  }
   if (key === "time") return { min: 0, max: 8 };
   if (key === "threshold") return { min: -60, max: 0 };
   if (key === "ratio") return { min: 1, max: 20 };
@@ -1012,7 +1060,7 @@ export const getNodePorts = (node) => {
     return { "in": ['midi1', 'midi2', 'midi3'], "out": SMK25_FACE_OUT_PORTS };
   }
   if (node["type"] === 'midi_poly') return { "in": ['midi'], "out": ['main'] };
-  if (node["type"] === 'pad_micro' || node["type"] === 'analog_poly_juniper' || node["type"] === 'fm_4op' || node["type"] === 'hybrid_toxic_x' || node["type"] === 'wavetable_morph' || node["type"] === 'organ_drawbars' || node["type"] === 'drum_machine_xr' || node["type"] === 'rompler_90s' || node["type"] === 'vocoder_pad' || node["type"] === 'analog_mono_lead') return { "in": ['midi', 'main'], "out": ['main'] };
+  if (node["type"] === 'pad_micro' || node["type"] === 'analog_poly_juniper' || node["type"] === 'fm_4op' || node["type"] === 'hybrid_toxic_x' || node["type"] === 'wavetable_morph' || node["type"] === 'organ_drawbars' || node["type"] === 'drum_machine_xr' || node["type"] === 'rompler_90s' || node["type"] === 'vocoder_pad' || node["type"] === 'analog_mono_lead' || node["type"] === 'multibank_xv' || node["type"] === 'mpc_pads') return { "in": ['midi', 'main'], "out": ['main'] };
   const regAccept = MODULE_REGISTRY[node["type"]];
   if (regAccept && regAccept.acceptsMidiInput === true) {
     return { "in": ['midi', 'main'], "out": ['main'] };

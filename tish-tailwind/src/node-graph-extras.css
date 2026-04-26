@@ -140,3 +140,71 @@
 .overflow-visible {
   overflow: visible;
 }
+
+/* The patch board is the entire scene and is on screen for the lifetime of
+   the app. Force WebKit to put it on its own compositor layer at first paint
+   so the cold-start "first drag is laggy until alt-tab wakes the compositor"
+   regression doesn't happen. One layer is fine; many layers are not. */
+.tf-patch-board {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Rack metal-texture overlay. Was an SVG `filter: url(#metal-texture)` chain
+   (`feTurbulence` + `feColorMatrix` + `feBlend`) applied per rack — that
+   pipeline runs per-pixel on every first paint, costing ~500 ms per rack on
+   WebKit's cold rasterizer cache and forcing the patchboard to feel laggy
+   until alt-tab incidentally warmed the layer.
+   Replaced with a 64×64 baked noise tile delivered as a data-URI, so the
+   browser parses + rasterizes the bitmap ONCE and tiles it. Cost is one
+   `background-image` blit per rack — basically free, and identical look. */
+.tf-texture {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.18 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-repeat: repeat;
+  background-size: 64px 64px;
+  filter: none !important;
+}
+
+/* Per-app GPU warmup window: App.tish sets body.tf-warming-up for ~240ms
+   after mount and we re-arm it briefly each time a rack is freshly added,
+   so the very first drag (and the first drag of a freshly-spawned rack)
+   is as fast as steady-state. `will-change` only forces eager layer
+   promotion while it's set — we drop it after the window so we don't keep
+   N permanent compositor layers around. */
+body.tf-warming-up .tf-node-root {
+  will-change: transform;
+}
+
+/* --- Drag/render perf -----------------------------------------------------
+   We DON'T put `will-change: transform` or a permanent `translateZ(0)` on
+   every `.tf-node-root`: WebKit (Tauri WKWebView) creates a separate
+   compositor layer per element, which blows GPU memory and slows the whole
+   patchboard even when nothing is moving.
+
+   Instead:
+   - `contain: layout paint` isolates each rack's layout/paint to its own
+     box, so a moving sibling doesn't force re-layout of the rest. Cheap and
+     no GPU layer cost.
+   - During drag, JS sets `willChange = "transform"` on the active node only
+     and clears it on pointer-up (see startDragNode / handlePointerUp).
+   - During drag, the body gets `tf-dragging` so the SVG metal-texture
+     filter and CSS transitions stop on every rack, which is what kills the
+     compositor cost that comes from re-rasterizing filters per frame. */
+.tf-node-root {
+  contain: layout paint;
+}
+
+body.tf-dragging .tf-node-root .tf-texture {
+  filter: none !important;
+}
+body.tf-dragging .tf-node-root {
+  transition: none !important;
+}
+body.tf-dragging .tf-node-root [class*="hover\\:"],
+body.tf-dragging .tf-node-root .group-hover\:opacity-100 {
+  /* Skip hover-state writes while transforming */
+  pointer-events: none !important;
+}
+body.tf-dragging svg.tf-board {
+  cursor: grabbing;
+}

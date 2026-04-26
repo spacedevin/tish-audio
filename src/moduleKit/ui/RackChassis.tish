@@ -63,13 +63,13 @@ export fn _RackChassis(props) {
   return (
     <div
       class={
-        "relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] transition-all duration-300 select-none touch-none " +
+        "relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] transition-[opacity,filter] duration-300 select-none touch-none " +
         shellExtra +
         " " +
         (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")
       }
     >
-      <div class="absolute inset-0 pointer-events-none opacity-[0.18]" style={{ filter: "url(#metal-texture)" }} />
+      <div class="tf-texture absolute inset-0 pointer-events-none opacity-[0.18]" style={{ filter: "url(#metal-texture)" }} />
 
       {!previewOnly && onDragStart ? (
         <div

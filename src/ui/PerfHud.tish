@@ -1,0 +1,328 @@
+/**
+ * Live performance HUD for diagnosing the cold-drag / post-alt-tab gap.
+ *
+ * Shows in the top-right of the patchboard:
+ *   - document.hasFocus() / visibilityState
+ *   - rAF cadence: average + max gap (ms) over the last 60 frames; derived FPS
+ *   - pointermove rate during drag: events/sec, average & max gap, queued vs
+ *     coalesced via getCoalescedEvents()
+ *   - drag transform-write rate (frames the rack actually moved on)
+ *   - timeline of focus / blur / visibilitychange / pageshow events with
+ *     wall-clock and document-time deltas
+ *
+ * All measurements run at module load and stream to both the on-screen HUD
+ * (auto-mounted by App.tish) and console.log so the user can paste the cold
+ * vs. warm transcript. Add `?perf=0` to the URL to suppress the HUD.
+ */
+import { h, useState, useEffect, useRef } from "lattish"
+
+const APP_T0 = (typeof performance !== "undefined" && performance.now)
+  ? performance.now()
+  : Date.now();
+
+let rafGaps = [];
+let lastRafAt = null;
+let lastRafGap = 0;
+let rafFrameCount = 0;
+
+let pointerGaps = [];
+let lastPointerAt = null;
+let pointerCountInWindow = 0;
+let pointerWindowStart = APP_T0;
+let lastCoalescedCount = 0;
+
+let dragWriteCountWindow = 0;
+let dragWriteWindowStart = APP_T0;
+let lastDragWriteRate = 0;
+
+const focusEvents = [];
+
+const fmt2 = (n) => {
+  if (!Number.isFinite(n)) return "0.00";
+  const v = Number(n);
+  const r = Math.round(v * 100) / 100;
+  return String(r);
+};
+
+const avg = (arr) => {
+  if (!arr || !arr.length) return 0;
+  let s = 0;
+  let i = 0;
+  while (i < arr.length) { s = s + arr[i]; i = i + 1; }
+  return s / arr.length;
+};
+
+const maxOf = (arr) => {
+  if (!arr || !arr.length) return 0;
+  let m = arr[0];
+  let i = 1;
+  while (i < arr.length) { if (arr[i] > m) m = arr[i]; i = i + 1; }
+  return m;
+};
+
+/** Public hook so the patchboard's drag handler can count actual transform
+ *  writes. Called by NodeGraphView.flushDragFrame on every successful write. */
+export fn perfMarkDragWrite() {
+  dragWriteCountWindow = dragWriteCountWindow + 1;
+}
+
+/* Render-rate probe. App.tish calls perfMarkRender() at the top of its
+   function body so we count every full app re-render (lattish flushRender →
+   App() invocation). Helps catch "every setInterval tick re-renders the
+   whole app" storms. */
+let renderCountWindow = 0;
+let lastRenderRate = 0;
+let renderWindowStart = APP_T0;
+export fn perfMarkRender() {
+  renderCountWindow = renderCountWindow + 1;
+}
+
+/* Phase-resolved render duration (set by lattish in flushRender via a
+   window callback). renderMs is the cost of rebuilding the JSX tree;
+   patchMs is the cost of the DOM diff. If renders/s is low but renderMs
+   or patchMs is high, every flush is blocking the main thread, which
+   feels janky even at 10 Hz. */
+let renderMsSamples = [];
+let patchMsSamples = [];
+let renderInFlight = false;
+const setStateInRenderHits = {};
+let setStateInRenderTotal = 0;
+let lastSetStateInRenderTotal = 0;
+if (typeof window !== "undefined") {
+  window.__lattishOnFlush = (renderMs, patchMs) => {
+    renderMsSamples.push(renderMs);
+    patchMsSamples.push(patchMs);
+    if (renderMsSamples.length > 30) renderMsSamples.shift();
+    if (patchMsSamples.length > 30) patchMsSamples.shift();
+  };
+  /* Detect setState-during-render loops. Lattish calls
+     __lattishSetStateProbe(slotIdx) on every setState. We mark any call
+     made while a flushRender is underway (window.__lattishRendering) as a
+     suspect — the slot index gives us a stable key to attribute the loop
+     to a specific useState declaration. */
+  window.__lattishSetStateProbe = (slotIdx) => {
+    if (window.__lattishRendering === true) {
+      const k = "slot#" + String(slotIdx);
+      setStateInRenderHits[k] = (setStateInRenderHits[k] || 0) + 1;
+      setStateInRenderTotal = setStateInRenderTotal + 1;
+    }
+  };
+}
+
+/* MIDI event probe. useMidiPatch / router calls perfMarkMidiEvent() per
+   incoming dispatch so we can see if hardware is flooding us. */
+let midiCountWindow = 0;
+let lastMidiRate = 0;
+let midiWindowStart = APP_T0;
+export fn perfMarkMidiEvent() {
+  midiCountWindow = midiCountWindow + 1;
+}
+
+/* Tagged-setState probe. Modules that own a setInterval tick can call
+   perfMarkTick(tag) so we can attribute renders/sec to a source. The HUD
+   shows the top 3 most-active tags. */
+const tickCounts = {};
+let lastTickReport = {};
+export fn perfMarkTick(tag) {
+  const key = String(tag || "?");
+  tickCounts[key] = (tickCounts[key] || 0) + 1;
+}
+if (typeof window !== "undefined") {
+  /* Allow individual modules to tag their setInterval ticks without
+     importing PerfHud (avoids circular import noise across the registry). */
+  window.__perfMarkTick = perfMarkTick;
+}
+
+const installRafProbe = () => {
+  if (typeof window === "undefined" || !window.requestAnimationFrame) return;
+  const tick = (t) => {
+    if (lastRafAt != null) {
+      const gap = t - lastRafAt;
+      lastRafGap = gap;
+      rafGaps.push(gap);
+      if (rafGaps.length > 60) rafGaps.shift();
+    }
+    lastRafAt = t;
+    rafFrameCount = rafFrameCount + 1;
+    window.requestAnimationFrame(tick);
+  };
+  window.requestAnimationFrame(tick);
+};
+
+const installPointerProbe = () => {
+  if (typeof window === "undefined" || !window.addEventListener) return;
+  const onMove = (e) => {
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    if (lastPointerAt != null) {
+      const gap = now - lastPointerAt;
+      pointerGaps.push(gap);
+      if (pointerGaps.length > 60) pointerGaps.shift();
+    }
+    lastPointerAt = now;
+    pointerCountInWindow = pointerCountInWindow + 1;
+    let coalesced = 0;
+    if (e && typeof e.getCoalescedEvents === "function") {
+      try { coalesced = e.getCoalescedEvents().length; } catch (eC) { void eC; coalesced = 0; }
+    }
+    lastCoalescedCount = coalesced;
+  };
+  window.addEventListener("pointermove", onMove, { passive: true, capture: true });
+};
+
+const installFocusProbe = () => {
+  if (typeof window === "undefined" || !window.addEventListener) return;
+  const log = (kind, extra) => {
+    const t = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    const dt = t - APP_T0;
+    const row = { kind: kind, dt: dt, extra: extra || null };
+    focusEvents.push(row);
+    if (focusEvents.length > 12) focusEvents.shift();
+    if (typeof console !== "undefined" && console.info) {
+      console.info("[PerfHud] " + kind + " @" + Math.round(dt) + "ms hasFocus=" + (typeof document !== "undefined" ? document.hasFocus() : "?") + " visibility=" + (typeof document !== "undefined" ? document.visibilityState : "?"));
+    }
+  };
+  window.addEventListener("focus", () => log("window:focus"));
+  window.addEventListener("blur", () => log("window:blur"));
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("visibilitychange", () => log("visibilitychange", document.visibilityState));
+    document.addEventListener("focus", () => log("doc:focus"), true);
+    document.addEventListener("blur", () => log("doc:blur"), true);
+  }
+  log("PerfHud:init", { hasFocus: typeof document !== "undefined" ? document.hasFocus() : null, visibility: typeof document !== "undefined" ? document.visibilityState : null });
+};
+
+let probesInstalled = false;
+const ensureProbes = () => {
+  if (probesInstalled) return;
+  probesInstalled = true;
+  installRafProbe();
+  installPointerProbe();
+  installFocusProbe();
+};
+
+export fn PerfHud(props) {
+  void props;
+  let [tick, setTick] = useState(0);
+  useEffect(() => {
+    ensureProbes();
+    const id = window.setInterval(() => {
+      const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+      const dragEl = now - dragWriteWindowStart;
+      if (dragEl > 0) lastDragWriteRate = (dragWriteCountWindow * 1000) / dragEl;
+      dragWriteCountWindow = 0;
+      dragWriteWindowStart = now;
+      const renderEl = now - renderWindowStart;
+      if (renderEl > 0) lastRenderRate = (renderCountWindow * 1000) / renderEl;
+      renderCountWindow = 0;
+      renderWindowStart = now;
+      const midiEl = now - midiWindowStart;
+      if (midiEl > 0) lastMidiRate = (midiCountWindow * 1000) / midiEl;
+      midiCountWindow = 0;
+      midiWindowStart = now;
+      lastTickReport = {};
+      const keys = Object.keys(tickCounts);
+      let i = 0;
+      while (i < keys.length) {
+        lastTickReport[keys[i]] = tickCounts[keys[i]];
+        tickCounts[keys[i]] = 0;
+        i = i + 1;
+      }
+      lastSetStateInRenderTotal = setStateInRenderTotal;
+      setStateInRenderTotal = 0;
+      pointerCountInWindow = 0;
+      pointerWindowStart = now;
+      setTick((x) => x + 1);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, []);
+  void tick;
+
+  const hasFocus = typeof document !== "undefined" && document.hasFocus ? document.hasFocus() : false;
+  const visibility = typeof document !== "undefined" ? document.visibilityState : "?";
+  const rafAvg = avg(rafGaps);
+  const rafMax = maxOf(rafGaps);
+  const fps = rafAvg > 0 ? 1000 / rafAvg : 0;
+  const pAvg = avg(pointerGaps);
+  const pMax = maxOf(pointerGaps);
+  const pHz = pAvg > 0 ? 1000 / pAvg : 0;
+  const renderMsAvg = avg(renderMsSamples);
+  const renderMsMax = maxOf(renderMsSamples);
+  const patchMsAvg = avg(patchMsSamples);
+  const patchMsMax = maxOf(patchMsSamples);
+  const totalMs = renderMsAvg + patchMsAvg;
+  const blockedPct = lastRenderRate > 0 ? (lastRenderRate * totalMs) / 10 : 0; // (rate * ms) / 1000ms * 100%
+
+  const focusRows = [];
+  let i = focusEvents.length - 1;
+  let added = 0;
+  while (i >= 0 && added < 5) {
+    const r = focusEvents[i];
+    focusRows.push(<div key={i} class="text-[9px] opacity-80">{"+" + Math.round(r.dt) + "ms " + r.kind + (r.extra ? " " + String(r.extra) : "")}</div>);
+    i = i - 1;
+    added = added + 1;
+  }
+
+  /* Top-3 most active setInterval tick sources (lower = better). */
+  const topTickRows = [];
+  {
+    const tagKeys = Object.keys(lastTickReport);
+    const sorted = tagKeys.slice().sort((a, b) => (lastTickReport[b] || 0) - (lastTickReport[a] || 0));
+    let ti = 0;
+    while (ti < sorted.length && ti < 3) {
+      const k = sorted[ti];
+      topTickRows.push(<div key={k} class="text-[9px] opacity-85">{k} {lastTickReport[k]}/0.5s</div>);
+      ti = ti + 1;
+    }
+  }
+
+  /* Top-5 useState slots that fired DURING a render (this is the smoking
+     gun for "renders 1000/s" infinite loops — any non-zero count here is
+     a setState-in-render call). */
+  const renderHitRows = [];
+  {
+    const hKeys = Object.keys(setStateInRenderHits);
+    const sortedH = hKeys.slice().sort((a, b) => (setStateInRenderHits[b] || 0) - (setStateInRenderHits[a] || 0));
+    let hi = 0;
+    while (hi < sortedH.length && hi < 5) {
+      const k = sortedH[hi];
+      renderHitRows.push(<div key={k} class="text-[9px] text-rose-300">{k} {setStateInRenderHits[k]}</div>);
+      hi = hi + 1;
+    }
+  }
+
+  return (
+    <div class="absolute top-1 right-1 z-[120] pointer-events-none font-mono text-[10px] leading-tight px-2 py-1 rounded-sm bg-black/80 border border-zinc-700 text-emerald-200 select-none" style={{ width: "240px" }}>
+      <div class="text-[10px] font-bold tracking-[0.2em] text-emerald-300 mb-0.5">PERF HUD</div>
+      <div>focus={hasFocus ? "T" : "F"} vis={visibility}</div>
+      <div>raf {fmt2(rafAvg)}ms (max {fmt2(rafMax)}) ≈ {fmt2(fps)}fps</div>
+      <div>ptr {fmt2(pAvg)}ms (max {fmt2(pMax)}) ≈ {fmt2(pHz)}Hz coal={lastCoalescedCount}</div>
+      <div>dragWrites {fmt2(lastDragWriteRate)}/s</div>
+      <div class={"font-bold " + (lastRenderRate > 30 ? "text-rose-300" : (lastRenderRate > 10 ? "text-amber-300" : "text-emerald-200"))}>renders {fmt2(lastRenderRate)}/s</div>
+      <div class={renderMsAvg > 16 ? "text-rose-300" : (renderMsAvg > 8 ? "text-amber-300" : "text-emerald-200")}>renderMs {fmt2(renderMsAvg)} (max {fmt2(renderMsMax)})</div>
+      <div class={patchMsAvg > 16 ? "text-rose-300" : (patchMsAvg > 8 ? "text-amber-300" : "text-emerald-200")}>patchMs {fmt2(patchMsAvg)} (max {fmt2(patchMsMax)})</div>
+      <div class={blockedPct > 50 ? "text-rose-300" : (blockedPct > 25 ? "text-amber-300" : "text-emerald-200")}>main blocked ≈ {fmt2(blockedPct)}%</div>
+      <div class={lastMidiRate > 200 ? "text-rose-300" : "text-emerald-200"}>midi {fmt2(lastMidiRate)}/s</div>
+      <div class={"mt-1 border-t border-zinc-700 pt-0.5 " + (lastSetStateInRenderTotal > 0 ? "bg-rose-950/30" : "")}>
+        <div class={"text-[8px] tracking-[0.18em] opacity-80 " + (lastSetStateInRenderTotal > 0 ? "text-rose-300 font-bold" : "text-emerald-400")}>setState-in-render {lastSetStateInRenderTotal > 0 ? "⚠ " + String(lastSetStateInRenderTotal) + "/0.5s" : "0"}</div>
+        {renderHitRows}
+      </div>
+      <div class="mt-1 border-t border-zinc-700 pt-0.5">
+        <div class="text-[8px] tracking-[0.18em] text-emerald-400 opacity-80">TICK SOURCES</div>
+        {topTickRows.length > 0 ? topTickRows : <div class="text-[9px] opacity-60">(none)</div>}
+      </div>
+      <div class="mt-1 border-t border-zinc-700 pt-0.5">
+        <div class="text-[8px] tracking-[0.18em] text-emerald-400 opacity-80">FOCUS LOG</div>
+        {focusRows}
+      </div>
+    </div>
+  );
+}
+
+export fn perfHudEnabled() {
+  if (typeof window === "undefined" || !window.location) return true;
+  try {
+    const qp = new URLSearchParams(window.location.search || "");
+    if (qp.get("perf") === "0") return false;
+  } catch (e) { void e; }
+  return true;
+}

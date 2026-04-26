@@ -15,13 +15,12 @@ import { applyMidiLikeToGeneratorSink } from "./voiceApi.tish"
 import { enrichMidiDeviceRow } from "../inputDevices/midiHardwareVisuals.tish"
 import { mergeMidiHardwareRows } from "./midiPortGroups.tish"
 import { isMidiDebugEnabled, midiDebugLog } from "./midiDebug.tish"
-import { deviceRowIsSmk25FamilyCombo, buildSmk25LayoutNode, smk25DefaultComboEdges } from "./deviceAutoLayout.tish"
+import { deviceRowIsSmk25FamilyCombo, smk25DefaultComboEdges } from "./deviceAutoLayout.tish"
+import { getHardwareAutoRig, rigPortDescriptor, detectAudioCapabilities } from "./hardwareAutoRig.tish"
+import { perfMarkMidiEvent } from "../ui/PerfHud.tish"
 import {
   loadSynthQualitySettings,
-  saveSynthQualitySettings,
-  QUALITY_STUDIO,
-  QUALITY_LIVE,
-  BACKEND_AUTO
+  saveSynthQualitySettings
 } from "../audio/synth/qualityProfile.tish"
 
 let __midiDispatchDebugCount = 0;
@@ -307,13 +306,29 @@ export fn useMidiPatch(
           portKey = midiInputId;
         }
 
-        const smkAutoLayout = deviceRowIsSmk25FamilyCombo(row);
-        let smkLayoutId = null;
-        let smkEdges = [];
-        let smkStarterEdges = [];
-        if (smkAutoLayout && mergedPortIds && mergedPortIds.length) {
-          smkLayoutId = Math.random().toString(36).substr(2, 9);
-          smkEdges = smk25DefaultComboEdges("midi_in_" + bindingId, smkLayoutId, mergedPortIds.length);
+        const recipe = getHardwareAutoRig(hardwareVisualId);
+        const portInfo = rigPortDescriptor(row, mergedPortIds);
+        const newGraphId = () => Math.random().toString(36).substr(2, 9);
+        const isComboMatch = recipe && recipe.isCombo
+          ? recipe.isCombo(row) === true
+          : deviceRowIsSmk25FamilyCombo(row);
+        let layoutId = null;
+        let layoutEdges = [];
+        let starterEdges = [];
+        let starterMidiInExtras = null;
+        if (isComboMatch && portInfo.portCount > 0 && recipe && recipe.layoutNode) {
+          layoutId = newGraphId();
+          if (recipe.layoutEdges) {
+            layoutEdges = recipe.layoutEdges({
+              midiInNodeId: "midi_in_" + bindingId,
+              layoutId: layoutId,
+              portCount: portInfo.portCount,
+              mergedPortIds: portInfo.mergedPortIds,
+              newId: newGraphId
+            }) || [];
+          } else {
+            layoutEdges = smk25DefaultComboEdges("midi_in_" + bindingId, layoutId, portInfo.portCount);
+          }
         }
 
         runBatched(() => {
@@ -323,7 +338,7 @@ export fn useMidiPatch(
               id: bindingId,
               midiInputId: midiInputId,
               midiInputIds: mergedPortIds,
-              targetNodeId: smkLayoutId,
+              targetNodeId: layoutId,
               channelMask: -1
             }
           ]);
@@ -350,10 +365,6 @@ export fn useMidiPatch(
             if (hardwareVisualId) {
               midiParams["hardwareVisualId"] = hardwareVisualId;
             }
-            if (smkAutoLayout && mergedPortIds && mergedPortIds.length) {
-              midiParams["midiComboLayout"] = "smk25";
-              midiParams["autoLayoutDeviceId"] = hardwareVisualId != null ? String(hardwareVisualId) : "";
-            }
             const midiNode = {
               id: "midi_in_" + bindingId,
               "type": "MIDI_IN",
@@ -363,87 +374,64 @@ export fn useMidiPatch(
               isSystem: true,
               params: midiParams
             };
-            if (smkLayoutId) {
-              const nonSystemCount = prevList.filter((n) => !n.isSystem).length;
-              const emptyBoard = nonSystemCount === 0;
-              const smkX = 280;
-              const smkY = 320 + nMidi * 72;
-              const smkNode = buildSmk25LayoutNode(smkLayoutId, smkX, smkY);
-              if (!emptyBoard) {
-                return [...prevList, midiNode, smkNode];
-              }
-
-              const qs = loadSynthQualitySettings();
-              const AC = window.AudioContext || window.webkitAudioContext;
-              if (AC) {
-                const probe = new AC();
-                const hasW = !!probe.audioWorklet;
-                try { probe.close(); } catch (ePc) {}
-                qs.qualityTier = hasW ? QUALITY_STUDIO : QUALITY_LIVE;
-                qs.backend = BACKEND_AUTO;
+            if (!layoutId) {
+              return [...prevList, midiNode];
+            }
+            const nonSystemCount = prevList.filter((n) => !n.isSystem).length;
+            const emptyBoard = nonSystemCount === 0;
+            const layoutX = 280;
+            const layoutY = 320 + nMidi * 72;
+            const layoutNode = recipe.layoutNode({
+              id: layoutId,
+              x: layoutX,
+              y: layoutY,
+              portCount: portInfo.portCount,
+              hardwareVisualId: hardwareVisualId,
+              mergedPortIds: portInfo.mergedPortIds
+            });
+            if (!layoutNode) {
+              return [...prevList, midiNode];
+            }
+            if (!emptyBoard) {
+              return [...prevList, midiNode, layoutNode];
+            }
+            if (recipe.recommendedQuality) {
+              const caps = detectAudioCapabilities();
+              const rq = recipe.recommendedQuality(caps);
+              if (rq && (rq.qualityTier || rq.backend)) {
+                const qs = loadSynthQualitySettings();
+                if (rq.qualityTier) qs.qualityTier = rq.qualityTier;
+                if (rq.backend) qs.backend = rq.backend;
                 saveSynthQualitySettings(qs);
               }
-
-              const semTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_semantic_splitter");
-              const polyTpl = PEDAL_LIBRARY.INSTRUMENTS.find((p) => p["type"] === "analog_poly_juniper");
-              const semanticId = Math.random().toString(36).substr(2, 9);
-              const keysPolyId = Math.random().toString(36).substr(2, 9);
-              const padsPolyId = Math.random().toString(36).substr(2, 9);
-              const nextNodes = [...prevList, midiNode, smkNode];
-              if (semTpl) {
-                nextNodes.push({
-                  id: semanticId,
-                  ...semTpl,
-                  params: { ...semTpl.defaultParams },
-                  bypassed: false,
-                  x: smkX + 360,
-                  y: smkY + 60
-                });
-              }
-              if (polyTpl) {
-                nextNodes.push({
-                  id: keysPolyId,
-                  ...polyTpl,
-                  label: "Keys Poly",
-                  params: { ...polyTpl.defaultParams },
-                  bypassed: false,
-                  x: smkX + 360,
-                  y: smkY - 120
-                });
-                nextNodes.push({
-                  id: padsPolyId,
-                  ...polyTpl,
-                  label: "Pads Poly",
-                  params: { ...polyTpl.defaultParams },
-                  bypassed: false,
-                  x: smkX + 360,
-                  y: smkY - 10
-                });
-              }
-
-              const edges = [];
-              const addEdge = (from, fromPort, to, toPort) => {
-                if (!from || !to) return;
-                edges.push({
-                  id: Math.random().toString(36).substr(2, 9),
-                  from: from,
-                  fromPort: fromPort,
-                  to: to,
-                  toPort: toPort
-                });
-              };
-              addEdge(smkLayoutId, "keys", keysPolyId, "midi");
-              addEdge(smkLayoutId, "pads", padsPolyId, "midi");
-              addEdge(smkLayoutId, "knobs", semanticId, "midi");
-              addEdge(keysPolyId, "main", "sys_out", "main");
-              addEdge(padsPolyId, "main", "sys_out", "main");
-              smkStarterEdges = edges;
-              return nextNodes;
             }
-            return [...prevList, midiNode];
+            const starter = recipe.starterRig
+              ? recipe.starterRig({
+                  midiInNodeId: "midi_in_" + bindingId,
+                  layoutId: layoutId,
+                  layoutX: layoutX,
+                  layoutY: layoutY,
+                  PEDAL_LIBRARY: PEDAL_LIBRARY,
+                  newId: newGraphId,
+                  hardwareVisualId: hardwareVisualId,
+                  mergedPortIds: portInfo.mergedPortIds
+                })
+              : null;
+            if (starter && starter.midiInExtraParams) {
+              const extras = starter.midiInExtraParams;
+              const keys = Object.keys(extras);
+              let ki = 0;
+              while (ki < keys.length) {
+                midiNode.params[keys[ki]] = extras[keys[ki]];
+                ki = ki + 1;
+              }
+            }
+            const starterNodes = starter && Array.isArray(starter.nodes) ? starter.nodes : [];
+            starterEdges = starter && Array.isArray(starter.edges) ? starter.edges : [];
+            return [...prevList, midiNode, layoutNode, ...starterNodes];
           });
-          if (smkEdges.length || smkStarterEdges.length) {
-            setConnections((prev) => [...asArray(prev), ...smkEdges, ...smkStarterEdges]);
+          if (layoutEdges.length || starterEdges.length) {
+            setConnections((prev) => [...asArray(prev), ...layoutEdges, ...starterEdges]);
           }
           setAudioReady(true);
           setHardwareMenuOpen(false);
@@ -571,6 +559,7 @@ export fn useMidiPatch(
       return;
     }
     const unsub = subscribeMidiDispatch((ev) => {
+      perfMarkMidiEvent();
       if (isMidiDebugEnabled() && ev && ev.kind != null) {
         __midiDispatchDebugCount = __midiDispatchDebugCount + 1;
         if (__midiDispatchDebugCount <= 20 || __midiDispatchDebugCount % 60 === 0) {

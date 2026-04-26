@@ -29,7 +29,9 @@ import { useMidiPatch } from "./midi/useMidiPatch.tish"
 import { registerBuiltinIrModules } from "./render/registerBuiltinIrModules.tish"
 import { SynthQualityPanel } from "./ui/SynthQualityPanel.tish"
 import { preloadSynthWorkletModules } from "./audio/synth/workletPreload.tish"
+import { PerfHud, perfHudEnabled, perfMarkRender } from "./ui/PerfHud.tish"
 export fn App() {
+perfMarkRender();
 registerBuiltinIrModules();
 let renderBackendMode = null;
 if (typeof window !== "undefined" && window.location) {
@@ -86,6 +88,75 @@ el.setAttribute("data-tauri-drag-region", "");
 el.removeAttribute("data-tauri-drag-region");
 }
 }, []);
+
+/* WKWebView throttles pointer / RAF / event-loop priority while the
+   window isn't keyWindow on macOS. A freshly-launched Tauri app starts
+   in that throttled state — alt-tabbing to anything else and back
+   forces a key-window cycle which is why "alt-tab fixes the drag" was
+   the only thing that worked. The Rust setup() hook now calls
+   window.set_focus() at launch; this JS-side fallback runs on web /
+   non-Tauri builds and also covers the case where the macOS event
+   arrives before our DOM is mounted. We dispatch a synthetic focus
+   event so WebKit's internal "active" flag flips, then poke the event
+   loop with two RAFs to flush any backpressure. Pure no-op once the
+   window is already key. */
+useEffect(() => {
+if (typeof window === "undefined") return;
+try { window.focus && window.focus(); } catch (e0) { void e0; }
+try {
+if (typeof window.dispatchEvent === "function" && typeof window.FocusEvent === "function") {
+window.dispatchEvent(new window.FocusEvent("focus"));
+}
+} catch (e1) { void e1; }
+let r1 = null;
+let r2 = null;
+if (window.requestAnimationFrame) {
+r1 = window.requestAnimationFrame(() => {
+r2 = window.requestAnimationFrame(() => {});
+});
+}
+return () => {
+if (r1 != null && window.cancelAnimationFrame) window.cancelAnimationFrame(r1);
+if (r2 != null && window.cancelAnimationFrame) window.cancelAnimationFrame(r2);
+};
+}, []);
+
+/* Re-armable warmup hint for newly-added racks (kept light: just
+   `will-change: transform` for ~240ms on the .tf-node-root layer so
+   WebKit promotes the rack's compositor layer before the first drag).
+   Triggers when the patch board's node count grows. */
+const lastNodeCountRef = useRef(0);
+useEffect(() => {
+if (typeof document === "undefined" || !document.body) return;
+const len = Array.isArray(nodes) ? nodes.length : 0;
+if (len <= lastNodeCountRef.current) {
+lastNodeCountRef.current = len;
+return;
+}
+lastNodeCountRef.current = len;
+document.body.classList.add("tf-warming-up");
+let frame1 = null;
+let frame2 = null;
+let stopTimer = null;
+if (typeof window !== "undefined" && window.requestAnimationFrame) {
+frame1 = window.requestAnimationFrame(() => {
+frame2 = window.requestAnimationFrame(() => {
+stopTimer = window.setTimeout(() => {
+if (document.body) document.body.classList.remove("tf-warming-up");
+}, 240);
+});
+});
+} else {
+stopTimer = window.setTimeout(() => {
+if (document.body) document.body.classList.remove("tf-warming-up");
+}, 320);
+}
+return () => {
+if (frame1 != null && typeof window !== "undefined" && window.cancelAnimationFrame) window.cancelAnimationFrame(frame1);
+if (frame2 != null && typeof window !== "undefined" && window.cancelAnimationFrame) window.cancelAnimationFrame(frame2);
+if (stopTimer != null && typeof window !== "undefined" && window.clearTimeout) window.clearTimeout(stopTimer);
+};
+}, [nodes]);
 const nodeGraphMeterTick = activeTab === 'pedalboard' ? audioGraphTick : patchBoardMeterTickRef.current;
 
 let midi = useMidiPatch(audioReady, nodeAudioMapRef, audioCtxRef, analyserRef, pitchAnalyserRef, outGainRef, setNodes, setConnections, setAudioReady, setShowHardwareMenu, setShowModuleLibrary);
@@ -522,7 +593,27 @@ useEffect(() => {
 if (!audioReady) return;
 let frame = 0;
 let cableVisTick = 0;
+let frameSkip = 0;
 const loop = () => {
+/* The cable-color RAF used to run unconditionally at 60Hz even with
+   zero cables on the board — competing with the drag's RAF for frame
+   slots and racking up GPU/CPU pressure that doesn't get released
+   until the window loses focus (which is exactly the alt-tab
+   workaround the user kept hitting). Now:
+     - Hard pause while a node is being dragged. Drag owns the frame.
+     - Skip work entirely on tabs that aren't the patch board.
+     - Throttle to ~15 Hz when running (every 4th rAF). A cable color
+       update every ~67ms is plenty for visual feedback. */
+frame = requestAnimationFrame(loop);
+if (typeof document !== "undefined" && document.body && document.body.classList && document.body.classList.contains("tf-dragging")) {
+  return;
+}
+if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+  return;
+}
+frameSkip = frameSkip + 1;
+if (frameSkip < 4) return;
+frameSkip = 0;
 try { tickSmartGates(nodeAudioMapRef, nodesRef.current); } catch (eTick) { console.error(eTick); }
 
 cableVisTick = cableVisTick + 1;
@@ -598,8 +689,6 @@ if (nodeAudioMapRef.current && patchBoard) {
   }
   }
 }
-
-frame = requestAnimationFrame(loop);
 };
 frame = requestAnimationFrame(loop);
 return () => { if (frame) cancelAnimationFrame(frame); };
@@ -1056,8 +1145,11 @@ const tuningScene = useMemo(() => {
   return buildTuningScene(w, h, activeTab === "chords" ? "chords" : "tuning");
 }, [renderBackendEnabled, activeTab]);
 
+const perfHud = perfHudEnabled() ? h(PerfHud, {}) : null;
+
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans select-none">
+{perfHud}
 {micDenied && (
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" style={{ zIndex: 9999 }}>
 <div class="bg-neutral-900 border border-red-500/60 rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 flex flex-col gap-5">

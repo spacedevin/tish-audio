@@ -75,13 +75,15 @@ export fn buildLitePolyGraph(ctx, spec, profile, node) {
       return;
     }
     releaseAdsr(v.data.gain.gain, ctx.currentTime, 120);
-    const osc = v.data.osc;
+    const capturedOsc = v.data.osc;
+    const capturedGain = v.data.gain;
+    const capturedFilt = v.data.filt;
     window.setTimeout(() => {
-      try { osc.stop(); } catch (e0) {}
-      try { osc.disconnect(); } catch (e1) {}
-      try { v.data.gain.disconnect(); } catch (e2) {}
-      if (v.data.filt) {
-        try { v.data.filt.disconnect(); } catch (e3) {}
+      try { capturedOsc.stop(); } catch (e0) {}
+      try { capturedOsc.disconnect(); } catch (e1) {}
+      try { capturedGain.disconnect(); } catch (e2) {}
+      if (capturedFilt) {
+        try { capturedFilt.disconnect(); } catch (e3) {}
       }
     }, 140);
     vm.clearVoice(v);

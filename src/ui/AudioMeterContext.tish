@@ -44,6 +44,18 @@ let cancelled = false;
 
 const updateLoop = () => {
 if (cancelled) return;
+/* This pitch-meter loop was running at 60fps doing FFT analysis on the
+   audio analyser even when the user was just trying to drag a rack.
+   Hard-pause during drag and when the page isn't visible — the header
+   meter doesn't need to update while you're dragging. */
+if (typeof document !== "undefined" && document.body && document.body.classList && document.body.classList.contains("tf-dragging")) {
+animationRef.current = requestAnimationFrame(updateLoop);
+return;
+}
+if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+animationRef.current = requestAnimationFrame(updateLoop);
+return;
+}
 analyser.getFloatTimeDomainData(dataArray);
 const frame = analyzeTimeDomainFrame(dataArray, audioCtxRef.current.sampleRate, { maxHz: 2000 });
 const level = frame.rms * 10;

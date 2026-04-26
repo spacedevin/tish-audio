@@ -11,8 +11,8 @@ let previewOnly = props.previewOnly === true;
 const numCh = node.params.channels || 4;
 const analysers = audioDataMap[node.id]?.analysers || {};
 return (
-<div class="relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-all duration-300 select-none touch-none">
-<div class="absolute inset-0 pointer-events-none opacity-[0.18]" style={{ filter: 'url(#metal-texture)' }} />
+<div class="relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-[opacity,filter] duration-300 select-none touch-none">
+<div class="tf-texture absolute inset-0 pointer-events-none opacity-[0.18]" style={{ filter: 'url(#metal-texture)' }} />
 
 {!previewOnly && onDragStart ? (
 <div
@@ -103,8 +103,8 @@ const masterAnalyser = audioDataMap[node.id]?.analyser;
 const bands = [31, 62, 125, 250, 500, '1k', '2k', '4k', '8k', '16k'];
 
 return (
-<div class={"relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-all duration-300 select-none touch-none " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
-<div class="absolute inset-0 pointer-events-none opacity-[0.2]" style={{ filter: 'url(#metal-texture)' }} />
+<div class={"relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-[opacity,filter] duration-300 select-none touch-none " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
+<div class="tf-texture absolute inset-0 pointer-events-none opacity-[0.2]" style={{ filter: 'url(#metal-texture)' }} />
 
 {!previewOnly && onDragStart ? (
 <div
@@ -186,8 +186,8 @@ let previewOnly = props.previewOnly === true;
 const analyser = audioDataMap[node.id]?.analyser;
 
 return (
-<div class={"relative w-[120px] h-[200px] bg-gradient-to-br select-none touch-none " + node.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col transition-all duration-300"}>
-<div class="absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
+<div class={"relative w-[120px] h-[200px] bg-gradient-to-br select-none touch-none " + node.color + " rounded-xl border-t border-l border-t-white/30 border-l-white/20 border-r-black/60 border-b-black/80 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.5)] flex flex-col transition-[opacity,filter] duration-300"}>
+<div class="tf-texture absolute inset-0 mix-blend-multiply opacity-50 pointer-events-none rounded-xl" style={{ filter: 'url(#metal-texture)' }} />
 
 {!previewOnly && onDragStart ? (
 <div
@@ -228,42 +228,37 @@ useEffect(() => {
 const canvas = canvasRef.current;
 if (!canvas) return;
 const ctx = canvas.getContext('2d');
-let animationId;
-const dataArray = new Uint8Array(512);
-
-const draw = () => {
-animationId = requestAnimationFrame(draw);
-
+/* Paint the inert background once when there's no live analyser so we
+   don't burn a 60fps RAF clearing a black rect on every frame. */
 if (!masterAnalyser || node.bypassed) {
 ctx.fillStyle = '#0a0a0a';
 ctx.fillRect(0, 0, canvas.width, canvas.height);
 return;
 }
-
+let animationId;
+const dataArray = new Uint8Array(512);
+const draw = () => {
+animationId = requestAnimationFrame(draw);
 masterAnalyser.getByteFrequencyData(dataArray);
-
-ctx.fillStyle = 'rgba(10, 10, 10, 0.4)'; 
+ctx.fillStyle = 'rgba(10, 10, 10, 0.4)';
 ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-const barWidth = (canvas.width / 120); 
+const barWidth = (canvas.width / 120);
 let x = 0;
-
 for(let i = 0; i < 120; i = i + 1) {
-const val = dataArray[i] * (1 + (i/120)*0.5); 
+const val = dataArray[i] * (1 + (i/120)*0.5);
 const barHeight = (val / 255) * canvas.height;
-
 ctx.fillStyle = "rgb(" + String(Math.floor(val)) + ", " + String(Math.floor(250 - val)) + ", 100)";
 ctx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight);
 x = x + (barWidth);
 }
 };
 draw();
-return () => cancelAnimationFrame(animationId);
+return () => { if (animationId) cancelAnimationFrame(animationId); };
 }, [masterAnalyser, node.bypassed]);
 
 return (
-<div class={"relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-all duration-300 select-none touch-none " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
-<div class="absolute inset-0 pointer-events-none opacity-[0.18]" style={{ filter: 'url(#metal-texture)' }} />
+<div class={"relative w-[640px] h-[216px] flex rounded-sm overflow-hidden border border-black shadow-[0_18px_44px_rgba(0,0,0,0.92)] bg-zinc-950 transition-[opacity,filter] duration-300 select-none touch-none " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}>
+<div class="tf-texture absolute inset-0 pointer-events-none opacity-[0.18]" style={{ filter: 'url(#metal-texture)' }} />
 
 {!previewOnly && onDragStart ? (
 <div
@@ -384,10 +379,10 @@ const faceShadow = isAmpSim
 
 return (
 <div 
-class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-all duration-300 bg-gradient-to-br select-none touch-none " + pedal.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
+class={"relative rounded-2xl border-t-2 border-l border-t-neutral-200 border-l-neutral-300 border-r-zinc-950 border-b-black p-5 flex flex-col group transition-[opacity,filter] duration-300 bg-gradient-to-br select-none touch-none " + pedal.color + " " + faceShadow + " " + (isBypassed ? "brightness-50 grayscale opacity-80" : "brightness-100 grayscale-0 opacity-100")}
 style={{ width: String(panelW) + "px", height: String(panelH) + "px" }}
 >
-<div class={"absolute inset-0 rounded-2xl mix-blend-multiply pointer-events-none " + (isAmpSim ? "opacity-40" : "opacity-45")} style={{ filter: 'url(#metal-texture)' }} />
+<div class={"tf-texture absolute inset-0 rounded-2xl mix-blend-multiply pointer-events-none " + (isAmpSim ? "opacity-40" : "opacity-45")} style={{ filter: 'url(#metal-texture)' }} />
 
 {!previewOnly && onDragStart ? (
 <div

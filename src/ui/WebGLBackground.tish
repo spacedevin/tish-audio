@@ -83,6 +83,7 @@ const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
 
 let animationId = null;
 const startTime = performance.now();
+let frameSkip = 0;
 
 const resizeToCanvas = () => {
 const dw = Math.max(1, Math.round(canvas.clientWidth));
@@ -94,26 +95,48 @@ gl.viewport(0, 0, dw, dh);
 }
 };
 
-const render = () => {
-if (!panelActive) {
-animationId = null;
-return;
-}
+const drawNow = () => {
 resizeToCanvas();
 gl.useProgram(program);
 gl.uniform2f(resolutionLocation, gl.canvas.width, gl.canvas.height);
 gl.uniform1f(timeLocation, (performance.now() - startTime) / 1000.0);
 gl.drawArrays(gl.TRIANGLES, 0, 6);
+};
+
+/* This animated retro-grid background was rendering at 60fps continuously,
+   running a fragment shader every single frame and committing to the
+   compositor — competing with the drag handler for frame slots. Alt-tabbing
+   the window paused RAF, which is why drag felt smoother after a tab cycle.
+   Now: hard-pause while a node is being dragged, hard-pause when the page
+   is hidden, and throttle to 15fps (every 4 rAF) the rest of the time.
+   Drops GPU draw rate by 4× and gets out of the drag's way completely. */
+const render = () => {
+if (!panelActive) {
+animationId = null;
+return;
+}
 animationId = requestAnimationFrame(render);
+if (typeof document !== "undefined" && document.body && document.body.classList && document.body.classList.contains("tf-dragging")) {
+return;
+}
+if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+return;
+}
+frameSkip = frameSkip + 1;
+if (frameSkip < 4) return;
+frameSkip = 0;
+drawNow();
 };
 
 const ro = new ResizeObserver(() => {
 resizeToCanvas();
+drawNow();
 });
 ro.observe(canvas);
 resizeToCanvas();
 
 if (panelActive) {
+drawNow(); // Paint once immediately so the canvas isn't blank.
 render();
 }
 

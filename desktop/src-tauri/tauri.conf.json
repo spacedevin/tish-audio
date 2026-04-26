@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "identifier": "com.tish.audio",
   "build": {
-    "beforeDevCommand": "npm --prefix .. run build && npm --prefix .. run dev",
+    "beforeDevCommand": "npm --prefix .. run dev",
     "beforeBuildCommand": "npm --prefix .. run build",
     "devUrl": "http://localhost:8080",
     "frontendDist": "../../dist"
@@ -17,7 +17,9 @@
         "decorations": true,
         "width": 1280,
         "height": 800,
-        "acceptFirstMouse": true
+        "acceptFirstMouse": true,
+        "focus": true,
+        "visible": true
       }
     ],
     "security": {

@@ -93,6 +93,41 @@ pub fn run() {
         .manage(SynthEngineController::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            // macOS leaves a freshly-launched Tauri window in a non-key
+            // state until the user alt-tabs to it. WKWebView throttles
+            // pointer / RAF / event-loop priority while the *application*
+            // (not just the window) isn't the active foreground app —
+            // and `window.set_focus()` only handles the window-level
+            // focus, not app-level activation. When you launch via
+            // `npm run desktop:dev` from a terminal, the terminal still
+            // owns app focus until you alt-tab. The fix is to call
+            // `NSApplication.activate(ignoringOtherApps:)` which is the
+            // Cocoa-level equivalent of clicking the dock icon.
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            #[cfg(target_os = "macos")]
+            {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                unsafe {
+                    let cls = objc2::class!(NSApplication);
+                    let ns_app: *mut AnyObject = msg_send![cls, sharedApplication];
+                    if !ns_app.is_null() {
+                        // Tell AppKit we want to be the active foreground
+                        // app — this kicks the window into keyWindow state,
+                        // un-throttles WKWebView's RAF / pointer priority,
+                        // and is what alt-tab was doing for us by accident.
+                        let _: () = msg_send![ns_app, activateIgnoringOtherApps: true];
+                    }
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             ensure_mic_permission,
             list_audio_inputs,

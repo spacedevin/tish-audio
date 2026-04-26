@@ -1,4 +1,4 @@
-import { h, useEffect, useState } from "lattish"
+import { h } from "lattish"
 import { RackChassis, formatKnobLabel } from "../../moduleKit/ui/index.tish"
 import { RotaryKnob } from "../../ui/controls.tish"
 import { hzFromMidi } from "../../guitar/instrumentSpec.tish"
@@ -16,12 +16,9 @@ export fn makeRackView(typeLabel) {
     const onDragStart = props.onDragStart;
     const onToggleBypass = props.onToggleBypass;
     const previewOnly = props.previewOnly === true;
-    let [rev, setRev] = useState(0);
-    useEffect(() => {
-      let t = window.setInterval(() => setRev((r) => r + 1), 120);
-      return () => window.clearInterval(t);
-    }, []);
-    void rev;
+    /* No timer-driven re-render: this generic rack derives its visuals
+       entirely from `node.params`, so the parent's normal param updates
+       are sufficient. */
     const p = node.params || {};
     return (
       <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel={typeLabel}>
@@ -118,12 +115,16 @@ export fn makeSimplePolyBuildAudio(flavor) {
       const v = vm.findByNote(note);
       if (!v || !v.data) return;
       releaseAdsr(v.data.gain.gain, ctx.currentTime, 120);
-      const osc = v.data.osc;
+      const capturedOsc = v.data.osc;
+      const capturedGain = v.data.gain;
+      const capturedFilt = v.data.filt;
       window.setTimeout(() => {
-        try { osc.stop(); } catch (e0) {}
-        try { osc.disconnect(); } catch (e1) {}
-        try { v.data.gain.disconnect(); } catch (e2) {}
-        try { v.data.filt.disconnect(); } catch (e3) {}
+        try { capturedOsc.stop(); } catch (e0) {}
+        try { capturedOsc.disconnect(); } catch (e1) {}
+        try { capturedGain.disconnect(); } catch (e2) {}
+        if (capturedFilt) {
+          try { capturedFilt.disconnect(); } catch (e3) {}
+        }
       }, 140);
       vm.clearVoice(v);
     };

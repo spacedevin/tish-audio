@@ -1,0 +1,281 @@
+/**
+ * Hardware Auto-Rig Registry
+ * --------------------------
+ *
+ * When the user picks a MIDI device row from "Connect hardware", the patch
+ * engine asks this registry whether that device has an "auto-rig recipe".
+ * If yes, the recipe gets to:
+ *   1. Decide whether the device row is a *combo* (multi-USB-port composite)
+ *      and how many port jacks it should expose on the MIDI_IN node.
+ *   2. Spawn an optional **layout node** (the patchable hardware face / pads /
+ *      keys panel), wire one edge per port from the MIDI_IN to the layout.
+ *   3. When the patch board is empty, also drop a **starter rig** of audio
+ *      modules (synths, splitters, FX chain) with their cables already routed
+ *      to MASTER OUT, plus pick a sensible default quality tier.
+ *
+ * The recipe itself is just a plain object (no React, no hooks). All identity
+ * and routing decisions live behind a stable schema so adding hardware support
+ * is a pure data change.
+ *
+ *
+ * Schema
+ * ======
+ *
+ *   {
+ *     hardwareVisualId: string,        // matches midiHardwareVisuals.tish ID
+ *     displayName: string,             // human-readable, used in logs/badges
+ *     comboKey: string | null,         // optional grouping key for combo merge
+ *     isCombo(row) -> boolean,         // accept this device row as a combo
+ *     layoutNode(opts) -> node | null, // optional patch-board panel/face
+ *                                      //   opts: { id, x, y, portCount, hardwareVisualId, mergedPortIds }
+ *     layoutEdges(opts) -> edge[],     // edges that connect MIDI_IN ports to the layout
+ *                                      //   opts: { midiInNodeId, layoutId, portCount, mergedPortIds, newId }
+ *     starterRig(opts) -> { nodes: [], edges: [], midiInExtraParams: {} } | null,
+ *                                      //   opts: { midiInNodeId, layoutId, layoutX, layoutY,
+ *                                      //          PEDAL_LIBRARY, newId, hardwareVisualId, mergedPortIds }
+ *                                      //   Only invoked when the board is empty
+ *                                      //   (no non-system nodes besides MIDI_IN).
+ *     recommendedQuality(audioCapabilities) -> { qualityTier, backend } | null
+ *                                      //   Auto-picks Studio/Live/Lite + backend selector.
+ *                                      //   Called once per starter rig.
+ *   }
+ *
+ * Required fields: hardwareVisualId, displayName.
+ * Everything else is optional — omit a method to opt out of that step.
+ *
+ *
+ * How to add a new hardware recipe
+ * ================================
+ *
+ *   1. Pick / add a hardware visual ID in `src/inputDevices/midiHardwareVisuals.tish`
+ *      (e.g. `HARDWARE_AKAI_MPK_MINI = "akai_mpk_mini"`) and teach
+ *      `matchMidiHardwareVisualId(portLabel)` to return that ID for this device.
+ *   2. Optionally add a layout module (e.g. `src/modules/<your_face>/`) so the
+ *      device's pads/keys/knobs show up as a draggable panel.
+ *   3. Add a recipe object to `HARDWARE_AUTO_RIGS` below, filling in only
+ *      the fields you need. Use `SMK25_FAMILY_RECIPE` as the canonical
+ *      example.
+ *   4. Done. `useMidiPatch.tish` will pick the recipe up automatically the
+ *      next time the user clicks Connect hardware.
+ *
+ *
+ * Per-instrument auto-rig
+ * =======================
+ *
+ * Recipes don't have to be device-specific. A purely instrument-driven recipe
+ * (e.g. "if any keyboard MIDI device shows up, drop in a MultiBank XV-1000")
+ * can register with `hardwareVisualId: "*"` and a custom `isCombo(row) =>
+ * row.merged !== true` predicate. The per-engine factory presets each
+ * instrument ships in `metadata.presets` are still respected — the auto-rig
+ * just decides which racks land on the patch board to begin with.
+ *
+ *
+ * Notes
+ * -----
+ *  - The `newId()` helper (passed in the opts) returns a fresh patch-graph id;
+ *    use it for any node/edge you create so id collisions are impossible.
+ *  - The `recommendedQuality` callback is given a capabilities object:
+ *      { hasWorklet: bool, isTauri: bool, isMobile: bool }.
+ *  - Recipes never set audio params on rack nodes directly — let the rack's
+ *    own `metadata.defaultParams` apply. Override via the optional
+ *    `params` field on the spawned node only when truly needed.
+ */
+
+import { HARDWARE_MVAVE_SMK25_FAMILY } from "../inputDevices/midiHardwareVisuals.tish"
+import {
+  smk25_face_category,
+  smk25_face_metadata,
+  smk25_face_type
+} from "../modules/smk25_face/index.tish"
+import { QUALITY_STUDIO, QUALITY_LIVE, BACKEND_AUTO } from "../audio/synth/qualityProfile.tish"
+
+const newRandomId = () => Math.random().toString(36).substr(2, 9);
+
+const buildSmk25LayoutNodeFromMeta = (smkId, x, y) => {
+  const meta = smk25_face_metadata;
+  return {
+    id: smkId,
+    "type": smk25_face_type,
+    label: meta.label,
+    category: smk25_face_category,
+    theme: meta.theme,
+    color: meta.color,
+    params: meta.defaultParams && typeof meta.defaultParams === "object" ? { ...meta.defaultParams } : {},
+    bypassed: false,
+    x: x,
+    y: y
+  };
+};
+
+/**
+ * SMK-25 family — the canonical reference recipe.
+ * Adds a layout panel, fans MIDI_IN ports out to its 3 logical jacks, and
+ * (on an empty board) drops in two analog poly synths + a semantic splitter.
+ */
+const SMK25_FAMILY_RECIPE = {
+  hardwareVisualId: HARDWARE_MVAVE_SMK25_FAMILY,
+  displayName: "M-VAVE SMK-25 family",
+  comboKey: HARDWARE_MVAVE_SMK25_FAMILY,
+
+  isCombo: (row) => {
+    if (!row || row.hardwareVisualId !== HARDWARE_MVAVE_SMK25_FAMILY) {
+      return false;
+    }
+    if (row.merged !== true || !row.members || row.members.length < 2) {
+      return false;
+    }
+    return true;
+  },
+
+  layoutNode: (opts) => {
+    if (!opts) return null;
+    return buildSmk25LayoutNodeFromMeta(opts.id, opts.x, opts.y);
+  },
+
+  layoutEdges: (opts) => {
+    if (!opts) return [];
+    const portCount = Number(opts.portCount) || 0;
+    const out = [];
+    let i = 0;
+    while (i < portCount) {
+      const port = "midi" + String(i + 1);
+      out.push({
+        id: opts.newId ? opts.newId() : newRandomId(),
+        from: opts.midiInNodeId,
+        fromPort: port,
+        to: opts.layoutId,
+        toPort: port
+      });
+      i = i + 1;
+    }
+    return out;
+  },
+
+  starterRig: (opts) => {
+    if (!opts) return null;
+    const lib = opts.PEDAL_LIBRARY;
+    if (!lib) return null;
+    const newId = opts.newId ? opts.newId : newRandomId;
+    const semTpl = lib.UTILITY ? lib.UTILITY.find((p) => p["type"] === "midi_semantic_splitter") : null;
+    const polyTpl = lib.INSTRUMENTS ? lib.INSTRUMENTS.find((p) => p["type"] === "analog_poly_juniper") : null;
+
+    const semanticId = newId();
+    const keysPolyId = newId();
+    const padsPolyId = newId();
+    const layoutX = Number(opts.layoutX) || 280;
+    const layoutY = Number(opts.layoutY) || 320;
+
+    const nodes = [];
+    if (semTpl) {
+      nodes.push({
+        id: semanticId,
+        ...semTpl,
+        params: { ...(semTpl.defaultParams || {}) },
+        bypassed: false,
+        x: layoutX + 360,
+        y: layoutY + 60
+      });
+    }
+    if (polyTpl) {
+      nodes.push({
+        id: keysPolyId,
+        ...polyTpl,
+        label: "Keys Poly",
+        params: { ...(polyTpl.defaultParams || {}) },
+        bypassed: false,
+        x: layoutX + 360,
+        y: layoutY - 120
+      });
+      nodes.push({
+        id: padsPolyId,
+        ...polyTpl,
+        label: "Pads Poly",
+        params: { ...(polyTpl.defaultParams || {}) },
+        bypassed: false,
+        x: layoutX + 360,
+        y: layoutY - 10
+      });
+    }
+
+    const edges = [];
+    const addEdge = (from, fromPort, to, toPort) => {
+      if (!from || !to) return;
+      edges.push({
+        id: newId(),
+        from: from,
+        fromPort: fromPort,
+        to: to,
+        toPort: toPort
+      });
+    };
+    addEdge(opts.layoutId, "keys", keysPolyId, "midi");
+    addEdge(opts.layoutId, "pads", padsPolyId, "midi");
+    addEdge(opts.layoutId, "knobs", semanticId, "midi");
+    addEdge(keysPolyId, "main", "sys_out", "main");
+    addEdge(padsPolyId, "main", "sys_out", "main");
+
+    return {
+      nodes: nodes,
+      edges: edges,
+      midiInExtraParams: {
+        midiComboLayout: "smk25",
+        autoLayoutDeviceId: opts.hardwareVisualId != null ? String(opts.hardwareVisualId) : ""
+      }
+    };
+  },
+
+  recommendedQuality: (caps) => {
+    const c = caps || {};
+    return {
+      qualityTier: c.hasWorklet ? QUALITY_STUDIO : QUALITY_LIVE,
+      backend: BACKEND_AUTO
+    };
+  }
+};
+
+/** All registered auto-rig recipes, keyed by hardware visual id. */
+export const HARDWARE_AUTO_RIGS = {};
+HARDWARE_AUTO_RIGS[HARDWARE_MVAVE_SMK25_FAMILY] = SMK25_FAMILY_RECIPE;
+
+/** Look up a recipe; returns null when the device has no auto-rig profile. */
+export fn getHardwareAutoRig(hardwareVisualId) {
+  if (!hardwareVisualId) return null;
+  const rec = HARDWARE_AUTO_RIGS[String(hardwareVisualId)];
+  return rec || null;
+}
+
+/** Convenience: derive port count + ids for the auto-rig pipeline. */
+export fn rigPortDescriptor(row, mergedPortIds) {
+  const ids = Array.isArray(mergedPortIds) ? mergedPortIds : [];
+  if (ids.length) {
+    return { portCount: ids.length, mergedPortIds: ids };
+  }
+  if (row && row.merged === true && row.members && row.members.length) {
+    return { portCount: row.members.length, mergedPortIds: ids };
+  }
+  return { portCount: 1, mergedPortIds: [] };
+}
+
+/** Convenience: gather audio backend capabilities for `recommendedQuality`. */
+export fn detectAudioCapabilities() {
+  const caps = { hasWorklet: false, isTauri: false, isMobile: false };
+  if (typeof window === "undefined") return caps;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) {
+      const probe = new AC();
+      caps.hasWorklet = !!probe.audioWorklet;
+      try { probe.close(); } catch (eC) {}
+    }
+  } catch (e0) {
+    void e0;
+  }
+  caps.isTauri = !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+  if (typeof navigator !== "undefined" && navigator.userAgent) {
+    const ua = String(navigator.userAgent).toLowerCase();
+    caps.isMobile = ua.indexOf("iphone") >= 0 || ua.indexOf("ipad") >= 0 || ua.indexOf("android") >= 0;
+  } else {
+    caps.isMobile = false;
+  }
+  return caps;
+}

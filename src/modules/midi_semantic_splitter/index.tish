@@ -116,7 +116,11 @@ export fn midi_semantic_splitter_View(props) {
   const previewOnly = props.previewOnly === true;
   let [tick, setTick] = useState(0);
   useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), 120);
+    const id = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.body && document.body.classList && document.body.classList.contains("tf-dragging")) return;
+      if (typeof window !== "undefined" && window.__perfMarkTick) window.__perfMarkTick("midi_semantic_splitter");
+      setTick((t) => t + 1);
+    }, 200);
     return () => window.clearInterval(id);
   }, []);
   void tick;

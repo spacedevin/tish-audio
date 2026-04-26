@@ -19,6 +19,7 @@ import { WebGLBackground } from "./WebGLBackground.tish"
 import { PatchBoardRenderSurface } from "./PatchBoardRenderSurface.tish"
 import { RotaryKnob } from "./controls.tish"
 import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode, hardwareRemoveClass } from "./nodes.tish"
+import { perfMarkDragWrite } from "./PerfHud.tish"
 import { MODULE_REGISTRY } from "../modules/registry.tish"
 import { hardwareDisplayNameForId, midiInNodeSizeForParams } from "../inputDevices/midiHardwareVisuals.tish"
 import { MIDI_PEDAL_W, MIDI_PEDAL_H, MIDI_RACK_W, MIDI_RACK_H } from "../moduleKit/ui/midiModuleUi.tish"
@@ -328,12 +329,105 @@ let renderBackendMode = props.renderBackendMode || null;
 const renderBackendEnabled = renderBackendMode === "dom" || renderBackendMode === "webgl";
   const boardRef = useRef(null);
 const dragLiveRef = useRef(null);
+const dragRafRef = useRef(null);
+const dragLatestRef = useRef({ ex: 0, ey: 0 });
 const wireFromNodeRef = useRef(null);
 const wireMouseRef = useRef({ x: 0, y: 0 });
 const wireDraftPathsRef = useRef(null);
 const wireDraftRafRef = useRef(null);
 const wiringSnapRef = useRef(null);
 let [wiring, setWiring] = useState(null);
+
+/* Stable per-node handler cache. Without this, every render of
+   NodeGraphView would create FRESH arrow closures
+   (`onRemove: () => removeNode(node.id)` etc.) for every rack on
+   the patchboard, and lattish `memo()` shallow-equals against the
+   previous props → finds new function references → cache miss →
+   re-runs the rack View body. With smk25_face_View at 1900+ lines
+   that meant a 30+ ms render every flush, even when nothing
+   visually changed. We now hold one stable bundle per node.id; the
+   bundle's functions read from refs that we update every render so
+   they always call the latest impl, but the closure identity itself
+   never changes. */
+const handlerImplsRef = useRef({
+  removeNode: null,
+  updateNodeParam: null,
+  startDragNode: null,
+  toggleNodeBypass: null,
+  onAudioUiBump: null,
+  onAutoWirePreset: null,
+  nodesById: {}
+});
+const handlerCacheRef = useRef({});
+const handlerNodesRef = useRef({});
+
+handlerImplsRef.current.removeNode = removeNode;
+handlerImplsRef.current.updateNodeParam = updateNodeParam;
+handlerImplsRef.current.toggleNodeBypass = toggleNodeBypass;
+handlerImplsRef.current.onAudioUiBump = onAudioUiBump;
+handlerImplsRef.current.onAutoWirePreset = onAutoWireSmkPreset;
+{
+  const idx = {};
+  let _ni = 0;
+  while (_ni < nodes.length) {
+    idx[nodes[_ni].id] = nodes[_ni];
+    _ni = _ni + 1;
+  }
+  handlerImplsRef.current.nodesById = idx;
+  handlerNodesRef.current = idx;
+}
+
+const getStableNodeHandlers = (id) => {
+  let bundle = handlerCacheRef.current[id];
+  if (!bundle) {
+    bundle = {
+      onRemove: () => {
+        const impl = handlerImplsRef.current.removeNode;
+        if (impl) impl(id);
+      },
+      onChange: (pn, val) => {
+        const impl = handlerImplsRef.current.updateNodeParam;
+        if (impl) impl(id, pn, val);
+      },
+      onDragStart: (e) => {
+        const node = handlerImplsRef.current.nodesById[id];
+        if (node) startDragNode(e, node);
+      },
+      onToggleBypass: () => {
+        const impl = handlerImplsRef.current.toggleNodeBypass;
+        if (impl) impl(id);
+      },
+      onFaderDragEnd: () => {
+        const impl = handlerImplsRef.current.onAudioUiBump;
+        if (impl) impl();
+      },
+      onAutoWirePreset: () => {
+        const impl = handlerImplsRef.current.onAutoWirePreset;
+        if (impl) impl(id);
+      }
+    };
+    handlerCacheRef.current[id] = bundle;
+  }
+  return bundle;
+};
+
+/* Helper called from the rack render branch. Builds the View vnode with
+   stable handler references so lattish memo() can short-circuit when
+   nothing else changed. */
+const renderRegistryView = (node, nt) => {
+  const _h = getStableNodeHandlers(node.id);
+  return h(MODULE_REGISTRY[nt]["View"], {
+    node: node,
+    onRemove: _h.onRemove,
+    onChange: _h.onChange,
+    onDragStart: _h.onDragStart,
+    onToggleBypass: _h.onToggleBypass,
+    audioDataMap: nodeAudioMapRef.current,
+    meterSync: audioGraphTick,
+    onFaderDragEnd: _h.onFaderDragEnd,
+    onAutoWirePreset: _h.onAutoWirePreset
+  });
+};
 
 const cancelWireDraftRaf = () => {
 if (wireDraftRafRef.current !== null && typeof cancelAnimationFrame !== "undefined") {
@@ -443,6 +537,12 @@ const rect = boardRef.current.getBoundingClientRect();
 const el = e.currentTarget.closest(".tf-node-root");
 if (!el) return;
 el.style.willChange = "transform";
+if (typeof document !== "undefined" && document.body) {
+document.body.classList.add("tf-dragging");
+}
+if (e.target && typeof e.target.setPointerCapture === "function" && e.pointerId != null) {
+try { e.target.setPointerCapture(e.pointerId); } catch (eC) { void eC; }
+}
 const cablePathRefs = collectIncidentCablePathRefs(boardRef.current, connections, node.id);
 dragLiveRef.current = {
 id: node.id,
@@ -454,8 +554,60 @@ startNodeX: node.x,
 startNodeY: node.y,
 el: el,
 lastSnapX: node.x,
-lastSnapY: node.y
+lastSnapY: node.y,
+boardRectLeft: rect.left,
+boardRectTop: rect.top,
+nodeSize: getNodeSize(node)
 };
+};
+
+/* RAF-batched drag step. Multiple high-frequency pointermove events
+   (ProMotion sends 120 Hz raw input) collapse into one transform write
+   per animation frame. */
+const flushDragFrame = () => {
+dragRafRef.current = null;
+const dlv = dragLiveRef.current;
+if (!dlv || !dlv.el) return;
+const latest = dragLatestRef.current;
+const dx = latest.ex - dlv.startMouseX;
+const dy = latest.ey - dlv.startMouseY;
+const rawX = dlv.startNodeX + dx;
+const rawY = dlv.startNodeY + dy;
+const dsz = dlv.nodeSize || getNodeSize(dlv.dragNode || nodes.find(n => n.id === dlv.id) || { type: "" });
+const snapped = snapPosToPeers(rawX, rawY, dlv.id, dsz.w, dsz.h, nodes);
+if (snapped.x === dlv.lastSnapX && snapped.y === dlv.lastSnapY) {
+return;
+}
+dlv.lastSnapX = snapped.x;
+dlv.lastSnapY = snapped.y;
+dlv.el.style.transform = "translate3d(" + String(snapped.x) + "px, " + String(snapped.y) + "px, 0)";
+perfMarkDragWrite();
+const live = { id: dlv.id, x: snapped.x, y: snapped.y };
+const cpr = dlv.cablePathRefs;
+if (cpr && cpr.length > 0) {
+let ri = 0;
+while (ri < cpr.length) {
+const row = cpr[ri];
+ri = ri + 1;
+const fromN = nodeMap[row.c.from];
+const toN = nodeMap[row.c.to];
+if (!fromN || !toN) continue;
+const d = placedCableD(fromN, toN, row.c, live);
+applyDToPathList(row.paths, d);
+}
+} else {
+let ci = 0;
+while (ci < connections.length) {
+const c = connections[ci];
+ci = ci + 1;
+if (c.from !== dlv.id && c.to !== dlv.id) continue;
+const fromN = nodeMap[c.from];
+const toN = nodeMap[c.to];
+if (!fromN || !toN) continue;
+const d = placedCableD(fromN, toN, c, live);
+applyPlacedCablePaths(boardRef.current, c.id, d);
+}
+}
 };
 
 const graphMemo = useMemo(() => {
@@ -504,52 +656,23 @@ const cableBlocks = graphMemo.cableBlocks;
 wiringSnapRef.current = wiring;
 
 const handlePointerMove = (e) => {
-if (!boardRef.current) return;
-const rect = boardRef.current.getBoundingClientRect();
-const ex = e.clientX - rect.left;
-const ey = e.clientY - rect.top;
-
 const dlv = dragLiveRef.current;
 if (dlv) {
-const dx = ex - dlv.startMouseX;
-const dy = ey - dlv.startMouseY;
-const rawX = dlv.startNodeX + dx;
-const rawY = dlv.startNodeY + dy;
-const dragNode = dlv.dragNode ? dlv.dragNode : nodes.find(n => n.id === dlv.id);
-if (dragNode && dlv.el) {
-const dsz = getNodeSize(dragNode);
-const snapped = snapPosToPeers(rawX, rawY, dlv.id, dsz.w, dsz.h, nodes);
-dlv.lastSnapX = snapped.x;
-dlv.lastSnapY = snapped.y;
-dlv.el.style.transform = "translate(" + String(snapped.x) + "px, " + String(snapped.y) + "px)";
-const live = { id: dlv.id, x: snapped.x, y: snapped.y };
-const cpr = dlv.cablePathRefs;
-if (cpr && cpr.length > 0) {
-let ri = 0;
-while (ri < cpr.length) {
-const row = cpr[ri];
-ri = ri + 1;
-const fromN = nodeMap[row.c.from];
-const toN = nodeMap[row.c.to];
-if (!fromN || !toN) continue;
-const d = placedCableD(fromN, toN, row.c, live);
-applyDToPathList(row.paths, d);
+e.preventDefault();
+const ex = e.clientX - dlv.boardRectLeft;
+const ey = e.clientY - dlv.boardRectTop;
+dragLatestRef.current.ex = ex;
+dragLatestRef.current.ey = ey;
+if (dragRafRef.current === null) {
+dragRafRef.current = requestAnimationFrame(flushDragFrame);
 }
-} else {
-let ci = 0;
-while (ci < connections.length) {
-const c = connections[ci];
-ci = ci + 1;
-if (c.from !== dlv.id && c.to !== dlv.id) continue;
-const fromN = nodeMap[c.from];
-const toN = nodeMap[c.to];
-if (!fromN || !toN) continue;
-const d = placedCableD(fromN, toN, c, live);
-applyPlacedCablePaths(boardRef.current, c.id, d);
+return;
 }
-}
-}
-} else if (wiring) {
+
+if (wiring) {
+const rect = boardRef.current ? boardRef.current.getBoundingClientRect() : { left: 0, top: 0 };
+const ex = e.clientX - rect.left;
+const ey = e.clientY - rect.top;
 wireMouseRef.current.x = ex;
 wireMouseRef.current.y = ey;
 if (wireDraftRafRef.current !== null) return;
@@ -583,6 +706,13 @@ applyDToPathList(paths, d);
 
 const handlePointerUp = () => {
 const dlv = dragLiveRef.current;
+if (typeof document !== "undefined" && document.body) {
+document.body.classList.remove("tf-dragging");
+}
+if (dragRafRef.current !== null) {
+cancelAnimationFrame(dragRafRef.current);
+dragRafRef.current = null;
+}
 if (wiring === null && dlv === null) {
 if (onAudioUiBump) onAudioUiBump();
 return;
@@ -591,7 +721,7 @@ if (dlv && dlv.el) {
 const fx = dlv.lastSnapX !== undefined && dlv.lastSnapX !== null ? dlv.lastSnapX : dlv.startNodeX;
 const fy = dlv.lastSnapY !== undefined && dlv.lastSnapY !== null ? dlv.lastSnapY : dlv.startNodeY;
 updateNodePos(dlv.id, fx, fy);
-dlv.el.style.transform = "translate(" + String(fx) + "px, " + String(fy) + "px)";
+dlv.el.style.transform = "translate3d(" + String(fx) + "px, " + String(fy) + "px, 0)";
 dlv.el.style.willChange = "";
 dragLiveRef.current = null;
 }
@@ -634,7 +764,7 @@ return (
 <div 
 id="tf-patch-board"
 ref={boardRef}
-class="flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none select-none"
+class="tf-patch-board flex-1 min-h-0 w-full overflow-hidden bg-black relative cursor-crosshair touch-none select-none"
 onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
 onPointerLeave={(e) => { if (e.buttons === 0) handlePointerUp(); }}
@@ -734,17 +864,7 @@ class="flex flex-col items-center justify-center w-20 h-[140px] border-2 border-
 <span class="transform -rotate-90 text-sm font-black tracking-widest text-orange-500 drop-shadow-md select-none whitespace-nowrap">{node.label}</span>
 </div>
 ) : nt === 'MIDI_IN' ? renderMidiInNode(node, midiBindings, nodes, connections, removeNode, startDragNode) : MODULE_REGISTRY[nt] && MODULE_REGISTRY[nt]["View"] ? (
-h(MODULE_REGISTRY[nt]["View"], {
-  node: node,
-  onRemove: () => removeNode(node.id),
-  onChange: (pn, val) => updateNodeParam(node.id, pn, val),
-  onDragStart: (e) => startDragNode(e, node),
-  onToggleBypass: () => toggleNodeBypass(node.id),
-  audioDataMap: nodeAudioMapRef.current,
-  meterSync: audioGraphTick,
-  onFaderDragEnd: onAudioUiBump,
-  onAutoWirePreset: onAutoWireSmkPreset
-})
+renderRegistryView(node, nt)
 ) : nt === 'master_eq' ? (
 h(RackNode, {
 node: node,

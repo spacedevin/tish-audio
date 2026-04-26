@@ -1,0 +1,462 @@
+/**
+ * MPC Velocity Pads — 16 velocity-sensitive performance pads with kit selector.
+ * Triggers drum/percussion voices internally and supports MIDI input on notes 36-51.
+ */
+import { h, useState, useEffect, useRef } from "lattish"
+import { RackChassis } from "../../../moduleKit/ui/index.tish"
+import { RotaryKnob } from "../../../ui/controls.tish"
+import { Group, Rect, Text } from "../../../render/prims.tish"
+import { padCell, knobOrnate } from "../../../render/widgets/materialKit.tish"
+import { getEraPalette, materialTokens } from "../../../render/themeTokens.tish"
+
+const MPC_KITS = [
+  { id: "STD", label: "STUDIO 808", accent: "#fb7185" },
+  { id: "TRP", label: "TRAP 909",   accent: "#a78bfa" },
+  { id: "LOFI",label: "LOFI VINYL",  accent: "#f59e0b" },
+  { id: "ACO", label: "ACOUSTIC",   accent: "#34d399" },
+  { id: "ELE", label: "ELECTRO",    accent: "#22d3ee" },
+  { id: "PRC", label: "WORLD PERC", accent: "#fbbf24" },
+  { id: "CLP", label: "CLAPS+SNAP", accent: "#f472b6" },
+  { id: "FX",  label: "GLITCH FX",  accent: "#a3e635" }
+];
+
+const MPC_PAD_LABELS = [
+  "KICK","SNARE","HAT-C","HAT-O",
+  "TOM-L","TOM-M","TOM-H","RIDE",
+  "CRASH","CLAP","RIM","COW",
+  "SHAKE","CONGA","PERC","FX"
+];
+
+const mpcClamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0));
+
+const mpcKitFromParam = (kitParam) => {
+  const idx = Math.max(0, Math.min(MPC_KITS.length - 1, Math.floor(mpcClamp01(kitParam) * MPC_KITS.length)));
+  return idx;
+};
+
+export const mpc_pads_type = "mpc_pads";
+export const mpc_pads_category = "INSTRUMENTS";
+fn buildMpcPresets() {
+  const out = [];
+  let i = 0;
+  const denom = Math.max(1, MPC_KITS.length - 1);
+  while (i < MPC_KITS.length) {
+    out.push({
+      id: "kit_" + MPC_KITS[i].id,
+      name: MPC_KITS[i].label,
+      params: { kit: i / denom, level: 0.5, tune: 0.5, swing: 0.0, decay: 0.5, sequencer: 0, tempo: 0.4 }
+    });
+    i = i + 1;
+  }
+  return out;
+}
+
+const MPC_PRESETS = buildMpcPresets();
+
+export const mpc_pads_metadata = {
+  label: "MPC-16 Velocity Pads",
+  color: "from-rose-700 via-orange-900 to-amber-950",
+  theme: "dark",
+  defaultParams: { kit: 0.0, level: 0.5, tune: 0.5, swing: 0.0, decay: 0.5, sequencer: 0, tempo: 0.4 },
+  presets: MPC_PRESETS
+};
+export const mpc_pads_layout = { width: 640, height: 216 };
+export const mpc_pads_parameters = [
+  { id: "kit",   min: 0, max: 1, def: 0.0, taper: "lin" },
+  { id: "level", min: 0, max: 1, def: 0.5, taper: "lin" },
+  { id: "tune",  min: 0, max: 1, def: 0.5, taper: "lin" },
+  { id: "swing", min: 0, max: 1, def: 0.0, taper: "lin" },
+  { id: "decay", min: 0, max: 1, def: 0.5, taper: "lin" },
+  { id: "sequencer", min: 0, max: 1, def: 0, taper: "lin" },
+  { id: "tempo", min: 0, max: 1, def: 0.4, taper: "lin" }
+];
+export const mpc_pads_requirements = { irVersion: 1 };
+
+fn MpcKitButton(props) {
+  const idx = props.idx;
+  const kit = props.kit;
+  const active = props.active;
+  const interactive = props.interactive !== false;
+  const onPick = props.onPick;
+  return (
+    <div
+      onPointerDown={(e) => { if (!interactive) return; e.stopPropagation(); if (onPick) onPick(idx); }}
+      class={"select-none touch-none px-2 py-1 rounded-[2px] text-[8px] font-black tracking-[0.18em] uppercase border " + (active ? "text-black" : "text-rose-200/85") + " " + (interactive ? "cursor-pointer" : "")}
+      style={{
+        textAlign: "center",
+        background: active ? kit.accent : "rgba(40,12,12,0.85)",
+        borderColor: active ? kit.accent : "rgba(220,80,80,0.45)",
+        boxShadow: active ? "0 0 8px " + kit.accent + ", inset 0 1px 0 rgba(255,255,255,0.45)" : "inset 0 1px 0 rgba(220,80,80,0.18)"
+      }}
+    >{kit.label}</div>
+  );
+}
+
+export fn mpc_pads_View(props) {
+  const node = props.node;
+  const onRemove = props.onRemove;
+  const onChange = props.onChange;
+  const onDragStart = props.onDragStart;
+  const onToggleBypass = props.onToggleBypass;
+  const previewOnly = props.previewOnly === true;
+  const p = node.params || {};
+  const kitIdx = mpcKitFromParam(p.kit);
+  const kit = MPC_KITS[kitIdx];
+  const accent = kit.accent;
+  let [hot, setHot] = useState({});
+  if (!hot) hot = {};
+  const triggerPad = (padIdx) => {
+    if (previewOnly) return;
+    const stamp = Date.now();
+    const next = { ...hot };
+    next[String(padIdx)] = stamp;
+    setHot(next);
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => {
+        setHot((cur) => {
+          const out = { ...cur };
+          out[String(padIdx)] = 0;
+          return out;
+        });
+      }, 160);
+    }
+    if (typeof window !== "undefined" && window.dispatchEvent && typeof window.CustomEvent === "function") {
+      const ev = new window.CustomEvent("mpc-pad-trigger", { detail: { nodeId: node.id, padIdx: padIdx, vel: 110 } });
+      window.dispatchEvent(ev);
+    }
+  };
+  return (
+    <RackChassis node={node} onRemove={onRemove} onDragStart={onDragStart} onToggleBypass={onToggleBypass} previewOnly={previewOnly} typeLabel="MPC · 16 VELOCITY PADS">
+      <div class="relative z-10 flex-1 flex flex-row min-h-0" style={{ background: "linear-gradient(180deg,#3f1d18,#1a0a08)" }}>
+        <div class="grid grid-cols-4 grid-rows-4 gap-[3px] p-2 shrink-0">
+          {MPC_PAD_LABELS.map((lab, i) => {
+            const isHot = (hot[String(i)] || 0) > 0;
+            return (
+              <div key={i} onPointerDown={(e) => { e.stopPropagation(); triggerPad(i); }}
+                class={"relative rounded-[4px] flex items-end justify-center select-none " + (previewOnly ? "" : "cursor-pointer")}
+                style={{
+                  width: "38px", height: "38px",
+                  background: isHot
+                    ? "linear-gradient(180deg," + accent + ",rgba(0,0,0,0.6))"
+                    : "linear-gradient(180deg,#3f1212,#180404 80%,#080202)",
+                  boxShadow: isHot
+                    ? ("0 0 14px " + accent + ", inset 0 -3px 5px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.45)")
+                    : "inset 0 -3px 5px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.55)",
+                  border: "1px solid rgba(0,0,0,0.7)"
+                }}
+              >
+                <span class="text-[6px] font-black tracking-[0.1em] text-rose-100/90 mb-[2px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] uppercase">{lab}</span>
+                <span class="absolute top-[2px] left-[3px] text-[6px] font-mono text-rose-200/55">{String(i + 1)}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div class="flex flex-col flex-1 gap-1 px-2 py-2 min-w-0">
+          <div class="flex flex-col gap-1">
+            <span class="text-[7px] font-black tracking-[0.3em] uppercase" style={{ color: accent }}>KIT BANK</span>
+            <div class="grid grid-cols-2 gap-[3px]">
+              {MPC_KITS.map((k, i) => (
+                <MpcKitButton key={i} idx={i} kit={k} active={i === kitIdx} interactive={!previewOnly} onPick={(ki) => { if (onChange) onChange("kit", ki / Math.max(1, MPC_KITS.length - 1)); }} />
+              ))}
+            </div>
+          </div>
+          <div class="flex flex-row items-center gap-2 mt-auto">
+            <div
+              onPointerDown={(e) => { if (previewOnly) return; e.stopPropagation(); if (onChange) onChange("sequencer", (p.sequencer ?? 0) > 0.5 ? 0 : 1); }}
+              class={"select-none touch-none px-2 py-1.5 rounded-[3px] border text-[8px] font-black tracking-[0.25em] uppercase " + (previewOnly ? "" : "cursor-pointer") + " " + ((p.sequencer ?? 0) > 0.5 ? "text-black shadow-[0_0_10px_rgba(252,165,165,0.8)]" : "text-rose-200")}
+              style={{ background: (p.sequencer ?? 0) > 0.5 ? accent : "rgba(40,12,12,0.85)", borderColor: accent }}
+            >{(p.sequencer ?? 0) > 0.5 ? "● PLAY" : "▶ PLAY"}</div>
+            <div class="flex-1 flex flex-row items-center gap-1">
+              <RotaryKnob label="TEMPO" min={0} max={1} value={p.tempo ?? 0.4} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tempo", v)} />
+              <RotaryKnob label="LVL"   min={0} max={1} value={p.level ?? 0.5} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("level", v)} />
+              <RotaryKnob label="TUNE"  min={0} max={1} value={p.tune ?? 0.5}  theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("tune", v)} />
+              <RotaryKnob label="DECAY" min={0} max={1} value={p.decay ?? 0.5} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("decay", v)} />
+              <RotaryKnob label="SWING" min={0} max={1} value={p.swing ?? 0.0} theme={node.theme} compact={true} interactive={!previewOnly} onChange={(v) => onChange("swing", v)} />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="absolute top-1 right-2 pointer-events-none">
+        <span class="text-[7px] font-black tracking-[0.4em] uppercase" style={{ color: accent }}>MPC-16</span>
+      </div>
+    </RackChassis>
+  );
+}
+
+export fn mpc_pads_paintScene(ctx) {
+  const c = ctx || {};
+  const node = c.node || { id: "mpc", x: 0, y: 0, label: "MPC Pads" };
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const palette = getEraPalette("tan_red_drum");
+  const kitIdx = mpcKitFromParam((node.params && node.params.kit) ? node.params.kit : 0);
+  const kit = MPC_KITS[kitIdx];
+  const children = [];
+  children.push(Rect("mpc_panel_" + String(node.id), x, y, 640, 216, { fill: "#3f1d18", stroke: "#1a120e", strokeWidth: 2, radius: 6 }));
+  children.push(Text("mpc_title_" + String(node.id), x + 18, y + 26, "MPC-16 Velocity Pads", { color: palette.text, size: 14, weight: 800 }));
+  let pi = 0;
+  while (pi < 16) {
+    const col = pi % 4;
+    const row = Math.floor(pi / 4);
+    children.push(padCell("mpc_p_" + String(pi) + "_" + String(node.id), x + 28 + col * 44, y + 50 + row * 36, 38, 32, pi === 0, kit.accent));
+    pi = pi + 1;
+  }
+  let ki = 0;
+  while (ki < MPC_KITS.length) {
+    const col = ki % 2;
+    const row = Math.floor(ki / 2);
+    const bx = x + 230 + col * 90;
+    const by = y + 56 + row * 28;
+    const active = ki === kitIdx;
+    children.push(Rect("mpc_kit_" + String(ki) + "_" + String(node.id), bx, by, 86, 22, { fill: active ? MPC_KITS[ki].accent : "#1a0606", stroke: MPC_KITS[ki].accent, strokeWidth: 1, radius: 3, opacity: active ? 0.95 : 0.55 }));
+    children.push(Text("mpc_kitt_" + String(ki) + "_" + String(node.id), bx + 6, by + 14, MPC_KITS[ki].label, { color: active ? "#1a0606" : palette.text, size: 8, weight: 800 }));
+    ki = ki + 1;
+  }
+  children.push(knobOrnate("mpc_lvl_" + String(node.id), x + 460, y + 160, 28, 0.5, { rim: "#3f1212", top: kit.accent }));
+  children.push(knobOrnate("mpc_tune_" + String(node.id), x + 510, y + 160, 28, 0.5, { rim: "#3f1212", top: kit.accent }));
+  children.push(knobOrnate("mpc_dec_" + String(node.id),  x + 560, y + 160, 28, 0.5, { rim: "#3f1212", top: kit.accent }));
+  children.push(knobOrnate("mpc_swg_" + String(node.id),  x + 610, y + 160, 28, 0.5, { rim: "#3f1212", top: kit.accent }));
+  return { resources: [], primitives: [Group("mpc_root_" + String(node.id), children, {})] };
+}
+
+export fn mpc_pads_inputBindings(ctx) {
+  const n = (ctx && ctx.node) ? ctx.node : { id: "mpc", x: 0, y: 0 };
+  const x = Number(n.x) || 0;
+  const y = Number(n.y) || 0;
+  return [
+    { id: "knob_level_" + String(n.id), rect: { x: x + 440, y: y + 130, w: 44, h: 60 }, role: "knob", param: "level" },
+    { id: "knob_tune_" + String(n.id),  rect: { x: x + 490, y: y + 130, w: 44, h: 60 }, role: "knob", param: "tune" },
+    { id: "knob_decay_" + String(n.id), rect: { x: x + 540, y: y + 130, w: 44, h: 60 }, role: "knob", param: "decay" },
+    { id: "knob_swing_" + String(n.id), rect: { x: x + 590, y: y + 130, w: 44, h: 60 }, role: "knob", param: "swing" }
+  ];
+}
+
+const MPC_VOICE_RECIPES = [
+  { name: "kick",  osc: "sine",     hz: 50,  attack: 1, decay: 350, sustain: 0,    release: 220, sweep: -45, drive: 0.4, noise: 0.08 },
+  { name: "snare", osc: "triangle", hz: 220, attack: 1, decay: 180, sustain: 0,    release: 140, sweep: -10, drive: 0.35,noise: 0.5 },
+  { name: "hat_c", osc: "square",   hz: 7000,attack: 1, decay: 60,  sustain: 0,    release: 60,  sweep: 0,   drive: 0.0, noise: 0.85 },
+  { name: "hat_o", osc: "square",   hz: 6500,attack: 1, decay: 220, sustain: 0,    release: 240, sweep: 0,   drive: 0.0, noise: 0.85 },
+  { name: "tom_l", osc: "sine",     hz: 90,  attack: 1, decay: 320, sustain: 0,    release: 200, sweep: -25, drive: 0.2, noise: 0.04 },
+  { name: "tom_m", osc: "sine",     hz: 140, attack: 1, decay: 280, sustain: 0,    release: 180, sweep: -20, drive: 0.2, noise: 0.04 },
+  { name: "tom_h", osc: "sine",     hz: 200, attack: 1, decay: 240, sustain: 0,    release: 160, sweep: -15, drive: 0.2, noise: 0.04 },
+  { name: "ride",  osc: "square",   hz: 4500,attack: 2, decay: 380, sustain: 0,    release: 320, sweep: 0,   drive: 0.0, noise: 0.65 },
+  { name: "crash", osc: "square",   hz: 5500,attack: 2, decay: 600, sustain: 0,    release: 800, sweep: 0,   drive: 0.0, noise: 0.95 },
+  { name: "clap",  osc: "triangle", hz: 1100,attack: 2, decay: 110, sustain: 0,    release: 120, sweep: 0,   drive: 0.2, noise: 0.78 },
+  { name: "rim",   osc: "square",   hz: 1800,attack: 1, decay: 80,  sustain: 0,    release: 50,  sweep: 0,   drive: 0.4, noise: 0.2 },
+  { name: "cow",   osc: "square",   hz: 800, attack: 1, decay: 180, sustain: 0,    release: 100, sweep: 0,   drive: 0.1, noise: 0.05 },
+  { name: "shake", osc: "triangle", hz: 5500,attack: 5, decay: 200, sustain: 0,    release: 200, sweep: 0,   drive: 0.0, noise: 0.92 },
+  { name: "conga", osc: "sine",     hz: 200, attack: 1, decay: 280, sustain: 0,    release: 200, sweep: -10, drive: 0.1, noise: 0.05 },
+  { name: "perc",  osc: "triangle", hz: 700, attack: 1, decay: 220, sustain: 0,    release: 200, sweep: -5,  drive: 0.05,noise: 0.15 },
+  { name: "fx",    osc: "sawtooth", hz: 300, attack: 4, decay: 800, sustain: 0,    release: 700, sweep: 80,  drive: 0.5, noise: 0.4 }
+];
+
+const MPC_KIT_TUNE_OFFSETS = [1.0, 0.94, 1.08, 0.98, 1.12, 0.92, 1.05, 1.18];
+
+export fn mpc_pads_buildAudio(ctx, node) {
+  const inNode = ctx.createGain();
+  inNode.gain.value = 0;
+  const outNode = ctx.createGain();
+  outNode.gain.value = (node.params && node.params.level != null) ? node.params.level : 0.5;
+  inNode.connect(outNode);
+  const fxBus = createFxBus(ctx, { wet: 0.12, reverb: 0.06, delaySec: 0.16, feedback: 0.18 });
+  outNode.connect(fxBus["in"]);
+  fxBus["out"].connect(outNode);
+
+  const noiseLen = Math.max(64, Math.floor(ctx.sampleRate * 0.6));
+  const padNoiseBuffer = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+  {
+    const ch = padNoiseBuffer.getChannelData(0);
+    let nbi = 0;
+    while (nbi < noiseLen) {
+      ch[nbi] = Math.random() * 2 - 1;
+      nbi = nbi + 1;
+    }
+  }
+
+  const triggerPad = (padIdx, vel) => {
+    const recipe = MPC_VOICE_RECIPES[Math.max(0, Math.min(15, padIdx))];
+    const params = node.params || {};
+    const kitIdx = mpcKitFromParam(params.kit != null ? params.kit : 0);
+    const tuneNorm = params.tune != null ? params.tune : 0.5;
+    const decayNorm = params.decay != null ? params.decay : 0.5;
+    const tuneMul = MPC_KIT_TUNE_OFFSETS[kitIdx % MPC_KIT_TUNE_OFFSETS.length] * (0.6 + tuneNorm * 0.8);
+    const t0 = ctx.currentTime;
+    const peak = Math.max(0.05, Math.min(1, (vel || 110) / 127)) * 0.7;
+    const decay = recipe.decay * (0.5 + decayNorm * 1.4);
+    const release = recipe.release * (0.5 + decayNorm * 1.4);
+
+    const env = ctx.createGain();
+    env.gain.value = 0.0001;
+    env.connect(outNode);
+
+    const drive = recipe.drive;
+    let driveStage = null;
+    if (drive > 0) {
+      driveStage = ctx.createWaveShaper();
+      const samples = 128;
+      const curve = new Float32Array(samples);
+      const k = 1 + drive * 6;
+      let s = 0;
+      while (s < samples) {
+        const x = (s / (samples - 1)) * 2 - 1;
+        curve[s] = Math.tanh(x * k);
+        s = s + 1;
+      }
+      driveStage.curve = curve;
+      driveStage.connect(env);
+    }
+    const sink = driveStage ? driveStage : env;
+
+    if (recipe.noise > 0) {
+      const noise = ctx.createBufferSource();
+      noise.buffer = padNoiseBuffer;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.value = recipe.noise * 0.6;
+      const noiseFilt = ctx.createBiquadFilter();
+      noiseFilt["type"] = "highpass";
+      noiseFilt.frequency.value = 800 + tuneNorm * 5000;
+      noise.connect(noiseFilt);
+      noiseFilt.connect(noiseGain);
+      noiseGain.connect(sink);
+      noise.start(t0);
+      noise.stop(t0 + Math.min(2, (decay + release) / 1000));
+    }
+
+    const oscA = ctx.createOscillator();
+    oscA["type"] = recipe.osc;
+    const baseHz = recipe.hz * tuneMul;
+    oscA.frequency.setValueAtTime(baseHz * Math.pow(2, recipe.sweep / 12), t0);
+    oscA.frequency.exponentialRampToValueAtTime(Math.max(20, baseHz), t0 + (decay / 1000) * 0.6);
+    oscA.connect(sink);
+    oscA.start(t0);
+    oscA.stop(t0 + (decay + release) / 1000 + 0.1);
+
+    applyAdsr(env.gain, t0, recipe.attack, decay, recipe.sustain, release, peak);
+  };
+
+  if (typeof window !== "undefined" && window.addEventListener) {
+    /* Audio graph rebuilds re-run buildAudio on the same node. Detach the
+       previous handler first so we never grow window listeners over time. */
+    if (typeof node._mpcDetach === "function") {
+      try { node._mpcDetach(); } catch (eD) { void eD; }
+      node._mpcDetach = null;
+    }
+    const handler = (ev) => {
+      const detail = ev && ev.detail ? ev.detail : null;
+      if (!detail) return;
+      if (detail.nodeId !== node.id) return;
+      triggerPad(Math.max(0, Math.min(15, Number(detail.padIdx) || 0)), Number(detail.vel) || 110);
+    };
+    window.addEventListener("mpc-pad-trigger", handler);
+    node._mpcDetach = () => window.removeEventListener("mpc-pad-trigger", handler);
+  }
+
+  const midiSink = {
+    handleEvent: (ev, ctx2) => {
+      void ctx2;
+      if (!ev) return;
+      if (ev.kind === "noteOn") {
+        const padIdx = Math.max(0, Math.min(15, (ev.note != null ? ev.note : 36) - 36));
+        triggerPad(padIdx, ev.velocity != null ? ev.velocity : 110);
+        return;
+      }
+    },
+    getActivity: () => ({ last: "mpc_pads", vel: 100 }),
+    dispose: () => {
+      try { fxBus.dispose(); } catch (e0) {}
+      if (node._mpcDetach) {
+        try { node._mpcDetach(); } catch (e1) {}
+        node._mpcDetach = null;
+      }
+      stopSeq();
+    }
+  };
+
+  const SEQ_PATTERN = [
+    [0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [2,2,3,2,2,2,3,2,2,2,3,2,2,2,3,2],
+    [9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9]
+  ];
+  let seqStep = 0;
+  let seqIntervalId = null;
+
+  const seqTick = () => {
+    const params = node.params || {};
+    const tune = params.tune != null ? params.tune : 0.5;
+    const swing = params.swing != null ? params.swing : 0;
+    void tune;
+    if (seqStep % 4 === 0) {
+      triggerPad(0, 120);
+    }
+    if (seqStep % 8 === 4) {
+      triggerPad(1, 110);
+    }
+    triggerPad(seqStep % 2 === 0 ? 2 : 3, seqStep % 2 === 0 ? 90 : 70);
+    if (seqStep % 16 === 14) {
+      triggerPad(9, 100);
+    }
+    void swing;
+    seqStep = (seqStep + 1) % 16;
+  };
+
+  const startSeq = () => {
+    if (seqIntervalId != null || typeof window === "undefined") return;
+    const params = node.params || {};
+    const tempo = params.tempo != null ? params.tempo : 0.4;
+    const bpm = 60 + tempo * 140;
+    const stepMs = (60000 / bpm) / 4;
+    seqIntervalId = window.setInterval(seqTick, Math.max(40, stepMs));
+  };
+
+  const stopSeq = () => {
+    if (seqIntervalId == null || typeof window === "undefined") return;
+    window.clearInterval(seqIntervalId);
+    seqIntervalId = null;
+    seqStep = 0;
+  };
+
+  let lastSeq = 0;
+  let lastTempo = -1;
+
+  const nodeParamSync = (ctx2, n2) => {
+    void ctx2;
+    const params = n2.params || {};
+    const lvl = params.level != null ? params.level : 0.5;
+    outNode.gain.value = lvl;
+    const wantSeq = (params.sequencer != null ? params.sequencer : 0) > 0.5;
+    const tempo = params.tempo != null ? params.tempo : 0.4;
+    if (wantSeq && !lastSeq) {
+      startSeq();
+    } else if (!wantSeq && lastSeq) {
+      stopSeq();
+    } else if (wantSeq && tempo !== lastTempo) {
+      stopSeq();
+      startSeq();
+    }
+    lastSeq = wantSeq ? 1 : 0;
+    lastTempo = tempo;
+  };
+
+  if ((node.params || {}).sequencer != null && (node.params || {}).sequencer > 0.5) {
+    startSeq();
+    lastSeq = 1;
+  }
+
+  return {
+    "in": inNode,
+    "out": outNode,
+    inPorts: null,
+    outPorts: null,
+    analysers: {},
+    nodeParamSync: nodeParamSync,
+    smartGateRuntime: null,
+    _seqDispose: () => stopSeq(),
+    midiSink: midiSink
+  };
+}
+
+void useEffect;
+void useRef;
+void materialTokens;
