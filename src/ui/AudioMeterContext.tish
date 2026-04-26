@@ -15,9 +15,19 @@ levelFill: null
 
 const writeHeaderMeterDom = (level, pitchNote, pitchHz) => {
 const els = headerMeterEls;
-if (els.levelFill) els.levelFill.style.width = String(Math.min(100, level * 100)) + "%";
-if (els.note) els.note.textContent = pitchNote || '-';
-if (els.hz) els.hz.textContent = String(pitchHz) + "Hz";
+/* Guard each property access — during Lattish reconciliation a ref slot
+   can briefly resolve to a non-element placeholder where `.style` is
+   undefined. Without these guards a single transient ref glitch crashes
+   the meter RAF loop and floods the console with `style.width` TypeErrors. */
+if (els.levelFill && els.levelFill.style) {
+els.levelFill.style.width = String(Math.min(100, level * 100)) + "%";
+}
+if (els.note && "textContent" in els.note) {
+els.note.textContent = pitchNote || '-';
+}
+if (els.hz && "textContent" in els.hz) {
+els.hz.textContent = String(pitchHz) + "Hz";
+}
 };
 
 export fn AudioMeterProvider(props) {

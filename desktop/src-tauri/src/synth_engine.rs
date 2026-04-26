@@ -189,6 +189,11 @@ pub fn send_synth_note_event(
         gv.get(&handle_id).cloned()
     };
     let Some(voice_arc) = voice_arc else {
+        log_safe!(
+            "[ToneFrame:native-synth] note_event: NO VOICE for handle_id={} kind={}",
+            handle_id,
+            event.kind
+        );
         return Ok(());
     };
     let mut v = voice_arc.lock().expect("synth voice poisoned");
@@ -199,8 +204,25 @@ pub fn send_synth_note_event(
         v.hz = hz_from_midi(n);
         v.vel = vel.max(0.05);
         v.gate = true;
+        log_safe!(
+            "[ToneFrame:native-synth] note_event noteOn handle_id={} note={} vel={} -> hz={} gate=true",
+            handle_id,
+            n,
+            event.velocity.unwrap_or(100),
+            v.hz
+        );
     } else if k == "noteOff" {
         v.gate = false;
+        log_safe!(
+            "[ToneFrame:native-synth] note_event noteOff handle_id={}",
+            handle_id
+        );
+    } else {
+        log_safe!(
+            "[ToneFrame:native-synth] note_event: ignored kind={} handle_id={}",
+            k,
+            handle_id
+        );
     }
     Ok(())
 }

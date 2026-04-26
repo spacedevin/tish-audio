@@ -76,5 +76,22 @@ if (process !== null && process.env !== null && "PORT" in process.env) {
   port = parseInt(process.env.PORT)
 }
 
-console.log("Starting server on http://localhost:" + String(port))
+/* tish `serve` forks N worker processes (typically 14 on this Mac) and
+   each one re-runs this top-level script — that's why a single startup
+   was logging "Starting server on http://localhost:8080" 14 times in
+   the desktop:dev terminal. Print only from worker 0 (or when the
+   worker id env hint is missing, e.g. running standalone). The kernel-
+   level "tish http: listening on …" line still tells you the bind
+   succeeded across all workers. */
+let workerId = -1
+if (process !== null && process.env !== null) {
+  if ("TISH_HTTP_WORKER" in process.env) {
+    workerId = parseInt(process.env.TISH_HTTP_WORKER)
+  } else if ("TISH_WORKER_INDEX" in process.env) {
+    workerId = parseInt(process.env.TISH_WORKER_INDEX)
+  }
+}
+if (workerId < 0 || workerId === 0) {
+  console.log("Starting server on http://localhost:" + String(port))
+}
 serve(port, handleRequest)

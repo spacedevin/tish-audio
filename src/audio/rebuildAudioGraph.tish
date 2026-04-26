@@ -86,6 +86,44 @@ const buildSmkControlRoutes = (smkNodeId, conns, graphNodes) => {
   return routes;
 }
 
+/* Module-scoped cache of the previous topology per AudioContext, used to
+   make `rebuildAudioGraph` *incremental*: only nodes that disappeared
+   from `currentNodes` get disposed, only nodes that newly appeared get
+   built, and only connection edges that actually changed get
+   added/removed. Existing audio engines stay alive across rebuilds —
+   adding an unconnected new rack no longer kills the keys-poly that
+   was happily playing. */
+let __prevConnsByCtx = null;
+let __prevNodeIdsByCtx = null;
+const __ensureConnState = () => {
+  if (!__prevConnsByCtx) __prevConnsByCtx = new WeakMap();
+  if (!__prevNodeIdsByCtx) __prevNodeIdsByCtx = new WeakMap();
+};
+
+const __connKey = (c) => {
+  return String(c.from) + "::" + String(c.fromPort || "main") + "::" + String(c.to) + "::" + String(c.toPort || "main") + "::" + String(c.ctrlParam != null ? c.ctrlParam : "");
+};
+
+const __disposeOneNode = (n, outGainRef) => {
+  if (!n) return;
+  if (n.midiSink && typeof n.midiSink.dispose === "function") {
+    try { n.midiSink.dispose(); } catch (eMidi) {}
+  }
+  if (n.discardPullSilent) {
+    try { n.discardPullSilent.disconnect(); } catch (eD) {}
+  }
+  if (n["in"]) { try { n["in"].disconnect(); } catch (eIn) {} }
+  if (n["out"] && n["out"] !== outGainRef.current) { try { n["out"].disconnect(); } catch (eOut) {} }
+  if (n.lfo) {
+    try { n.lfo.stop(); } catch (eLs) {}
+    try { n.lfo.disconnect(); } catch (eLd) {}
+  }
+  if (n.analyser) { try { n.analyser.disconnect(); } catch (eA) {} }
+  if (n.analysers) {
+    Object.values(n.analysers).forEach((a) => { try { a.disconnect(); } catch (eAv) {} });
+  }
+};
+
 export fn rebuildAudioGraph(ctx, deps, currentNodes, currentConns) {
 if (!ctx) return;
 const nodeAudioMapRef = deps.nodeAudioMapRef
@@ -100,25 +138,34 @@ const nn = currentNodes[nbi];
 nodeById[nn.id] = nn;
 nbi = nbi + 1;
 }
+const currentIdSet = {};
+{
+  let __cii = 0;
+  while (__cii < currentNodes.length) {
+    currentIdSet[currentNodes[__cii].id] = true;
+    __cii = __cii + 1;
+  }
+}
 
-Object.values(nodeAudioMapRef.current).forEach(n => {
-if (n.midiSink && typeof n.midiSink.dispose === "function") {
-try { n.midiSink.dispose(); } catch (eMidi) {}
-}
-if (n.discardPullSilent) {
-try { n.discardPullSilent.disconnect(); } catch (e) {}
-}
-if (n["in"]) n["in"].disconnect();
-if (n["out"] && n["out"] !== outGainRef.current) n["out"].disconnect();
-if (n.lfo) { n.lfo.stop(); n.lfo.disconnect(); }
-if (n.analyser) n.analyser.disconnect();
-if (n.analysers) {
-Object.values(n.analysers).forEach(a => a.disconnect());
-}
+/* Incremental dispose: only tear down audio nodes whose graph node was
+   actually removed. Existing nodes keep their `nodeAudioMapRef.current`
+   entry — and crucially their AudioWorkletNode / native engine handle —
+   so they keep producing sound. */
+__ensureConnState();
+const __prevNodeIds = __prevNodeIdsByCtx.get(ctx) || {};
+Object.keys(nodeAudioMapRef.current).forEach((id) => {
+  if (currentIdSet[id] === true) return;
+  __disposeOneNode(nodeAudioMapRef.current[id], outGainRef);
+  /* Tish parser refuses `delete obj[key]`; Reflect.deleteProperty is the
+     equivalent that survives transpile. */
+  Reflect.deleteProperty(nodeAudioMapRef.current, id);
 });
-nodeAudioMapRef.current = {};
 
 currentNodes.forEach(node => {
+/* Skip the entire build branch for nodes that were already alive in
+   the audio map. Their in/out/midiSink/etc. are intact and still
+   wired to whatever was connected before. */
+if (nodeAudioMapRef.current[node.id]) return;
 let inNode; let outNode; let lfo; let nodeAnalyser;
 let inPorts = null; let outPorts = null;
 let analysers = {}; 
@@ -823,25 +870,65 @@ controlInbound: controlInbound
 };
 });
 
-currentConns.forEach(conn => {
-const toNode = nodeById[conn.to];
-const dynCtrlPorts = getNodeControlPorts(toNode).map((p) => p.portId);
-const isDynamicControlIn = dynCtrlPorts.indexOf(conn.toPort) >= 0;
-if (isMidiGraphPortId(conn.fromPort) || isMidiGraphPortId(conn.toPort)) {
-return;
+/* Audio connection diff: only call .connect()/.disconnect() for edges
+   that actually changed. Without this, every rebuild blindly re-connects
+   every audio cable on the board on top of itself, AND a previous diff
+   pass needs to break the old ones — both of which used to require
+   tearing down every node first. With incremental dispose+build we MUST
+   diff connections too, otherwise an unchanged surviving node would end
+   up with a duplicate connection (which doubles signal in WebAudio). */
+const __prevConns = __prevConnsByCtx.get(ctx) || [];
+const isAudioConn = (c) => {
+  if (!c) return false;
+  if (isMidiGraphPortId(c.fromPort) || isMidiGraphPortId(c.toPort)) return false;
+  if (isSmkControlOutputPort(c.fromPort) || isControlInputPort(c.toPort)) return false;
+  const tn = nodeById[c.to];
+  const dynPorts = getNodeControlPorts(tn).map((p) => p.portId);
+  if (dynPorts.indexOf(c.toPort) >= 0) return false;
+  return true;
+};
+const __prevAudioMap = {};
+let __pci = 0;
+while (__pci < __prevConns.length) {
+  const c = __prevConns[__pci];
+  __pci = __pci + 1;
+  if (!isAudioConn(c)) continue;
+  __prevAudioMap[__connKey(c)] = c;
 }
-if (isSmkControlOutputPort(conn.fromPort) || isControlInputPort(conn.toPort) || isDynamicControlIn) {
-return;
+const __nextAudioMap = {};
+let __nci = 0;
+while (__nci < currentConns.length) {
+  const c = currentConns[__nci];
+  __nci = __nci + 1;
+  if (!isAudioConn(c)) continue;
+  __nextAudioMap[__connKey(c)] = c;
 }
-const fromData = nodeAudioMapRef.current[conn.from];
-const toData = nodeAudioMapRef.current[conn.to];
-if (fromData && toData) {
-const outAudioNode = fromData.outPorts[conn.fromPort || 'main'];
-const inAudioNode = toData.inPorts[conn.toPort || 'main'];
-if (outAudioNode && inAudioNode) {
-outAudioNode.connect(inAudioNode);
-}
-}
+/* Removed audio edges: previously had a .connect() pair, no longer in
+   the graph. Use disconnect(destination) so we only break THIS specific
+   pair and leave the source node's other connections alone. */
+Object.keys(__prevAudioMap).forEach((k) => {
+  if (__nextAudioMap[k]) return;
+  const c = __prevAudioMap[k];
+  const fromData = nodeAudioMapRef.current[c.from];
+  const toData = nodeAudioMapRef.current[c.to];
+  if (!fromData || !toData) return;
+  const outAudio = fromData.outPorts ? fromData.outPorts[c.fromPort || "main"] : null;
+  const inAudio = toData.inPorts ? toData.inPorts[c.toPort || "main"] : null;
+  if (!outAudio || !inAudio) return;
+  try { outAudio.disconnect(inAudio); } catch (eDC) { void eDC; }
+});
+/* Added audio edges: new in this rebuild (or edges into a freshly-built
+   node that didn't exist before). Connect them. */
+Object.keys(__nextAudioMap).forEach((k) => {
+  if (__prevAudioMap[k]) return;
+  const c = __nextAudioMap[k];
+  const fromData = nodeAudioMapRef.current[c.from];
+  const toData = nodeAudioMapRef.current[c.to];
+  if (!fromData || !toData) return;
+  const outAudio = fromData.outPorts ? fromData.outPorts[c.fromPort || "main"] : null;
+  const inAudio = toData.inPorts ? toData.inPorts[c.toPort || "main"] : null;
+  if (!outAudio || !inAudio) return;
+  try { outAudio.connect(inAudio); } catch (eC) { void eC; }
 });
 
 const midiRouteMap = {};
@@ -891,6 +978,72 @@ currentConns.forEach((conn) => {
   }
 });
 
+/* Refresh SMK-25 control routes for ALL smk25_face nodes — kept and
+   newly-built. The original code only installed routes inside the
+   build branch, but with incremental rebuild a kept SMK-25 can have
+   newly-added (or removed) `smk_ctrl_N -> some.param` edges that the
+   surviving midiSink hasn't seen. Re-installing here covers both cases
+   without needing to rebuild the whole face. */
+{
+  let __srci = 0;
+  while (__srci < currentNodes.length) {
+    const _n = currentNodes[__srci];
+    __srci = __srci + 1;
+    if (!_n || _n["type"] !== "smk25_face") continue;
+    const _box = nodeAudioMapRef.current[_n.id];
+    const _sink = _box && _box.midiSink ? _box.midiSink : null;
+    if (!_sink || typeof _sink.installControlRoutes !== "function") continue;
+    const _routes = buildSmkControlRoutes(_n.id, currentConns, currentNodes);
+    const _apply = deps.applyNodeParam;
+    if (_apply && typeof _apply === "function") {
+      try { _sink.installControlRoutes(_routes, _apply); } catch (eIC) { void eIC; }
+    } else {
+      try { _sink.installControlRoutes({}, null); } catch (eIC2) { void eIC2; }
+    }
+  }
+}
+
+/* Stale-fanout sweep: any source-port that HAD a route in the previous
+   rebuild but doesn't have one now must be explicitly nulled, otherwise
+   the source's `forwardSinks[port]` stays pointing at a sink that
+   belongs to a node we just disposed. Without this sweep, removing a
+   downstream rack would leave SMK-25 still forwarding into a dead
+   keysPoly sink — events get queued into garbage and audio dies. */
+const __prevRouteKeys = {};
+let __pri = 0;
+while (__pri < __prevConns.length) {
+  const c = __prevConns[__pri];
+  __pri = __pri + 1;
+  if (!c) continue;
+  if (isMidiGraphPortId(c.fromPort) || isSmk25FaceMidiOutputPort(c.fromPort) || isMidiChannelSplitterOutputPort(c.fromPort) || c.fromPort === "midi") {
+    __prevRouteKeys[String(c.from) + "::" + String(c.fromPort)] = c;
+  }
+}
+const __routeStillExists = (fromId, fromPort) => {
+  let i = 0;
+  while (i < currentConns.length) {
+    const c = currentConns[i];
+    i = i + 1;
+    if (c && c.from === fromId && c.fromPort === fromPort) return true;
+  }
+  return false;
+};
+Object.keys(__prevRouteKeys).forEach((k) => {
+  const sep = k.indexOf("::");
+  if (sep < 0) return;
+  const fromId = k.slice(0, sep);
+  const fromPort = k.slice(sep + 2);
+  if (__routeStillExists(fromId, fromPort)) return;
+  const box = nodeAudioMapRef.current[fromId];
+  const sink = box && box.midiSink ? box.midiSink : null;
+  if (!sink) return;
+  if (fromPort === "midi" && typeof sink.setMidiForward === "function") {
+    try { sink.setMidiForward(null); } catch (eS) { void eS; }
+  } else if (typeof sink.setMidiForwardCombo === "function") {
+    try { sink.setMidiForwardCombo(fromPort, null); } catch (eC) { void eC; }
+  }
+});
+
 const routeRows = Object.values(midiRouteMap);
 let rri = 0;
 while (rri < routeRows.length) {
@@ -915,9 +1068,16 @@ ni = ni + 1;
 if (node["type"] !== 'master_eq' && node["type"] !== 'graphic_eq') continue;
 if (node.bypassed) continue;
 const hasOutgoing = currentConns.some(c => c.from === node.id && c.fromPort !== 'midi');
-if (hasOutgoing) continue;
 const box = nodeAudioMapRef.current[node.id];
 if (!box || !box.out) continue;
+/* Tear down any pre-existing silent-pull tap before deciding whether
+   to install a new one — incremental rebuild keeps surviving boxes,
+   so a stale tap from the previous topology can leak forever. */
+if (box.discardPullSilent) {
+  try { box.discardPullSilent.disconnect(); } catch (eDP) { void eDP; }
+  box.discardPullSilent = null;
+}
+if (hasOutgoing) continue;
 const silent = ctx.createGain();
 silent.gain.value = 0;
 box.out.connect(silent);
@@ -934,9 +1094,13 @@ njp = njp + 1;
 if (node["type"] !== 'midi_poly') continue;
 if (node.bypassed) continue;
 const hasOut = currentConns.some(c => c.from === node.id && c.fromPort !== 'midi');
-if (hasOut) continue;
 const box = nodeAudioMapRef.current[node.id];
 if (!box || !box.out || !box.midiSink) continue;
+if (box.discardPullSilent) {
+  try { box.discardPullSilent.disconnect(); } catch (eDP2) { void eDP2; }
+  box.discardPullSilent = null;
+}
+if (hasOut) continue;
 const silentPull = ctx.createGain();
 silentPull.gain.value = 0;
 try {
@@ -946,4 +1110,8 @@ box.discardPullSilent = silentPull;
 } catch (ePull) {}
 }
 
+/* Persist this rebuild's connection list so the next rebuild can diff
+   against it instead of blindly re-installing every cable. */
+__prevConnsByCtx.set(ctx, currentConns.slice());
+__prevNodeIdsByCtx.set(ctx, currentIdSet);
 }

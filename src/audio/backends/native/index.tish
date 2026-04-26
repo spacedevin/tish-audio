@@ -34,15 +34,20 @@ export fn createNativeSynthBackend() {
     },
     allocateEngine: (spec, qualityProfile, node) => {
       void qualityProfile;
+      const allocPrefix = "[native-synth:" + String(spec && spec.id) + "]";
       if (!ctxRef || !ctxRef.audioWorklet) {
+        if (typeof console !== "undefined" && console.warn) console.warn(allocPrefix, "allocateEngine: no audioWorklet on ctx — falling back");
         return null;
       }
       if (!isTauriApp() || !synthBridgePresent()) {
+        if (typeof console !== "undefined" && console.warn) console.warn(allocPrefix, "allocateEngine: not Tauri or bridge missing — falling back. isTauri=", isTauriApp(), "bridge=", synthBridgePresent());
         return null;
       }
       if (!ensureNativeSynthOutWorklet(ctxRef)) {
+        if (typeof console !== "undefined" && console.warn) console.warn(allocPrefix, "allocateEngine: native-synth-out worklet not ready — falling back. _nativeSynthOutReady=", ctxRef._nativeSynthOutReady);
         return null;
       }
+      if (typeof console !== "undefined" && console.info) console.info(allocPrefix, "allocateEngine called for node=", node && node.id);
       const ota = window.__OTA_BRIDGE__;
       const inGain = ctxRef.createGain();
       inGain.gain.value = 0;
@@ -56,15 +61,21 @@ export fn createNativeSynthBackend() {
       });
       wn.connect(outGain);
       const ref = { handleId: null, unlisten: null };
+      const dbgPrefix = "[native-synth:" + String(spec && spec.id) + "]";
       const arm = () => {
+        if (typeof console !== "undefined" && console.info) console.info(dbgPrefix, "arm() start");
         ota.createSynthEngine(spec, ctxRef.sampleRate).then((raw) => {
           const hid = raw && raw.handleId != null ? raw.handleId : raw && raw.handle_id != null ? raw.handle_id : null;
           ref.handleId = hid;
+          if (typeof console !== "undefined" && console.info) console.info(dbgPrefix, "arm() got handleId=", hid);
           const ratio = 48000 / ctxRef.sampleRate;
           wn.port.postMessage({ type: "config", ratio: ratio });
           if (!ota.listenNativeSynthAudioChunk) {
+            if (typeof console !== "undefined" && console.warn) console.warn(dbgPrefix, "arm() — bridge missing listenNativeSynthAudioChunk");
             return null;
           }
+          let chunkCount = 0;
+          let firstChunkLogged = false;
           return ota.listenNativeSynthAudioChunk((payload) => {
             if (payload == null || ref.handleId == null) {
               return;
@@ -84,29 +95,66 @@ export fn createNativeSynthBackend() {
             }
             const f32 = new Float32Array(len);
             let j = 0;
+            let peak = 0;
             while (j < len) {
               f32[j] = s[j];
+              const a = s[j] < 0 ? -s[j] : s[j];
+              if (a > peak) peak = a;
               j = j + 1;
             }
             wn.port.postMessage({ type: "chunk", samples: f32 }, [f32.buffer]);
+            chunkCount = chunkCount + 1;
+            if (!firstChunkLogged) {
+              firstChunkLogged = true;
+              if (typeof console !== "undefined" && console.info) console.info(dbgPrefix, "first chunk arrived handleId=", ref.handleId, "len=", len, "peak=", peak);
+            }
+            if (chunkCount % 250 === 0) {
+              if (typeof console !== "undefined" && console.info) console.info(dbgPrefix, "chunks delivered handleId=", ref.handleId, "count=", chunkCount, "lastPeak=", peak);
+            }
           });
         }).then((un) => {
           ref.unlisten = un;
+          if (typeof console !== "undefined" && console.info) console.info(dbgPrefix, "arm() listener installed handleId=", ref.handleId);
         });
       };
       arm();
+      let warnedMissingHandle = false;
+      let noteEventCount = 0;
       const midiSink = {
         handleEvent: (ev, c2) => {
           void c2;
-          if (ref.handleId == null || !ota.sendSynthNoteEvent) {
+          if (ref.handleId == null) {
+            if (!warnedMissingHandle && typeof console !== "undefined" && console.warn) {
+              console.warn(dbgPrefix, "midiSink.handleEvent dropped — engine handleId still null (arm() pending or failed)");
+              warnedMissingHandle = true;
+            }
             return;
           }
+          if (!ota.sendSynthNoteEvent) {
+            return;
+          }
+          noteEventCount = noteEventCount + 1;
+          if (noteEventCount <= 5 || noteEventCount % 25 === 0) {
+            if (typeof console !== "undefined" && console.info) console.info(dbgPrefix, "sendSynthNoteEvent #", noteEventCount, "handleId=", ref.handleId, "kind=", ev && ev.kind, "note=", ev && ev.note, "vel=", ev && ev.velocity);
+          }
           try {
-            ota.sendSynthNoteEvent(ref.handleId, ev);
-          } catch (eN) {}
+            const p = ota.sendSynthNoteEvent(ref.handleId, ev);
+            if (p && typeof p.then === "function") {
+              p.then((res) => {
+                if (noteEventCount === 1 && typeof console !== "undefined" && console.info) {
+                  console.info(dbgPrefix, "sendSynthNoteEvent resolved on Rust side handleId=", ref.handleId, "result=", res);
+                }
+              }, (err) => {
+                if (typeof console !== "undefined" && console.warn) console.warn(dbgPrefix, "sendSynthNoteEvent REJECTED handleId=", ref.handleId, "error=", err && err.message ? err.message : err);
+              });
+            }
+          } catch (eN) {
+            if (typeof console !== "undefined" && console.warn) console.warn(dbgPrefix, "sendSynthNoteEvent threw", eN && eN.message ? eN.message : eN);
+          }
         },
         getActivity: () => ({ last: "native", vel: 100 }),
         dispose: () => {
+          if (typeof console !== "undefined" && console.info) console.info(dbgPrefix, "dispose() handleId=", ref.handleId, "unlisten?", !!ref.unlisten);
           try { wn.disconnect(); } catch (eW) {}
           try { outGain.disconnect(); } catch (eO) {}
           if (ref.unlisten) {
