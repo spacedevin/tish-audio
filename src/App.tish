@@ -29,7 +29,7 @@ import { useMidiPatch } from "./midi/useMidiPatch.tish"
 import { registerBuiltinIrModules } from "./render/registerBuiltinIrModules.tish"
 import { SynthQualityPanel } from "./ui/SynthQualityPanel.tish"
 import { preloadSynthWorkletModules } from "./audio/synth/workletPreload.tish"
-import { PerfHud, perfHudEnabled, perfMarkRender } from "./ui/PerfHud.tish"
+import { PerfHud, perfHudInitialVisible, perfMarkRender } from "./ui/PerfHud.tish"
 export fn App() {
 perfMarkRender();
 registerBuiltinIrModules();
@@ -49,6 +49,7 @@ let [showHardwareMenu, setShowHardwareMenu] = useState(false);
 let [showModuleLibrary, setShowModuleLibrary] = useState(false);
 let [showModuleDebug, setShowModuleDebug] = useState(false);
 let [showSynthQuality, setShowSynthQuality] = useState(false);
+let [showPerfHud, setShowPerfHud] = useState(perfHudInitialVisible());
 let [audioGraphTick, setAudioGraphTick] = useState(0);
 let [inputFlowBusy, setInputFlowBusy] = useState(false);
 let [micDenied, setMicDenied] = useState(false);
@@ -119,6 +120,20 @@ return () => {
 if (r1 != null && window.cancelAnimationFrame) window.cancelAnimationFrame(r1);
 if (r2 != null && window.cancelAnimationFrame) window.cancelAnimationFrame(r2);
 };
+}, []);
+
+useEffect(() => {
+if (typeof window === "undefined" || !window.addEventListener) return;
+const onKeyDown = (e) => {
+if (!e || e.repeat) return;
+if (e.code !== "Backquote") return;
+const el = e.target;
+if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+e.preventDefault();
+setShowPerfHud((v) => !v);
+};
+window.addEventListener("keydown", onKeyDown, true);
+return () => window.removeEventListener("keydown", onKeyDown, true);
 }, []);
 
 /* Re-armable warmup hint for newly-added racks (kept light: just
@@ -1145,7 +1160,7 @@ const tuningScene = useMemo(() => {
   return buildTuningScene(w, h, activeTab === "chords" ? "chords" : "tuning");
 }, [renderBackendEnabled, activeTab]);
 
-const perfHud = perfHudEnabled() ? h(PerfHud, {}) : null;
+const perfHud = showPerfHud ? h(PerfHud, {}) : null;
 
 return (
 <div class="flex-1 flex flex-col min-h-0 h-full bg-neutral-950 text-neutral-100 font-sans select-none">

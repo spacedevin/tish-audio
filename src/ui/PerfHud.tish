@@ -10,9 +10,10 @@
  *   - timeline of focus / blur / visibilitychange / pageshow events with
  *     wall-clock and document-time deltas
  *
- * All measurements run at module load and stream to both the on-screen HUD
- * (auto-mounted by App.tish) and console.log so the user can paste the cold
- * vs. warm transcript. Add `?perf=0` to the URL to suppress the HUD.
+ * All measurements run while the HUD is mounted and stream to both the
+ * on-screen HUD and console.log so the user can paste the cold vs. warm
+ * transcript. The HUD is hidden by default; press ` (Backquote) to toggle.
+ * Add `?perf=1` to the URL to open it on load.
  */
 import { h, useState, useEffect, useRef } from "lattish"
 
@@ -318,11 +319,12 @@ export fn PerfHud(props) {
   );
 }
 
-export fn perfHudEnabled() {
-  if (typeof window === "undefined" || !window.location) return true;
+/** True when `?perf=1` so devs can start with the HUD open without toggling. */
+export fn perfHudInitialVisible() {
+  if (typeof window === "undefined" || !window.location) return false;
   try {
     const qp = new URLSearchParams(window.location.search || "");
-    if (qp.get("perf") === "0") return false;
+    return qp.get("perf") === "1";
   } catch (e) { void e; }
-  return true;
+  return false;
 }
