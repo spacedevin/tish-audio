@@ -60,11 +60,18 @@ const BUILTIN_PAD_SLOTS_B = [
 // Observed on the M-VAVE SMK-25 II:
 //   KNOB-A (ports 1/2, MIDI ch 1): CC 20..27 for knobs 1..8.
 const BUILTIN_KNOB_CCS_A = [20, 21, 22, 23, 24, 25, 26, 27];
-// KNOB-B layer: firmware may send high-note taps per encoder slot; pitch bend on encoder channel then updates last touched slot.
+// KNOB-B layer on the M-VAVE SMK-25 II (observed):
+//   Port 3, MIDI ch 1..8 (wire 0..7) -> KNOB-B slots 1..8 (wire channel == slot index).
+//   Each turn also emits a tap noteOn 104..111 on ch 1 (knob index via indexInIntList).
 const SMK_KNOB_B_NOTES_DEFAULT = [104, 105, 106, 107, 108, 109, 110, 111];
-// Transport (firmware): Play A#6, Stop A6, Rec B6 — remap for passthrough so downstream synths / MIDI Recorder see low “button” notes.
+const SMK_KNOB_B_PORT_DEFAULT = 3;
+const SMK_KNOB_B_CHANNEL_AS_SLOT = true;
+// Transport notes (firmware): Play / Stop / Rec. Observed on the SMK-25 II:
+// Play = note 94, Stop = note 93, Rec = note 95 (MIDI ch 1, port 3).
+// Default: pass through unchanged (set smkTransportRecorderNotes in profile for downstream remap).
 const SMK_TRANSPORT_NOTES_DEFAULT = [94, 93, 95];
-const SMK_TRANSPORT_RECORDER_NOTES_DEFAULT = [36, 37, 38];
+const SMK_TRANSPORT_RECORDER_NOTES_DEFAULT = null;
+const SMK_TRANSPORT_LABELS = ["PLAY", "STOP", "REC"];
 const SMK_KNOB_LABELS_A = ["Mode", "Oct", "Latch", "Gate", "Swing", "Tempo", "Rate", "Transpose"];
 
 const cloneKeys = (keys) => {
@@ -108,6 +115,8 @@ const freshState = () => {
     padsBHitAt: padsBHitAt,
     knobs: knobs,
     knobsChangedAt: knobsChangedAt,
+    transport: { play: 0, stop: 0, rec: 0 },
+    transportHitAt: { play: 0, stop: 0, rec: 0 },
     pitchNorm: 0.5,
     modNorm: 0.0,
     padBankB: false,
@@ -321,6 +330,9 @@ const applyMidiToState = (prev, ev, opts) => {
   const knobBCcs = opts.knobBCcs && opts.knobBCcs.length >= SMK_KNOB_DIGITAL ? opts.knobBCcs : null;
   const padSlotsA = opts.padSlotsA;
   const padSlotsB = opts.padSlotsB;
+  const transportNotes = Array.isArray(opts.transportNotes) && opts.transportNotes.length >= 3 ? opts.transportNotes : null;
+  const knobBPort = Number.isFinite(opts.knobBPort) ? opts.knobBPort : SMK_KNOB_B_PORT_DEFAULT;
+  const knobBChannelAsSlot = opts.knobBChannelAsSlot === true || opts.knobBChannelAsSlot == null;
 
   const padASrc = prev.padsA && prev.padsA.length === SMK_PADS ? prev.padsA : prev.pads && prev.pads.length === SMK_PADS ? prev.pads : freshPadRow();
   const padBSrc = prev.padsB && prev.padsB.length === SMK_PADS ? prev.padsB : freshPadRow();
@@ -328,6 +340,8 @@ const applyMidiToState = (prev, ev, opts) => {
   const padsBHitAtSrc = prev.padsBHitAt && prev.padsBHitAt.length === SMK_PADS ? prev.padsBHitAt : freshPadRow();
   const knobsChangedAtSrc = prev.knobsChangedAt && prev.knobsChangedAt.length === SMK_KNOB_TOTAL ? prev.knobsChangedAt : freshKnobChangedAt();
 
+  const tPrev = prev.transport && typeof prev.transport === "object" ? prev.transport : { play: 0, stop: 0, rec: 0 };
+  const tHitPrev = prev.transportHitAt && typeof prev.transportHitAt === "object" ? prev.transportHitAt : { play: 0, stop: 0, rec: 0 };
   const next = {
     keys: cloneKeys(prev.keys),
     padsA: padASrc.slice(),
@@ -336,6 +350,8 @@ const applyMidiToState = (prev, ev, opts) => {
     padsBHitAt: padsBHitAtSrc.slice(),
     knobs: ensureKnobArray(prev.knobs),
     knobsChangedAt: knobsChangedAtSrc.slice(),
+    transport: { play: tPrev.play || 0, stop: tPrev.stop || 0, rec: tPrev.rec || 0 },
+    transportHitAt: { play: tHitPrev.play || 0, stop: tHitPrev.stop || 0, rec: tHitPrev.rec || 0 },
     pitchNorm: prev.pitchNorm,
     modNorm: prev.modNorm,
     padBankB: prev.padBankB === true,
@@ -367,6 +383,8 @@ const applyMidiToState = (prev, ev, opts) => {
     if (bSlot >= 0) {
       next.lastKnobBSlot = bSlot;
       next.knobs[SMK_KNOB_DIGITAL + bSlot] = Math.min(127, Math.max(0, vel));
+      next.knobsChangedAt[SMK_KNOB_DIGITAL + bSlot] = nowMs();
+      next.knobBankB = true;
       return next;
     }
     const hitA = resolvePadSlotIdx(n, evCh, padSlotsA);
@@ -384,6 +402,16 @@ const applyMidiToState = (prev, ev, opts) => {
       next.padsBHitAt[hitB] = nowMs();
       next.padBankB = true;
       return next;
+    }
+    if (transportNotes) {
+      const tIdx = indexInIntList(n, transportNotes);
+      if (tIdx >= 0) {
+        const now = nowMs();
+        if (tIdx === 0) { next.transport.play = 1; next.transportHitAt.play = now; }
+        else if (tIdx === 1) { next.transport.stop = 1; next.transportHitAt.stop = now; }
+        else if (tIdx === 2) { next.transport.rec = 1; next.transportHitAt.rec = now; }
+        return next;
+      }
     }
     if (n >= keybedRoot && n < keybedRoot + SMK_KEYS) {
       next.keys[String(n)] = vel;
@@ -407,6 +435,15 @@ const applyMidiToState = (prev, ev, opts) => {
     if (hitB >= 0) {
       return next;
     }
+    if (transportNotes) {
+      const tIdx = indexInIntList(n, transportNotes);
+      if (tIdx >= 0) {
+        if (tIdx === 0) { next.transport.play = 0; }
+        else if (tIdx === 1) { next.transport.stop = 0; }
+        else if (tIdx === 2) { next.transport.rec = 0; }
+        return next;
+      }
+    }
     if (n >= keybedRoot && n < keybedRoot + SMK_KEYS) {
       Reflect.deleteProperty(next.keys, String(n));
     }
@@ -423,12 +460,14 @@ const applyMidiToState = (prev, ev, opts) => {
     if (kiA >= 0 && isKnobCcAllowedForTwin(ev, knobCcRoute)) {
       next.knobs[kiA] = v;
       next.knobsChangedAt[kiA] = nowMs();
+      next.knobBankB = false;
     }
     if (knobBCcs) {
       const kiB = knobIndexForCc(cc, knobBCcs);
       if (kiB >= 0 && isKnobCcAllowedForTwin(ev, knobCcRoute)) {
         next.knobs[SMK_KNOB_DIGITAL + kiB] = v;
         next.knobsChangedAt[SMK_KNOB_DIGITAL + kiB] = nowMs();
+        next.knobBankB = true;
       }
     }
     return next;
@@ -436,7 +475,17 @@ const applyMidiToState = (prev, ev, opts) => {
 
   if (ev.kind === "pitchBend") {
     const ch = ev.channel != null ? ev.channel : -1;
-    if (ch === pitchStripCh) {
+    const evPort = ev.smkMidiInPort != null ? ev.smkMidiInPort : -1;
+    const isKnobBPort = Number.isFinite(knobBPort) && knobBPort > 0 && evPort === knobBPort;
+    if (isKnobBPort && knobBChannelAsSlot && ch >= 0 && ch < SMK_KNOB_DIGITAL) {
+      const v7 = value14ToMidi7(ev.value14);
+      next.knobs[SMK_KNOB_DIGITAL + ch] = v7;
+      next.knobsChangedAt[SMK_KNOB_DIGITAL + ch] = nowMs();
+      next.knobBankB = true;
+      next.lastKnobBSlot = ch;
+      return next;
+    }
+    if (ch === pitchStripCh && !isKnobBPort) {
       const v14 = ev.value14 != null ? ev.value14 : 8192;
       next.pitchNorm = Math.min(1, Math.max(0, v14 / 16383));
       return next;
@@ -444,6 +493,8 @@ const applyMidiToState = (prev, ev, opts) => {
     if (knobPitchLatchCh >= 0 && ch === knobPitchLatchCh && next.lastKnobBSlot >= 0 && next.lastKnobBSlot < SMK_KNOB_DIGITAL) {
       const v7 = value14ToMidi7(ev.value14);
       next.knobs[SMK_KNOB_DIGITAL + next.lastKnobBSlot] = v7;
+      next.knobsChangedAt[SMK_KNOB_DIGITAL + next.lastKnobBSlot] = nowMs();
+      next.knobBankB = true;
       return next;
     }
     return next;
@@ -702,7 +753,10 @@ export fn smk25_face_buildAudio(ctx, node) {
     knobBNotes: knobBNotesOpt,
     knobBCcs: knobBCcsOpt,
     padSlotsA: padSlotsA,
-    padSlotsB: padSlotsB
+    padSlotsB: padSlotsB,
+    transportNotes: transportFromNotes,
+    knobBPort: SMK_KNOB_B_PORT_DEFAULT,
+    knobBChannelAsSlot: SMK_KNOB_B_CHANNEL_AS_SLOT
   };
 
   let learnSession = null;
@@ -809,6 +863,7 @@ export fn smk25_face_buildAudio(ctx, node) {
   const classifyEvent = (ev, padBankBState, knobBankBState) => {
     if (!ev || ev.kind == null) { return "unknown"; }
     const ch0 = ev.channel != null ? ev.channel : -1;
+    const evPort = ev.smkMidiInPort != null ? ev.smkMidiInPort : -1;
     if (ev.kind === "mvaveSmk25SysexBtn") {
       const k = ev.sysexKey != null ? ev.sysexKey : -1;
       if (padBankSysexKey != null && k === padBankSysexKey) { return "SYSEX -> PAD-B toggle (key=" + String(k) + ")"; }
@@ -816,6 +871,9 @@ export fn smk25_face_buildAudio(ctx, node) {
       return "SYSEX button (key=" + String(k) + " val=" + String(ev.sysexValue) + ")";
     }
     if (ev.kind === "pitchBend") {
+      if (evPort === SMK_KNOB_B_PORT_DEFAULT && ch0 >= 0 && ch0 < SMK_KNOB_DIGITAL) {
+        return "KNOB-B slot " + String(ch0) + " (" + SMK_KNOB_LABELS_A[ch0] + ")";
+      }
       if (ch0 === pitchStripChannel0) { return "PITCH strip"; }
       if (knobBPitchLatchChannel0 >= 0 && ch0 === knobBPitchLatchChannel0) { return "KNOB-B pitch latch"; }
       return "pitchBend (ch=" + String(ch0 + 1) + " ignored)";
@@ -974,6 +1032,16 @@ export fn smk25_face_buildAudio(ctx, node) {
         padsBHitAt: state.padsBHitAt ? state.padsBHitAt.slice() : freshPadRow(),
         knobs: ensureKnobArray(state.knobs),
         knobsChangedAt: state.knobsChangedAt ? state.knobsChangedAt.slice() : freshKnobChangedAt(),
+        transport: {
+          play: state.transport ? state.transport.play : 0,
+          stop: state.transport ? state.transport.stop : 0,
+          rec: state.transport ? state.transport.rec : 0
+        },
+        transportHitAt: {
+          play: state.transportHitAt ? state.transportHitAt.play : 0,
+          stop: state.transportHitAt ? state.transportHitAt.stop : 0,
+          rec: state.transportHitAt ? state.transportHitAt.rec : 0
+        },
         nowMs: nowMs(),
         pitchNorm: state.pitchNorm,
         modNorm: state.modNorm,
@@ -1485,6 +1553,33 @@ export fn smk25_face_View(props) {
   const pitchPct = Math.round(vis.pitchNorm * 100);
   const modPct = Math.round(vis.modNorm * 100);
 
+  const tTransport = vis.transport || { play: 0, stop: 0, rec: 0 };
+  const tHitAt = vis.transportHitAt || { play: 0, stop: 0, rec: 0 };
+  const TRANSPORT_FLASH_MS = 220;
+  const TRANSPORT_FADE_MS = 380;
+  const transportVisualFor = (held, hitAt, activeCls) => {
+    const age = hitAt > 0 ? nowView - hitAt : 999999;
+    let intensity = 0;
+    if (held > 0) {
+      intensity = 1;
+    } else if (age < TRANSPORT_FLASH_MS) {
+      intensity = 1;
+    } else if (age < TRANSPORT_FLASH_MS + TRANSPORT_FADE_MS) {
+      intensity = 1 - (age - TRANSPORT_FLASH_MS) / TRANSPORT_FADE_MS;
+    }
+    if (intensity <= 0.01) {
+      return { cls: "border-neutral-600 bg-neutral-800 text-neutral-300", shadow: "none", intensity: 0 };
+    }
+    return {
+      cls: activeCls,
+      shadow: "0 0 " + String(8 + intensity * 14) + "px rgba(255,255,255," + String(0.25 + intensity * 0.45) + ")",
+      intensity: intensity
+    };
+  };
+  const playVis = transportVisualFor(tTransport.play, tHitAt.play, "border-emerald-300 bg-emerald-600/90 text-white");
+  const stopVis = transportVisualFor(tTransport.stop, tHitAt.stop, "border-red-300 bg-red-600/90 text-white");
+  const recVis = transportVisualFor(tTransport.rec, tHitAt.rec, "border-rose-300 bg-rose-600/90 text-white");
+
   return (
     <PedalChassis
       node={node}
@@ -1522,9 +1617,9 @@ export fn smk25_face_View(props) {
             <div class="flex items-center gap-1.5 shrink-0 pointer-events-auto">
               <div class="px-2 py-0.5 rounded bg-red-950/80 border border-red-900/80 text-red-400 font-mono text-[12px] font-black tracking-widest shadow-inner">127</div>
               <div class="flex gap-0.5">
-                <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">PLAY</span>
-                <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">STOP</span>
-                <span class="px-1.5 py-0.5 rounded border border-neutral-600 bg-neutral-800 text-neutral-300 text-[7px] font-bold uppercase tracking-wider">REC</span>
+                <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider transition-all duration-75 " + playVis.cls} style={{ boxShadow: playVis.shadow }}>PLAY</span>
+                <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider transition-all duration-75 " + stopVis.cls} style={{ boxShadow: stopVis.shadow }}>STOP</span>
+                <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider transition-all duration-75 " + recVis.cls} style={{ boxShadow: recVis.shadow }}>REC</span>
                 <span class={"px-1.5 py-0.5 rounded border text-[7px] font-bold uppercase tracking-wider " + (vis.padBankB ? "border-amber-400 bg-amber-700/70 text-white" : "border-neutral-600 bg-neutral-800 text-neutral-300")}>B1</span>
               </div>
             </div>
