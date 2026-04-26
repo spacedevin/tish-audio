@@ -1,0 +1,56 @@
+import { h, useEffect, useMemo, useRef } from "lattish"
+import { createRuntime } from "../render/runtime.tish"
+import { createDomBackend } from "../render/dom/backend.tish"
+import { createWebGlBackend } from "../render/webgl/backend.tish"
+import { buildPatchBoardScene } from "../render/patchBoardScene.tish"
+
+fn useRendererMode() {
+  if (typeof window === "undefined" || !window.location) return "dom";
+  const params = new URLSearchParams(window.location.search || "");
+  const mode = params.get("renderer");
+  if (mode === "webgl") return "webgl";
+  return "dom";
+}
+
+export fn PatchBoardRenderSurface(props) {
+  const rootRef = useRef(null);
+  const runtimeRef = useRef(null);
+  const mode = props.mode || useRendererMode();
+  const nodes = Array.isArray(props.nodes) ? props.nodes : [];
+  const connections = Array.isArray(props.connections) ? props.connections : [];
+  const boardActive = props.boardActive !== false;
+
+  const backend = useMemo(() => {
+    if (mode === "webgl") return createWebGlBackend();
+    return createDomBackend();
+  }, [mode]);
+
+  useEffect(() => {
+    if (!rootRef.current) return;
+    const rt = createRuntime(backend);
+    runtimeRef.current = rt;
+    rt.mount(rootRef.current);
+    const resize = () => {
+      const el = rootRef.current;
+      if (!el) return;
+      rt.resize(el.clientWidth, el.clientHeight);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      rt.unmount();
+      runtimeRef.current = null;
+    };
+  }, [backend]);
+
+  useEffect(() => {
+    const rt = runtimeRef.current;
+    const el = rootRef.current;
+    if (!rt || !el || !boardActive) return;
+    const s = buildPatchBoardScene(nodes, connections, el.clientWidth, el.clientHeight, 0.5);
+    rt.render(s);
+  }, [nodes, connections, boardActive, mode]);
+
+  return <div ref={rootRef} class="absolute inset-0 pointer-events-none" />;
+}

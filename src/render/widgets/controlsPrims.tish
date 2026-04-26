@@ -1,0 +1,55 @@
+import { Group, Rect, Path, Text } from "../prims.tish"
+import { createAnimatedValue, animateTo, tickAnimatedValue } from "../anim.tish"
+
+export fn createMeterState(initial) {
+  return createAnimatedValue(initial || 0);
+}
+
+export fn tickMeterState(state, level, nowMs) {
+  const s = state;
+  animateTo(s, Math.max(0, Math.min(1, Number(level) || 0)), 90, "easeInOut", nowMs || performance.now());
+  tickAnimatedValue(s, nowMs || performance.now());
+  return s.value;
+}
+
+export fn ledMeterPrims(id, x, y, w, h, level) {
+  const rows = [];
+  rows.push(Rect(String(id) + "_bg", x, y, w, h, { fill: "#030303", stroke: "#111827", strokeWidth: 1, radius: 2 }));
+  const segN = 20;
+  const segH = h / segN;
+  let i = 0;
+  while (i < segN) {
+    const threshold = 1 - i / segN;
+    const active = level >= threshold;
+    let color = "#22c55e";
+    if (i < 3) color = "#ef4444";
+    else if (i < 7) color = "#eab308";
+    rows.push(Rect(String(id) + "_seg_" + String(i), x + 1, y + i * segH + 0.5, Math.max(0, w - 2), Math.max(0, segH - 1), { fill: active ? color : "rgba(0,0,0,0.5)" }));
+    i = i + 1;
+  }
+  return Group(String(id), rows, {});
+}
+
+export fn verticalFaderPrims(id, x, y, h, value, label) {
+  const rows = [];
+  rows.push(Rect(String(id) + "_track", x + 8, y, 6, h, { fill: "#111111", stroke: "#242424", strokeWidth: 1, radius: 3 }));
+  const v = Math.max(0, Math.min(1, Number(value) || 0));
+  const knobY = y + (1 - v) * h;
+  rows.push(Rect(String(id) + "_knob", x, knobY - 6, 22, 12, { fill: "#d4d4d8", stroke: "#52525b", strokeWidth: 1, radius: 2 }));
+  rows.push(Text(String(id) + "_txt", x - 2, y + h + 14, String(label || ""), { size: 8, weight: 700, color: "#f97316" }));
+  return Group(String(id), rows, {});
+}
+
+export fn rotaryKnobPrims(id, cx, cy, r, value, label) {
+  const v = Math.max(0, Math.min(1, Number(value) || 0));
+  const ang = (-140 + v * 280) * (Math.PI / 180);
+  const px = cx + Math.cos(ang) * (r - 4);
+  const py = cy + Math.sin(ang) * (r - 4);
+  const arcD = "M " + String(cx - r + 2) + " " + String(cy) + " A " + String(r - 2) + " " + String(r - 2) + " 0 1 1 " + String(cx + r - 2) + " " + String(cy);
+  return Group(String(id), [
+    Rect(String(id) + "_face", cx - r, cy - r, r * 2, r * 2, { fill: "#0a0a0a", stroke: "#3f3f46", strokeWidth: 2, radius: r }),
+    Path(String(id) + "_arc", arcD, { stroke: "#27272a", strokeWidth: 3 }),
+    Path(String(id) + "_needle", "M " + String(cx) + " " + String(cy) + " L " + String(px) + " " + String(py), { stroke: "#f97316", strokeWidth: 2 }),
+    Text(String(id) + "_label", cx - r, cy + r + 12, String(label || ""), { size: 9, weight: 700, color: "#f8fafc" })
+  ], {});
+}

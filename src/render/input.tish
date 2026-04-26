@@ -1,0 +1,54 @@
+// Synthetic input + hit-test helpers.
+
+export fn flattenPrimitives(prims, out) {
+  const dst = out || [];
+  const rows = Array.isArray(prims) ? prims : [];
+  let i = 0;
+  while (i < rows.length) {
+    const p = rows[i];
+    i = i + 1;
+    if (!p) continue;
+    dst.push(p);
+    if (p.kind === "group" && Array.isArray(p.children)) {
+      flattenPrimitives(p.children, dst);
+    }
+  }
+  return dst;
+}
+
+export fn createHitTester() {
+  let boxes = {};
+  return {
+    setLayoutBoxes: (next) => {
+      boxes = next || {};
+    },
+    hitTest: (x, y) => {
+      const keys = Object.keys(boxes);
+      let i = keys.length - 1;
+      while (i >= 0) {
+        const id = keys[i];
+        const b = boxes[id];
+        if (b && x >= b.x && y >= b.y && x <= b.x + b.w && y <= b.y + b.h) {
+          return id;
+        }
+        i = i - 1;
+      }
+      return null;
+    }
+  };
+}
+
+export fn bindPointerEvents(el, handlers) {
+  if (!el || !handlers) return () => {};
+  const onDown = (e) => handlers.onPointerDown && handlers.onPointerDown(e);
+  const onMove = (e) => handlers.onPointerMove && handlers.onPointerMove(e);
+  const onUp = (e) => handlers.onPointerUp && handlers.onPointerUp(e);
+  el.addEventListener("pointerdown", onDown);
+  el.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  return () => {
+    el.removeEventListener("pointerdown", onDown);
+    el.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+}

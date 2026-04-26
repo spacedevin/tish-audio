@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, runBatched } from "lattish"
 import { isTauriApp } from "../platform/tauriEnv.tish"
+import { PEDAL_LIBRARY } from "../modules/registry.tish"
 import {
   subscribeMidiDispatch,
   attachWebMidiInput,
@@ -302,6 +303,7 @@ export fn useMidiPatch(
         const smkAutoLayout = deviceRowIsSmk25FamilyCombo(row);
         let smkLayoutId = null;
         let smkEdges = [];
+        let smkStarterEdges = [];
         if (smkAutoLayout && mergedPortIds && mergedPortIds.length) {
           smkLayoutId = Math.random().toString(36).substr(2, 9);
           smkEdges = smk25DefaultComboEdges("midi_in_" + bindingId, smkLayoutId, mergedPortIds.length);
@@ -355,13 +357,75 @@ export fn useMidiPatch(
               params: midiParams
             };
             if (smkLayoutId) {
-              const smkNode = buildSmk25LayoutNode(smkLayoutId, 280, 320 + nMidi * 72);
-              return [...prevList, midiNode, smkNode];
+              const nonSystemCount = prevList.filter((n) => !n.isSystem).length;
+              const emptyBoard = nonSystemCount === 0;
+              const smkX = 280;
+              const smkY = 320 + nMidi * 72;
+              const smkNode = buildSmk25LayoutNode(smkLayoutId, smkX, smkY);
+              if (!emptyBoard) {
+                return [...prevList, midiNode, smkNode];
+              }
+
+              const semTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_semantic_splitter");
+              const polyTpl = PEDAL_LIBRARY.UTILITY.find((p) => p["type"] === "midi_poly");
+              const semanticId = Math.random().toString(36).substr(2, 9);
+              const keysPolyId = Math.random().toString(36).substr(2, 9);
+              const padsPolyId = Math.random().toString(36).substr(2, 9);
+              const nextNodes = [...prevList, midiNode, smkNode];
+              if (semTpl) {
+                nextNodes.push({
+                  id: semanticId,
+                  ...semTpl,
+                  params: { ...semTpl.defaultParams },
+                  bypassed: false,
+                  x: smkX + 360,
+                  y: smkY + 60
+                });
+              }
+              if (polyTpl) {
+                nextNodes.push({
+                  id: keysPolyId,
+                  ...polyTpl,
+                  label: "Keys Poly",
+                  params: { ...polyTpl.defaultParams },
+                  bypassed: false,
+                  x: smkX + 360,
+                  y: smkY - 120
+                });
+                nextNodes.push({
+                  id: padsPolyId,
+                  ...polyTpl,
+                  label: "Pads Poly",
+                  params: { ...polyTpl.defaultParams },
+                  bypassed: false,
+                  x: smkX + 360,
+                  y: smkY - 10
+                });
+              }
+
+              const edges = [];
+              const addEdge = (from, fromPort, to, toPort) => {
+                if (!from || !to) return;
+                edges.push({
+                  id: Math.random().toString(36).substr(2, 9),
+                  from: from,
+                  fromPort: fromPort,
+                  to: to,
+                  toPort: toPort
+                });
+              };
+              addEdge(smkLayoutId, "keys", keysPolyId, "midi");
+              addEdge(smkLayoutId, "pads", padsPolyId, "midi");
+              addEdge(smkLayoutId, "knobs", semanticId, "midi");
+              addEdge(keysPolyId, "main", "sys_out", "main");
+              addEdge(padsPolyId, "main", "sys_out", "main");
+              smkStarterEdges = edges;
+              return nextNodes;
             }
             return [...prevList, midiNode];
           });
-          if (smkEdges.length) {
-            setConnections((prev) => [...asArray(prev), ...smkEdges]);
+          if (smkEdges.length || smkStarterEdges.length) {
+            setConnections((prev) => [...asArray(prev), ...smkEdges, ...smkStarterEdges]);
           }
           setAudioReady(true);
           setHardwareMenuOpen(false);

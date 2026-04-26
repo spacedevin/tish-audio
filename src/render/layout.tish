@@ -1,0 +1,69 @@
+// Minimal layout resolver: flex + absolute.
+
+fn asNum(v, d) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+
+fn resolvePadding(p) {
+  if (p == null) return { t: 0, r: 0, b: 0, l: 0 };
+  if (typeof p === "number") return { t: p, r: p, b: p, l: p };
+  return {
+    t: asNum(p.t, 0),
+    r: asNum(p.r, 0),
+    b: asNum(p.b, 0),
+    l: asNum(p.l, 0)
+  };
+}
+
+export fn resolveLayout(node, parentRect, out) {
+  const row = node || {};
+  const o = out || {};
+  const rect = parentRect || { x: 0, y: 0, w: 0, h: 0 };
+  const id = row.id != null ? String(row.id) : null;
+  const mode = row.layout || "absolute";
+  const pad = resolvePadding(row.padding);
+  let x = asNum(row.x, rect.x);
+  let y = asNum(row.y, rect.y);
+  let w = asNum(row.w, rect.w);
+  let h = asNum(row.h, rect.h);
+  if (mode === "fill") {
+    x = rect.x + pad.l;
+    y = rect.y + pad.t;
+    w = Math.max(0, rect.w - pad.l - pad.r);
+    h = Math.max(0, rect.h - pad.t - pad.b);
+  }
+  if (id != null) {
+    o[id] = { x: x, y: y, w: w, h: h };
+  }
+  const kids = Array.isArray(row.children) ? row.children : [];
+  if (kids.length === 0) return o;
+  if (mode === "flex-row" || mode === "flex-col") {
+    const gap = asNum(row.gap, 0);
+    const innerX = x + pad.l;
+    const innerY = y + pad.t;
+    const innerW = Math.max(0, w - pad.l - pad.r);
+    const innerH = Math.max(0, h - pad.t - pad.b);
+    const axis = mode === "flex-row" ? "row" : "col";
+    const span = axis === "row" ? innerW : innerH;
+    const fixedGaps = Math.max(0, kids.length - 1) * gap;
+    const each = kids.length > 0 ? Math.max(0, (span - fixedGaps) / kids.length) : 0;
+    let i = 0;
+    while (i < kids.length) {
+      const c = kids[i];
+      const cx = axis === "row" ? innerX + i * (each + gap) : innerX;
+      const cy = axis === "col" ? innerY + i * (each + gap) : innerY;
+      const cw = axis === "row" ? each : innerW;
+      const ch = axis === "col" ? each : innerH;
+      resolveLayout(c, { x: cx, y: cy, w: cw, h: ch }, o);
+      i = i + 1;
+    }
+    return o;
+  }
+  let j = 0;
+  while (j < kids.length) {
+    resolveLayout(kids[j], { x: x, y: y, w: w, h: h }, o);
+    j = j + 1;
+  }
+  return o;
+}

@@ -1,0 +1,99 @@
+import { scene, Rect, Path, Text, Group, BlurFilter } from "./prims.tish"
+import { pedalNodePrims, rackNodePrims, vuNodePrims, consoleNodePrims, graphicEqNodePrims } from "./widgets/nodesPrims.tish"
+
+const PB_JACK_PROTRUDE = 13;
+
+fn pbGetNodeSize(node) {
+  let w = 200;
+  let h = 340;
+  const nt = node["type"];
+  if (nt === "SYS_IN") { w = 96; h = 140; }
+  else if (nt === "SYS_OUT") { w = 80; h = 140; }
+  else if (nt === "MIDI_IN") { w = 240; h = 168; }
+  else if (nt === "midi_semantic_splitter") { w = 640; h = 216; }
+  else if (nt === "midi_channel_splitter") { w = 280; h = 220; }
+  else if (nt === "smk25_face") { w = 300; h = 460; }
+  return { w: w, h: h };
+}
+
+fn pbGetJackCoords(node, isOutput, portId) {
+  const sz = pbGetNodeSize(node);
+  const ports = node.__ports || (isOutput ? ["main"] : ["main"]);
+  const portIdx = Math.max(0, ports.indexOf(portId));
+  const totalPorts = ports.length || 1;
+  const yOffset = ((portIdx + 1) * sz.h) / (totalPorts + 1);
+  return {
+    x: node.x + (isOutput ? sz.w + PB_JACK_PROTRUDE : -PB_JACK_PROTRUDE),
+    y: node.y + yOffset
+  };
+}
+
+fn pbCableD(fromNode, toNode, fromPort, toPort) {
+  const start = pbGetJackCoords(fromNode, true, fromPort || "main");
+  const end = pbGetJackCoords(toNode, false, toPort || "main");
+  const dist = Math.max(80, Math.abs(end.x - start.x) * 0.6);
+  return {
+    d: "M " + String(start.x) + " " + String(start.y) + " C " + String(start.x + dist) + " " + String(start.y) + ", " + String(end.x - dist) + " " + String(end.y) + ", " + String(end.x) + " " + String(end.y),
+    start: start,
+    end: end
+  };
+}
+
+export fn buildPatchBoardScene(nodes, connections, w, h, dashSeconds) {
+  const nn = Array.isArray(nodes) ? nodes : [];
+  const cc = Array.isArray(connections) ? connections : [];
+  const rows = [];
+  const res = [BlurFilter("tf_blur_soft", 2)];
+
+  rows.push(Rect("board_bg", 0, 0, w || 0, h || 0, { fill: "#000000" }));
+
+  const nodeMap = {};
+  let i = 0;
+  while (i < nn.length) {
+    nodeMap[nn[i].id] = nn[i];
+    i = i + 1;
+  }
+
+  let ci = 0;
+  while (ci < cc.length) {
+    const c = cc[ci];
+    ci = ci + 1;
+    const from = nodeMap[c.from];
+    const to = nodeMap[c.to];
+    if (!from || !to) continue;
+    const geo = pbCableD(from, to, c.fromPort, c.toPort);
+    rows.push(Path("c_shadow_" + String(c.id), geo.d, { stroke: "#000000", strokeWidth: 12, opacity: 0.65, filterId: "tf_blur_soft" }));
+    rows.push(Path("c_body_" + String(c.id), geo.d, { stroke: "#2a2a2a", strokeWidth: 7, opacity: 1 }));
+    rows.push(Path("c_live_" + String(c.id), geo.d, {
+      stroke: "#a855f7",
+      strokeWidth: 2,
+      dashArray: "4 12",
+      dashOffsetAnim: { period: dashSeconds || 0.5, easing: "linear" }
+    }));
+  }
+
+  let ni = 0;
+  while (ni < nn.length) {
+    const n = nn[ni];
+    ni = ni + 1;
+    const sz = pbGetNodeSize(n);
+    if (n["type"] === "master_eq" || n["type"] === "graphic_eq") {
+      rows.push(graphicEqNodePrims(n, n.x, n.y, sz.w, sz.h));
+    } else if (n["type"] === "console_mixer") {
+      rows.push(consoleNodePrims(n, n.x, n.y, sz.w, sz.h));
+    } else if (n["type"] === "vu_meter") {
+      rows.push(vuNodePrims(n, n.x, n.y, sz.w, sz.h, 0));
+    } else if (n["type"] === "splitter" || n["type"] === "crossover") {
+      rows.push(pedalNodePrims(n, n.x, n.y, sz.w, sz.h));
+    } else {
+      const gRows = [];
+      const fill = n["type"] === "SYS_IN" ? "#052e16" : (n["type"] === "SYS_OUT" ? "#171717" : "#0a0a0a");
+      const stroke = n["type"] === "SYS_IN" ? "#15803d" : "#3f3f46";
+      gRows.push(Rect("node_rect_" + String(n.id), n.x, n.y, sz.w, sz.h, { radius: 10, fill: fill, stroke: stroke, strokeWidth: 2 }));
+      gRows.push(Text("node_text_" + String(n.id), n.x + 10, n.y + 22, String(n.label || n.id || ""), { size: 12, weight: 800, color: "#f5f5f5" }));
+      rows.push(Group("node_group_" + String(n.id), gRows, {}));
+    }
+  }
+
+  return scene(rows, res);
+}

@@ -1,0 +1,28 @@
+// Renderer protocol contract and safe invokers.
+
+export fn createRendererProtocol(impl) {
+  const api = impl || {};
+  const call = (name, args) => {
+    const method = api[name];
+    if (typeof method !== "function") return null;
+    return method.apply(null, args || []);
+  };
+  return {
+    mount: (rootEl) => call("mount", [rootEl]),
+    unmount: () => call("unmount", []),
+    resize: (w, h) => call("resize", [w, h]),
+    beginFrame: (rootSize) => call("beginFrame", [rootSize]),
+    endFrame: () => call("endFrame", []),
+    paintGroup: (row, parentEl) => call("paintGroup", [row, parentEl]),
+    paintRect: (row, parentEl) => call("paintRect", [row, parentEl]),
+    paintPath: (row, parentEl) => call("paintPath", [row, parentEl]),
+    paintText: (row, parentEl) => call("paintText", [row, parentEl]),
+    paintImage: (row, parentEl) => call("paintImage", [row, parentEl]),
+    defineGradient: (res) => call("defineGradient", [res]),
+    defineFilter: (res) => call("defineFilter", [res]),
+    loadImage: (src) => call("loadImage", [src]),
+    measureText: (text, font, size, weight) => call("measureText", [text, font, size, weight]),
+    hitTest: (x, y) => call("hitTest", [x, y]),
+    subscribe: (handlers) => call("subscribe", [handlers])
+  };
+}

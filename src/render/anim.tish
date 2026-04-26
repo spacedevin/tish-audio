@@ -1,0 +1,67 @@
+const linear = (t) => t;
+const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+export fn createAnimatedValue(initialValue) {
+  return {
+    value: Number(initialValue) || 0,
+    from: Number(initialValue) || 0,
+    to: Number(initialValue) || 0,
+    startedAt: 0,
+    durationMs: 0,
+    easing: "linear",
+    active: false
+  };
+}
+
+fn easingFn(name) {
+  if (name === "easeInOut") return easeInOut;
+  return linear;
+}
+
+export fn animateTo(state, toValue, durationMs, easingName, nowMs) {
+  const s = state;
+  s.from = Number(s.value) || 0;
+  s.to = Number(toValue) || 0;
+  s.startedAt = Number(nowMs) || 0;
+  s.durationMs = Math.max(1, Number(durationMs) || 1);
+  s.easing = easingName || "linear";
+  s.active = true;
+  return s;
+}
+
+export fn tickAnimatedValue(state, nowMs) {
+  const s = state;
+  if (!s.active) return s.value;
+  const t = ((Number(nowMs) || 0) - s.startedAt) / s.durationMs;
+  if (t >= 1) {
+    s.value = s.to;
+    s.active = false;
+    return s.value;
+  }
+  const ef = easingFn(s.easing);
+  const u = Math.max(0, Math.min(1, t));
+  s.value = s.from + (s.to - s.from) * ef(u);
+  return s.value;
+}
+
+export fn createFrameClock(onFrame) {
+  let rafId = 0;
+  let running = false;
+  const tick = (ts) => {
+    if (!running) return;
+    if (onFrame) onFrame(ts);
+    rafId = requestAnimationFrame(tick);
+  };
+  return {
+    start: () => {
+      if (running) return;
+      running = true;
+      rafId = requestAnimationFrame(tick);
+    },
+    stop: () => {
+      running = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  };
+}

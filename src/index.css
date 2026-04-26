@@ -1,1 +1,7 @@
 @import "tailwindcss";
+
+@keyframes tfDashFlow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}

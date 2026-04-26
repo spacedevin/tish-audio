@@ -1,0 +1,185 @@
+import { createHitTester, bindPointerEvents } from "../input.tish"
+
+// Lightweight WebGL backend focused on rect/path/text/image first pass.
+export fn createWebGlBackend() {
+  let rootEl = null;
+  let canvas = null;
+  let gl = null;
+  const hit = createHitTester();
+  let unsubscribe = null;
+  let ctx2d = null;
+
+  fn ensureCanvas(el) {
+    let c = el.querySelector("[data-render-layer='webgl']");
+    if (!c) {
+      c = document.createElement("canvas");
+      c.setAttribute("data-render-layer", "webgl");
+      c.style.position = "absolute";
+      c.style.inset = "0";
+      c.style.width = "100%";
+      c.style.height = "100%";
+      el.appendChild(c);
+    }
+    return c;
+  }
+
+  fn ensure2DOverlay(el) {
+    let c = el.querySelector("[data-render-layer='webgl-2d']");
+    if (!c) {
+      c = document.createElement("canvas");
+      c.setAttribute("data-render-layer", "webgl-2d");
+      c.style.position = "absolute";
+      c.style.inset = "0";
+      c.style.width = "100%";
+      c.style.height = "100%";
+      c.style.pointerEvents = "none";
+      el.appendChild(c);
+    }
+    return c;
+  }
+
+  fn parseHexColor(s) {
+    const str = String(s || "#ffffff");
+    if (str[0] !== "#") return [1, 1, 1, 1];
+    const hex = str.slice(1);
+    if (hex.length !== 6) return [1, 1, 1, 1];
+    const r = parseInt(hex.slice(0, 2), 16) / 255;
+    const g = parseInt(hex.slice(2, 4), 16) / 255;
+    const b = parseInt(hex.slice(4, 6), 16) / 255;
+    return [r, g, b, 1];
+  }
+
+  return {
+    mount: (el) => {
+      rootEl = el;
+      if (!rootEl) return;
+      rootEl.style.position = "relative";
+      canvas = ensureCanvas(rootEl);
+      gl = canvas.getContext("webgl", { antialias: true, alpha: true }) || canvas.getContext("experimental-webgl");
+      const overlay = ensure2DOverlay(rootEl);
+      ctx2d = overlay.getContext("2d");
+    },
+    unmount: () => {
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+      if (rootEl) rootEl.innerHTML = "";
+      rootEl = null;
+      canvas = null;
+      gl = null;
+      ctx2d = null;
+    },
+    resize: (w, h) => {
+      if (canvas) {
+        canvas.width = Math.max(1, Math.floor(w));
+        canvas.height = Math.max(1, Math.floor(h));
+      }
+      if (rootEl) {
+        const overlay = rootEl.querySelector("[data-render-layer='webgl-2d']");
+        if (overlay) {
+          overlay.width = Math.max(1, Math.floor(w));
+          overlay.height = Math.max(1, Math.floor(h));
+        }
+      }
+      if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
+    },
+    beginFrame: () => {
+      if (gl) {
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+      if (ctx2d) ctx2d.clearRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
+    },
+    endFrame: () => {},
+    paintGroup: () => {},
+    paintRect: (row) => {
+      if (!ctx2d) return;
+      ctx2d.save();
+      ctx2d.globalAlpha = row.opacity == null ? 1 : row.opacity;
+      ctx2d.fillStyle = row.fill || "#ffffff";
+      const r = Number(row.radius) || 0;
+      if (r > 0 && typeof ctx2d.roundRect === "function") {
+        ctx2d.beginPath();
+        ctx2d.roundRect(row.x, row.y, row.w, row.h, r);
+        ctx2d.fill();
+      } else {
+        ctx2d.fillRect(row.x, row.y, row.w, row.h);
+      }
+      if (row.stroke && row.strokeWidth) {
+        ctx2d.strokeStyle = row.stroke;
+        ctx2d.lineWidth = row.strokeWidth;
+        ctx2d.strokeRect(row.x, row.y, row.w, row.h);
+      }
+      ctx2d.restore();
+    },
+    paintPath: (row) => {
+      if (!ctx2d) return;
+      const p = new Path2D(row.d || "");
+      ctx2d.save();
+      ctx2d.globalAlpha = row.opacity == null ? 1 : row.opacity;
+      if (row.fill && row.fill !== "none") {
+        ctx2d.fillStyle = row.fill;
+        ctx2d.fill(p);
+      }
+      if (row.stroke) {
+        ctx2d.strokeStyle = row.stroke;
+        ctx2d.lineWidth = row.strokeWidth == null ? 1 : row.strokeWidth;
+        ctx2d.lineCap = row.lineCap || "round";
+        ctx2d.lineJoin = row.lineJoin || "round";
+        if (row.dashArray) {
+          const arr = String(row.dashArray).split(" ").map((n) => Number(n) || 0);
+          ctx2d.setLineDash(arr);
+          ctx2d.lineDashOffset = row.dashOffset == null ? 0 : row.dashOffset;
+        } else {
+          ctx2d.setLineDash([]);
+        }
+        ctx2d.stroke(p);
+      }
+      ctx2d.restore();
+    },
+    paintText: (row) => {
+      if (!ctx2d) return;
+      ctx2d.save();
+      ctx2d.globalAlpha = row.opacity == null ? 1 : row.opacity;
+      ctx2d.font = String(row.weight || 400) + " " + String(row.size || 12) + "px " + String(row.font || "Inter");
+      ctx2d.fillStyle = row.color || "#ffffff";
+      ctx2d.textAlign = row.align || "left";
+      ctx2d.textBaseline = row.baseline || "alphabetic";
+      ctx2d.fillText(String(row.text || ""), row.x || 0, row.y || 0);
+      ctx2d.restore();
+    },
+    paintImage: (row) => {
+      if (!ctx2d) return;
+      const img = new Image();
+      img.src = row.src || "";
+      img.onload = () => {
+        if (!ctx2d) return;
+        ctx2d.save();
+        ctx2d.globalAlpha = row.opacity == null ? 1 : row.opacity;
+        ctx2d.drawImage(img, row.x || 0, row.y || 0, row.w || img.width, row.h || img.height);
+        ctx2d.restore();
+      };
+    },
+    defineGradient: () => {},
+    defineFilter: () => {},
+    loadImage: () => {},
+    measureText: (text, font, size, weight) => {
+      if (!ctx2d) return null;
+      ctx2d.font = String(weight || 400) + " " + String(size || 12) + "px " + String(font || "Inter");
+      const m = ctx2d.measureText(String(text || ""));
+      return {
+        width: m.width,
+        ascent: m.actualBoundingBoxAscent || (Number(size) || 12) * 0.8,
+        descent: m.actualBoundingBoxDescent || (Number(size) || 12) * 0.2,
+        runs: [{ text: String(text || ""), font: font || "Inter", size: Number(size) || 12, weight: Number(weight) || 400 }]
+      };
+    },
+    hitTest: (x, y) => hit.hitTest(x, y),
+    subscribe: (handlers) => {
+      if (!rootEl) return null;
+      if (unsubscribe) unsubscribe();
+      unsubscribe = bindPointerEvents(rootEl, handlers || {});
+      return unsubscribe;
+    },
+    setLayoutBoxes: (boxes) => hit.setLayoutBoxes(boxes || {})
+  };
+}

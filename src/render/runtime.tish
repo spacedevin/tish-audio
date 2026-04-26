@@ -1,0 +1,140 @@
+import { createRendererProtocol } from "./renderer.tish"
+import { walk, diffById } from "./displayList.tish"
+
+// Tiny runtime: render primitive tree through protocol backend.
+
+export fn createRuntime(rendererImpl) {
+  const renderer = createRendererProtocol(rendererImpl);
+  let rootEl = null;
+  let mounted = false;
+  let prevPrims = [];
+  let unsubscribe = null;
+  let effectQueue = [];
+
+  const hooks = {
+    states: [],
+    refs: [],
+    memos: [],
+    effects: [],
+    cursorState: 0,
+    cursorRef: 0,
+    cursorMemo: 0,
+    cursorEffect: 0
+  };
+
+  fn resetCursors() {
+    hooks.cursorState = 0;
+    hooks.cursorRef = 0;
+    hooks.cursorMemo = 0;
+    hooks.cursorEffect = 0;
+  }
+
+  fn flushEffects() {
+    let i = 0;
+    while (i < effectQueue.length) {
+      const run = effectQueue[i];
+      if (typeof run === "function") run();
+      i = i + 1;
+    }
+    effectQueue = [];
+  }
+
+  fn paintRows(rows) {
+    walk(rows, (p) => {
+      if (p.kind === "group") renderer.paintGroup(p, rootEl);
+      else if (p.kind === "rect") renderer.paintRect(p, rootEl);
+      else if (p.kind === "path") renderer.paintPath(p, rootEl);
+      else if (p.kind === "text") renderer.paintText(p, rootEl);
+      else if (p.kind === "image") renderer.paintImage(p, rootEl);
+    });
+  }
+
+  fn runRender(nextScene) {
+    const scene = nextScene || { primitives: [], resources: [] };
+    const resources = Array.isArray(scene.resources) ? scene.resources : [];
+    let ri = 0;
+    while (ri < resources.length) {
+      const r = resources[ri];
+      if (r && (r.kind === "linearGradient" || r.kind === "radialGradient")) renderer.defineGradient(r);
+      if (r && r.kind === "blurFilter") renderer.defineFilter(r);
+      ri = ri + 1;
+    }
+    const nextPrims = Array.isArray(scene.primitives) ? scene.primitives : [];
+    const _d = diffById(prevPrims, nextPrims);
+    renderer.beginFrame({ w: rootEl ? rootEl.clientWidth : 0, h: rootEl ? rootEl.clientHeight : 0 });
+    paintRows(nextPrims);
+    renderer.endFrame();
+    prevPrims = nextPrims;
+    flushEffects();
+    return _d;
+  }
+
+  const runtime = {
+    mount: (el) => {
+      rootEl = el;
+      renderer.mount(el);
+      mounted = true;
+      if (unsubscribe) unsubscribe();
+      unsubscribe = renderer.subscribe ? renderer.subscribe({}) : null;
+    },
+    unmount: () => {
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+      renderer.unmount();
+      mounted = false;
+      rootEl = null;
+      prevPrims = [];
+    },
+    render: (scene) => {
+      if (!mounted) return null;
+      return runRender(scene);
+    },
+    resize: (w, h) => renderer.resize(w, h),
+    measureText: (text, font, size, weight) => renderer.measureText(text, font, size, weight),
+    hooks: {
+      beginComponent: () => {
+        resetCursors();
+      },
+      useState: (initialValue) => {
+        const idx = hooks.cursorState;
+        if (hooks.states.length <= idx) hooks.states.push(initialValue);
+        const setState = (next) => {
+          hooks.states[idx] = typeof next === "function" ? next(hooks.states[idx]) : next;
+        };
+        hooks.cursorState = idx + 1;
+        return [hooks.states[idx], setState];
+      },
+      useRef: (initialValue) => {
+        const idx = hooks.cursorRef;
+        if (hooks.refs.length <= idx) hooks.refs.push({ current: initialValue });
+        hooks.cursorRef = idx + 1;
+        return hooks.refs[idx];
+      },
+      useMemo: (factory, deps) => {
+        const idx = hooks.cursorMemo;
+        const row = hooks.memos[idx];
+        const depStr = JSON.stringify(Array.isArray(deps) ? deps : []);
+        if (!row || row.depStr !== depStr) {
+          hooks.memos[idx] = { depStr: depStr, value: factory() };
+        }
+        hooks.cursorMemo = idx + 1;
+        return hooks.memos[idx].value;
+      },
+      useEffect: (factory, deps) => {
+        const idx = hooks.cursorEffect;
+        const row = hooks.effects[idx];
+        const depStr = JSON.stringify(Array.isArray(deps) ? deps : []);
+        const changed = !row || row.depStr !== depStr;
+        if (changed) {
+          effectQueue.push(() => {
+            if (row && typeof row.cleanup === "function") row.cleanup();
+            const cleanup = factory ? factory() : null;
+            hooks.effects[idx] = { depStr: depStr, cleanup: cleanup };
+          });
+        }
+        hooks.cursorEffect = idx + 1;
+      }
+    }
+  };
+  return runtime;
+}

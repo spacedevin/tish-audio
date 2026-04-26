@@ -1,0 +1,197 @@
+import { createHitTester, bindPointerEvents } from "../input.tish"
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+fn ensureSvgRoot(root) {
+  let svg = root.querySelector("[data-render-layer='svg']");
+  if (!svg) {
+    svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("data-render-layer", "svg");
+    svg.style.position = "absolute";
+    svg.style.inset = "0";
+    svg.style.width = "100%";
+    svg.style.height = "100%";
+    svg.style.overflow = "visible";
+    root.appendChild(svg);
+  }
+  return svg;
+}
+
+fn ensureHtmlRoot(root) {
+  let html = root.querySelector("[data-render-layer='html']");
+  if (!html) {
+    html = document.createElement("div");
+    html.setAttribute("data-render-layer", "html");
+    html.style.position = "absolute";
+    html.style.inset = "0";
+    html.style.pointerEvents = "none";
+    root.appendChild(html);
+  }
+  return html;
+}
+
+fn setCommonStyle(el, row) {
+  if (!el || !row) return;
+  if (row.opacity != null) el.style.opacity = String(row.opacity);
+}
+
+export fn createDomBackend() {
+  let rootEl = null;
+  let svgRoot = null;
+  let htmlRoot = null;
+  const hit = createHitTester();
+  let unsubscribe = null;
+  let defsEl = null;
+
+  const clear = () => {
+    if (svgRoot) svgRoot.innerHTML = "";
+    if (htmlRoot) htmlRoot.innerHTML = "";
+    if (svgRoot) {
+      defsEl = document.createElementNS(SVG_NS, "defs");
+      svgRoot.appendChild(defsEl);
+    }
+  };
+
+  return {
+    mount: (el) => {
+      rootEl = el;
+      if (!rootEl) return;
+      rootEl.style.position = "relative";
+      rootEl.style.overflow = "hidden";
+      svgRoot = ensureSvgRoot(rootEl);
+      htmlRoot = ensureHtmlRoot(rootEl);
+      clear();
+    },
+    unmount: () => {
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+      if (rootEl) rootEl.innerHTML = "";
+      rootEl = null;
+      svgRoot = null;
+      htmlRoot = null;
+      defsEl = null;
+    },
+    resize: (w, h) => {
+      if (!svgRoot) return;
+      svgRoot.setAttribute("viewBox", "0 0 " + String(w) + " " + String(h));
+    },
+    beginFrame: () => clear(),
+    endFrame: () => {},
+    paintGroup: () => {},
+    paintRect: (row) => {
+      if (!svgRoot) return;
+      const r = document.createElementNS(SVG_NS, "rect");
+      r.setAttribute("x", String(row.x || 0));
+      r.setAttribute("y", String(row.y || 0));
+      r.setAttribute("width", String(row.w || 0));
+      r.setAttribute("height", String(row.h || 0));
+      if (row.radius) {
+        r.setAttribute("rx", String(row.radius));
+        r.setAttribute("ry", String(row.radius));
+      }
+      if (row.fill) r.setAttribute("fill", String(row.fill));
+      if (row.stroke) r.setAttribute("stroke", String(row.stroke));
+      if (row.strokeWidth) r.setAttribute("stroke-width", String(row.strokeWidth));
+      if (row.filterId) r.setAttribute("filter", "url(#" + String(row.filterId) + ")");
+      svgRoot.appendChild(r);
+    },
+    paintPath: (row) => {
+      if (!svgRoot) return;
+      const p = document.createElementNS(SVG_NS, "path");
+      p.setAttribute("d", String(row.d || ""));
+      p.setAttribute("fill", row.fill || "none");
+      if (row.stroke) p.setAttribute("stroke", String(row.stroke));
+      if (row.strokeWidth != null) p.setAttribute("stroke-width", String(row.strokeWidth));
+      if (row.lineCap) p.setAttribute("stroke-linecap", String(row.lineCap));
+      if (row.lineJoin) p.setAttribute("stroke-linejoin", String(row.lineJoin));
+      if (row.dashArray) p.setAttribute("stroke-dasharray", String(row.dashArray));
+      if (row.dashOffset != null) p.setAttribute("stroke-dashoffset", String(row.dashOffset));
+      if (row.filterId) p.setAttribute("filter", "url(#" + String(row.filterId) + ")");
+      if (row.dashOffsetAnim && row.dashOffsetAnim.period) {
+        p.style.animation = "tfDashFlow " + String(row.dashOffsetAnim.period) + "s linear infinite";
+      }
+      svgRoot.appendChild(p);
+    },
+    paintText: (row) => {
+      if (!htmlRoot) return;
+      const t = document.createElement("span");
+      t.textContent = row.text || "";
+      t.style.position = "absolute";
+      t.style.left = String(row.x || 0) + "px";
+      t.style.top = String(row.y || 0) + "px";
+      t.style.fontFamily = row.font || "Inter";
+      t.style.fontSize = String(row.size || 12) + "px";
+      t.style.fontWeight = String(row.weight || 400);
+      t.style.color = row.color || "#fff";
+      setCommonStyle(t, row);
+      htmlRoot.appendChild(t);
+    },
+    paintImage: (row) => {
+      if (!htmlRoot) return;
+      const img = document.createElement("img");
+      img.src = row.src || "";
+      img.style.position = "absolute";
+      img.style.left = String(row.x || 0) + "px";
+      img.style.top = String(row.y || 0) + "px";
+      img.style.width = String(row.w || 0) + "px";
+      img.style.height = String(row.h || 0) + "px";
+      setCommonStyle(img, row);
+      htmlRoot.appendChild(img);
+    },
+    defineGradient: (res) => {
+      if (!defsEl || !res) return;
+      if (res.kind === "linearGradient") {
+        const lg = document.createElementNS(SVG_NS, "linearGradient");
+        lg.setAttribute("id", res.id);
+        lg.setAttribute("x1", String(res.x0 || 0));
+        lg.setAttribute("y1", String(res.y0 || 0));
+        lg.setAttribute("x2", String(res.x1 || 1));
+        lg.setAttribute("y2", String(res.y1 || 0));
+        const stops = Array.isArray(res.stops) ? res.stops : [];
+        let i = 0;
+        while (i < stops.length) {
+          const s = stops[i];
+          const st = document.createElementNS(SVG_NS, "stop");
+          st.setAttribute("offset", String(s.offset || 0));
+          st.setAttribute("stop-color", String(s.color || "#fff"));
+          st.setAttribute("stop-opacity", String(s.opacity == null ? 1 : s.opacity));
+          lg.appendChild(st);
+          i = i + 1;
+        }
+        defsEl.appendChild(lg);
+      }
+    },
+    defineFilter: (res) => {
+      if (!defsEl || !res || res.kind !== "blurFilter") return;
+      const f = document.createElementNS(SVG_NS, "filter");
+      f.setAttribute("id", res.id);
+      const blur = document.createElementNS(SVG_NS, "feGaussianBlur");
+      blur.setAttribute("stdDeviation", String(res.radius || 0));
+      f.appendChild(blur);
+      defsEl.appendChild(f);
+    },
+    loadImage: () => {},
+    measureText: (text, font, size, weight) => {
+      if (typeof document === "undefined") return null;
+      const c = document.createElement("canvas");
+      const ctx = c.getContext("2d");
+      if (!ctx) return null;
+      ctx.font = String(weight || 400) + " " + String(size || 12) + "px " + String(font || "Inter");
+      const m = ctx.measureText(String(text || ""));
+      return {
+        width: m.width,
+        ascent: m.actualBoundingBoxAscent || (Number(size) || 12) * 0.8,
+        descent: m.actualBoundingBoxDescent || (Number(size) || 12) * 0.2,
+        runs: [{ text: String(text || ""), font: font || "Inter", size: Number(size) || 12, weight: Number(weight) || 400 }]
+      };
+    },
+    hitTest: (x, y) => hit.hitTest(x, y),
+    subscribe: (handlers) => {
+      if (!rootEl) return null;
+      if (unsubscribe) unsubscribe();
+      unsubscribe = bindPointerEvents(rootEl, handlers || {});
+      return unsubscribe;
+    },
+    setLayoutBoxes: (boxes) => hit.setLayoutBoxes(boxes || {})
+  };
+}

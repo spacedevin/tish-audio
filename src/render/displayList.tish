@@ -1,0 +1,58 @@
+export fn byId(primitives, out) {
+  const map = out || {};
+  const rows = Array.isArray(primitives) ? primitives : [];
+  let i = 0;
+  while (i < rows.length) {
+    const p = rows[i];
+    i = i + 1;
+    if (!p) continue;
+    if (p.id != null) map[p.id] = p;
+    if (p.kind === "group" && Array.isArray(p.children)) {
+      byId(p.children, map);
+    }
+  }
+  return map;
+}
+
+export fn diffById(prevPrims, nextPrims) {
+  const prev = byId(prevPrims, {});
+  const next = byId(nextPrims, {});
+  const dirty = [];
+  const added = [];
+  const removed = [];
+  const nextKeys = Object.keys(next);
+  let i = 0;
+  while (i < nextKeys.length) {
+    const k = nextKeys[i];
+    const np = next[k];
+    const pp = prev[k];
+    if (!pp) {
+      added.push(k);
+    } else if (JSON.stringify(pp) !== JSON.stringify(np)) {
+      dirty.push(k);
+    }
+    i = i + 1;
+  }
+  const prevKeys = Object.keys(prev);
+  let j = 0;
+  while (j < prevKeys.length) {
+    const k2 = prevKeys[j];
+    if (!next[k2]) removed.push(k2);
+    j = j + 1;
+  }
+  return { added: added, removed: removed, dirty: dirty };
+}
+
+export fn walk(prims, onRow) {
+  const rows = Array.isArray(prims) ? prims : [];
+  let i = 0;
+  while (i < rows.length) {
+    const p = rows[i];
+    i = i + 1;
+    if (!p) continue;
+    if (onRow) onRow(p);
+    if (p.kind === "group" && Array.isArray(p.children)) {
+      walk(p.children, onRow);
+    }
+  }
+}

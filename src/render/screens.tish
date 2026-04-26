@@ -1,0 +1,48 @@
+import { scene, Rect, Text, Group } from "./prims.tish"
+
+fn centeredCard(id, w, h, title, subtitle, accent) {
+  const cx = (w || 0) * 0.5;
+  const cy = (h || 0) * 0.5;
+  const cw = Math.min(760, Math.max(280, (w || 0) - 80));
+  const ch = Math.min(300, Math.max(160, (h || 0) - 120));
+  const x = cx - cw * 0.5;
+  const y = cy - ch * 0.5;
+  return Group(id, [
+    Rect(id + "_bg", 0, 0, w || 0, h || 0, { fill: "#050505" }),
+    Rect(id + "_card", x, y, cw, ch, { fill: "#0a0a0a", stroke: accent || "#3f3f46", strokeWidth: 2, radius: 14 }),
+    Text(id + "_title", x + 24, y + 48, title || "", { size: 28, weight: 900, color: "#f5f5f5" }),
+    Text(id + "_sub", x + 24, y + 82, subtitle || "", { size: 14, weight: 500, color: "#a1a1aa" })
+  ], {});
+}
+
+export fn buildChromeScene(activeTab, w, h, audioReady) {
+  const rows = [
+    Rect("chrome_bg", 0, 0, w || 0, h || 0, { fill: "#09090b" }),
+    Rect("chrome_header", 0, 0, w || 0, 78, { fill: "#111113", stroke: "#27272a", strokeWidth: 1 }),
+    Text("chrome_logo", 18, 42, "TONEFRAME", { size: 24, weight: 900, color: "#ffffff" }),
+    Text("chrome_state", (w || 0) - 190, 42, audioReady ? "AUDIO READY" : "AUDIO IDLE", { size: 11, weight: 800, color: audioReady ? "#22c55e" : "#f59e0b" })
+  ];
+  const tabs = ["pedalboard", "jam", "game", "tuning", "chords"];
+  let i = 0;
+  while (i < tabs.length) {
+    const t = tabs[i];
+    const x = 260 + i * 120;
+    rows.push(Rect("tab_" + t, x, 20, 104, 34, { fill: t === activeTab ? "#262626" : "#131313", stroke: t === activeTab ? "#52525b" : "#27272a", strokeWidth: 1, radius: 8 }));
+    rows.push(Text("tab_txt_" + t, x + 16, 42, t.toUpperCase(), { size: 11, weight: 800, color: t === activeTab ? "#fafafa" : "#71717a" }));
+    i = i + 1;
+  }
+  return scene(rows, []);
+}
+
+export fn buildJamScene(w, h) {
+  return scene([centeredCard("jam_card", w, h, "Jam", "Renderer-agnostic scene running on DOM/WebGL backend.", "#f97316")], []);
+}
+
+export fn buildArcadeScene(w, h) {
+  return scene([centeredCard("arcade_card", w, h, "Arcade", "Pitch lanes and rhythm HUD can be painted without DOM dependency.", "#8b5cf6")], []);
+}
+
+export fn buildTuningScene(w, h, variant) {
+  const name = variant === "chords" ? "Chords" : "Tuning";
+  return scene([centeredCard("tuning_card", w, h, name, "Pitch and chord visuals on primitive display lists.", "#06b6d4")], []);
+}

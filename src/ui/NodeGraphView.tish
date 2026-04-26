@@ -16,6 +16,7 @@ import {
   isMidiGraphPortId
 } from "../modules/registry.tish"
 import { WebGLBackground } from "./WebGLBackground.tish"
+import { PatchBoardRenderSurface } from "./PatchBoardRenderSurface.tish"
 import { RotaryKnob } from "./controls.tish"
 import { ConsoleNode, GraphicEqNode, VuMeterNode, RackNode, PedalNode, hardwareRemoveClass } from "./nodes.tish"
 import { MODULE_REGISTRY } from "../modules/registry.tish"
@@ -323,6 +324,8 @@ let audioGraphTick = props.audioGraphTick !== undefined && props.audioGraphTick 
   let onAudioUiBump = props.onAudioUiBump;
 let patchActive = props.patchActive !== undefined && props.patchActive !== null ? props.patchActive : true;
 let midiBindings = props.midiBindings != null ? props.midiBindings : [];
+let renderBackendMode = props.renderBackendMode || null;
+const renderBackendEnabled = renderBackendMode === "dom" || renderBackendMode === "webgl";
   const boardRef = useRef(null);
 const dragLiveRef = useRef(null);
 const wireFromNodeRef = useRef(null);
@@ -636,9 +639,10 @@ onPointerMove={handlePointerMove}
 onPointerUp={handlePointerUp}
 onPointerLeave={(e) => { if (e.buttons === 0) handlePointerUp(); }}
 >
+{renderBackendEnabled ? h(PatchBoardRenderSurface, { mode: renderBackendMode, nodes: nodes, connections: connections, boardActive: patchActive }) : null}
 {h(WebGLBackground, { "active": patchActive })}
 
-<svg class="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
+<svg class={"absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible " + (renderBackendEnabled ? "opacity-0" : "")}>
 {draftCableGroup}
 {cableBlocks}
 </svg>
@@ -660,7 +664,7 @@ const liveDrag = dragLiveRef.current;
 const rootX = liveDrag && liveDrag.id === node.id ? liveDrag.lastSnapX : node.x;
 const rootY = liveDrag && liveDrag.id === node.id ? liveDrag.lastSnapY : node.y;
 return (
-<div key={node.id} class="tf-node-root absolute z-20 pointer-events-auto touch-manipulation" style={{ transform: "translate(" + String(rootX) + "px, " + String(rootY) + "px)" }}>
+<div key={node.id} class={"tf-node-root absolute z-20 pointer-events-auto touch-manipulation " + (renderBackendEnabled ? "opacity-0" : "")} style={{ transform: "translate(" + String(rootX) + "px, " + String(rootY) + "px)" }}>
 
 
 {nt !== 'SYS_IN' && nt !== 'MIDI_IN' && ports["in"].map(port => {

@@ -1,0 +1,44 @@
+import { h, useEffect, useMemo, useRef } from "lattish"
+import { createRuntime } from "../render/runtime.tish"
+import { createDomBackend } from "../render/dom/backend.tish"
+import { createWebGlBackend } from "../render/webgl/backend.tish"
+
+export fn RenderSceneSurface(props) {
+  const rootRef = useRef(null);
+  const runtimeRef = useRef(null);
+  const mode = props.mode === "webgl" ? "webgl" : "dom";
+  const scene = props.scene || { primitives: [], resources: [] };
+
+  const backend = useMemo(() => {
+    if (mode === "webgl") return createWebGlBackend();
+    return createDomBackend();
+  }, [mode]);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const rt = createRuntime(backend);
+    runtimeRef.current = rt;
+    rt.mount(el);
+    const resize = () => {
+      if (!rootRef.current || !runtimeRef.current) return;
+      runtimeRef.current.resize(rootRef.current.clientWidth, rootRef.current.clientHeight);
+      runtimeRef.current.render(scene);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      rt.unmount();
+      runtimeRef.current = null;
+    };
+  }, [backend]);
+
+  useEffect(() => {
+    if (!runtimeRef.current || !rootRef.current) return;
+    runtimeRef.current.resize(rootRef.current.clientWidth, rootRef.current.clientHeight);
+    runtimeRef.current.render(scene);
+  }, [scene, mode]);
+
+  return <div ref={rootRef} class={props.class || "absolute inset-0"} />;
+}

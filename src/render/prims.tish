@@ -1,0 +1,131 @@
+// Primitive record constructors for renderer-agnostic paint stack.
+// Keep payloads plain (numbers, strings, arrays, objects).
+
+export const PRIM_GROUP = "group";
+export const PRIM_RECT = "rect";
+export const PRIM_PATH = "path";
+export const PRIM_TEXT = "text";
+export const PRIM_IMAGE = "image";
+export const RES_LINEAR_GRADIENT = "linearGradient";
+export const RES_RADIAL_GRADIENT = "radialGradient";
+export const RES_BLUR_FILTER = "blurFilter";
+
+fn base(id, kind) {
+  return {
+    id: id != null ? String(id) : null,
+    kind: kind
+  };
+}
+
+export fn Group(id, children, opts) {
+  const o = opts || {};
+  const row = base(id, PRIM_GROUP);
+  row.children = Array.isArray(children) ? children : [];
+  row.transform = o.transform || null;
+  row.clip = o.clip || null;
+  row.opacity = o.opacity == null ? 1 : Number(o.opacity);
+  return row;
+}
+
+export fn Rect(id, x, y, w, h, opts) {
+  const o = opts || {};
+  const row = base(id, PRIM_RECT);
+  row.x = Number(x) || 0;
+  row.y = Number(y) || 0;
+  row.w = Number(w) || 0;
+  row.h = Number(h) || 0;
+  row.radius = o.radius || 0;
+  row.fill = o.fill || null;
+  row.stroke = o.stroke || null;
+  row.strokeWidth = o.strokeWidth == null ? 0 : Number(o.strokeWidth);
+  row.shadow = o.shadow || null;
+  row.opacity = o.opacity == null ? 1 : Number(o.opacity);
+  row.filterId = o.filterId || null;
+  return row;
+}
+
+export fn Path(id, d, opts) {
+  const o = opts || {};
+  const row = base(id, PRIM_PATH);
+  row.d = String(d || "");
+  row.fill = o.fill || null;
+  row.stroke = o.stroke || null;
+  row.strokeWidth = o.strokeWidth == null ? 1 : Number(o.strokeWidth);
+  row.lineCap = o.lineCap || "round";
+  row.lineJoin = o.lineJoin || "round";
+  row.dashArray = o.dashArray || null;
+  row.dashOffset = o.dashOffset == null ? 0 : Number(o.dashOffset);
+  row.dashOffsetAnim = o.dashOffsetAnim || null;
+  row.opacity = o.opacity == null ? 1 : Number(o.opacity);
+  row.filterId = o.filterId || null;
+  return row;
+}
+
+export fn Text(id, x, y, text, opts) {
+  const o = opts || {};
+  const row = base(id, PRIM_TEXT);
+  row.x = Number(x) || 0;
+  row.y = Number(y) || 0;
+  row.text = String(text || "");
+  row.font = o.font || "Inter";
+  row.size = o.size == null ? 12 : Number(o.size);
+  row.weight = o.weight == null ? 400 : Number(o.weight);
+  row.color = o.color || "#ffffff";
+  row.align = o.align || "left";
+  row.baseline = o.baseline || "alphabetic";
+  row.opacity = o.opacity == null ? 1 : Number(o.opacity);
+  return row;
+}
+
+export fn ImagePrim(id, x, y, w, h, src, opts) {
+  const o = opts || {};
+  const row = base(id, PRIM_IMAGE);
+  row.x = Number(x) || 0;
+  row.y = Number(y) || 0;
+  row.w = Number(w) || 0;
+  row.h = Number(h) || 0;
+  row.src = String(src || "");
+  row.opacity = o.opacity == null ? 1 : Number(o.opacity);
+  return row;
+}
+
+export fn LinearGradient(id, x0, y0, x1, y1, stops) {
+  return {
+    id: String(id || ""),
+    kind: RES_LINEAR_GRADIENT,
+    x0: Number(x0) || 0,
+    y0: Number(y0) || 0,
+    x1: Number(x1) || 0,
+    y1: Number(y1) || 0,
+    stops: Array.isArray(stops) ? stops : []
+  };
+}
+
+export fn RadialGradient(id, x0, y0, r0, x1, y1, r1, stops) {
+  return {
+    id: String(id || ""),
+    kind: RES_RADIAL_GRADIENT,
+    x0: Number(x0) || 0,
+    y0: Number(y0) || 0,
+    r0: Number(r0) || 0,
+    x1: Number(x1) || 0,
+    y1: Number(y1) || 0,
+    r1: Number(r1) || 0,
+    stops: Array.isArray(stops) ? stops : []
+  };
+}
+
+export fn BlurFilter(id, radius) {
+  return {
+    id: String(id || ""),
+    kind: RES_BLUR_FILTER,
+    radius: Number(radius) || 0
+  };
+}
+
+export fn scene(rows, resources) {
+  return {
+    primitives: Array.isArray(rows) ? rows : [],
+    resources: Array.isArray(resources) ? resources : []
+  };
+}

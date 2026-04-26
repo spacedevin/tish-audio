@@ -1,0 +1,36 @@
+// Text measurement API with pluggable backend probe.
+
+export fn createTextMetrics(measureImpl) {
+  const cache = {};
+  const meas = typeof measureImpl === "function" ? measureImpl : null;
+  return {
+    measureText: (text, font, size, weight) => {
+      const key = String(text || "") + "|" + String(font || "") + "|" + String(size || "") + "|" + String(weight || "");
+      if (cache[key]) return cache[key];
+      let row = null;
+      if (meas) {
+        row = meas(text, font, size, weight);
+      }
+      if (!row) {
+        const t = String(text || "");
+        const sz = Number(size) || 12;
+        row = {
+          width: t.length * sz * 0.56,
+          ascent: sz * 0.78,
+          descent: sz * 0.22,
+          runs: [{ text: t, font: font || "Inter", size: sz, weight: Number(weight) || 400 }]
+        };
+      }
+      cache[key] = row;
+      return row;
+    },
+    clear: () => {
+      const keys = Object.keys(cache);
+      let i = 0;
+      while (i < keys.length) {
+        Reflect.deleteProperty(cache, keys[i]);
+        i = i + 1;
+      }
+    }
+  };
+}

@@ -1,0 +1,57 @@
+import { Group, Rect, Text } from "../prims.tish"
+import { rotaryKnobPrims, verticalFaderPrims, ledMeterPrims } from "./controlsPrims.tish"
+
+fn nodeFrame(id, x, y, w, h, label, colorA, colorB) {
+  return Group(String(id) + "_frame", [
+    Rect(String(id) + "_outer", x, y, w, h, { fill: colorA || "#0a0a0a", stroke: colorB || "#52525b", strokeWidth: 2, radius: 10 }),
+    Text(String(id) + "_title", x + 10, y + 20, String(label || ""), { size: 12, weight: 800, color: "#f5f5f5" })
+  ], {});
+}
+
+export fn pedalNodePrims(node, x, y, w, h) {
+  const n = node || {};
+  const rows = [];
+  rows.push(nodeFrame(n.id || "pedal", x, y, w, h, n.label || "PEDAL", "#090909", "#3f3f46"));
+  const params = n.params || {};
+  const keys = Object.keys(params);
+  let i = 0;
+  while (i < keys.length && i < 4) {
+    const k = keys[i];
+    const v = Number(params[k]) || 0;
+    rows.push(rotaryKnobPrims(String(n.id) + "_k_" + String(k), x + 40 + i * 42, y + 72, 16, Math.max(0, Math.min(1, v / 2)), k.toUpperCase().slice(0, 4)));
+    i = i + 1;
+  }
+  return Group(String(n.id) + "_pedal", rows, {});
+}
+
+export fn rackNodePrims(node, x, y, w, h) {
+  const n = node || {};
+  const rows = [];
+  rows.push(nodeFrame(n.id || "rack", x, y, w, h, n.label || "RACK", "#09090b", "#3f3f46"));
+  const params = n.params || {};
+  const keys = Object.keys(params);
+  let i = 0;
+  while (i < keys.length && i < 8) {
+    const k = keys[i];
+    const v = Math.max(0, Math.min(1, (Number(params[k]) || 0) / 2));
+    rows.push(verticalFaderPrims(String(n.id) + "_f_" + String(k), x + 14 + i * 24, y + 50, Math.max(24, h - 78), v, String(k).slice(0, 4)));
+    i = i + 1;
+  }
+  return Group(String(n.id) + "_rack", rows, {});
+}
+
+export fn vuNodePrims(node, x, y, w, h, level) {
+  const n = node || {};
+  return Group(String(n.id) + "_vu", [
+    nodeFrame(n.id || "vu", x, y, w, h, n.label || "VU", "#09090b", "#3f3f46"),
+    ledMeterPrims(String(n.id) + "_meter", x + (w / 2) - 10, y + 30, 20, Math.max(20, h - 50), level == null ? 0 : level)
+  ], {});
+}
+
+export fn consoleNodePrims(node, x, y, w, h) {
+  return rackNodePrims(node, x, y, w, h);
+}
+
+export fn graphicEqNodePrims(node, x, y, w, h) {
+  return rackNodePrims(node, x, y, w, h);
+}
